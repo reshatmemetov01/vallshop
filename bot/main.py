@@ -17,7 +17,7 @@ from fazercard import FazerCardClient
 from .config import BotConfig
 from .db import Database
 from .handlers import build_root_router
-from .payments import build_payhot, build_provider
+from .payments import build_paydex, build_payhot, build_provider
 from .services.poller import (
     run_fulfillment_poller,
     run_smartprice_poller,
@@ -27,13 +27,16 @@ from .services.poller import (
 log = logging.getLogger("vallshop")
 
 
-async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None) -> None:
+async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, paydex=None) -> None:
     """Запустить aiohttp-сервер вебхуков, если задан PUBLIC_BASE_URL."""
     from aiohttp import web
 
     from .web import build_app
 
-    app = build_app(bot=bot, db=db, provider=provider, liog=liog, config=config, payhot=payhot)
+    app = build_app(
+        bot=bot, db=db, provider=provider, liog=liog, config=config,
+        payhot=payhot, paydex=paydex,
+    )
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", "8080"))
@@ -241,6 +244,7 @@ async def main() -> None:
 
     provider = build_provider(config)
     payhot = build_payhot(config)
+    paydex = build_paydex(config)
     liog = LioGamesClient.from_env()
     fzr = FazerCardClient.from_env()
     from vpnresellers import VPNResellersClient
@@ -257,6 +261,7 @@ async def main() -> None:
     dp["db"] = db
     dp["provider"] = provider
     dp["payhot"] = payhot
+    dp["paydex"] = paydex
     dp["liog"] = liog
     dp["fzr"] = fzr
     dp["vpn"] = vpn
@@ -279,11 +284,11 @@ async def main() -> None:
 
     tasks = [
         asyncio.create_task(run_fulfillment_poller(bot, db, liog, fzr, config)),
-        asyncio.create_task(run_topup_poller(bot, db, provider, payhot=payhot)),
+        asyncio.create_task(run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex)),
         asyncio.create_task(run_smartprice_poller(bot, db, fzr, config)),
     ]
     if config.public_base_url:
-        await _run_web(config, bot, db, provider, liog, payhot)
+        await _run_web(config, bot, db, provider, liog, payhot, paydex)
 
     log.info(
         "Старт бота. Провайдер оплаты: %s. Админы: %s",

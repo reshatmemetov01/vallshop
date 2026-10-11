@@ -14,6 +14,7 @@ from fazercard import FazerCardClient
 from ..config import BotConfig
 from ..db import Database
 from ..services import menu as menu_service
+from ..services import paymethods as paymethods_service
 
 router = Router(name="admin_appearance")
 
@@ -36,6 +37,8 @@ class APState(StatesGroup):
     set_label = State()
     set_emoji = State()
     set_caption = State()
+    set_pay_label = State()
+    set_pay_heading = State()
 
 
 def _btn(text: str, data: str) -> InlineKeyboardButton:
@@ -53,6 +56,7 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     for m, title in menu_service.MENU_TITLES.items():
         kb.row(_btn(f"📋 {title}", f"ap_menu:{m}"))
+    kb.row(_btn("💳 Способы оплаты", "pm_home"))
     kb.row(_btn("♻️ Перевести Цены", "ap_migprices"))
     kb.row(_btn("♻️ Сбросить к стандартному", "ap_reset"))
     kb.row(_btn("⬅️ Назад", "a_home"))
@@ -308,3 +312,153 @@ async def msg_caption(message: Message, db: Database, state: FSMContext) -> None
     await state.clear()
     kb = InlineKeyboardBuilder().row(_btn("⬅️ Назад", f"ap_menu:{menu}")).as_markup()
     await message.answer("✅ Текст экрана обновлён", reply_markup=kb)
+
+
+# ── Способы оплаты (вкл/выкл + текст кнопок + заголовок экрана) ───────────────
+def _provider_ok(config: BotConfig, provider_name: str) -> bool:
+    return {
+        "payhot": config.payhot_enabled,
+        "paydex": config.paydex_enabled,
+        "bolt": True,  # крипта всегда доступна (реальный провайдер или mock)
+    }.get(provider_name, False)
+
+
+async def _show_pay_home(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    async with db.session() as session:
+        methods = await paymethods_service.list_methods(session)
+    kb = InlineKeyboardBuilder()
+    for m in methods:
+        mark = "🟢" if m["enabled"] else "🔴"
+        warn = "" if _provider_ok(config, m["provider"]) else " ⚠️"
+        kb.row(_btn(f"{mark} {m['label']}{warn}", f"pm:{m['id']}"))
+    kb.row(_btn("📝 Заголовок экрана", "pm_head"))
+    kb.row(_btn("⬅️ Назад", "ap_home"))
+    await call.message.edit_text(
+        "💳 <b>Способы оплаты</b>\n\n"
+        "Кнопки на экране пополнения баланса. 🟢 — видна клиентам, 🔴 — скрыта.\n"
+        "⚠️ — провайдер не настроен (кнопку покажу только когда настроишь ключи).\n\n"
+        "Выберите способ для настройки:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "pm_home")
+async def cb_pay_home(
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext
+) -> None:
+    await state.clear()
+    await _show_pay_home(call, db, config)
+    await call.answer()
+
+
+async def _show_pay_method(call: CallbackQuery, db: Database, config: BotConfig, mid: str) -> None:
+    if mid not in paymethods_service.METHOD_IDS:
+        await call.answer("Не найдено", show_alert=True)
+        return
+    async with db.session() as session:
+        enabled = await paymethods_service.is_enabled(session, mid)
+        label = await paymethods_service.label(session, mid)
+    provider = paymethods_service.PROVIDER_OF[mid]
+    ok = _provider_ok(config, provider)
+    vis = "🟢 видна" if enabled else "🔴 скрыта"
+    prov_state = "✅ настроен" if ok else "⚠️ не настроен (нет ключей)"
+    caption = (
+        f"💳 <b>{paymethods_service.TITLE.get(mid, mid)}</b>\n\n"
+        f"Текст кнопки: <b>{label}</b>\n"
+        f"Видимость: {vis}\n"
+        f"Провайдер: {prov_state}"
+    )
+    if enabled and not ok:
+        caption += "\n\n❗️ Кнопка включена, но провайдер не настроен — клиенту она не показывается."
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("✏️ Текст кнопки", f"pm_lbl:{mid}"))
+    tog = "🔴 Скрыть" if enabled else "🟢 Показать"
+    kb.row(_btn(tog, f"pm_tog:{mid}"))
+    kb.row(_btn("⬅️ Назад", "pm_home"))
+    await call.message.edit_text(caption, reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("pm:"))
+async def cb_pay_method(
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext
+) -> None:
+    await state.clear()
+    await _show_pay_method(call, db, config, call.data.split(":", 1)[1])
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("pm_tog:"))
+async def cb_pay_toggle(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    mid = call.data.split(":", 1)[1]
+    if mid not in paymethods_service.METHOD_IDS:
+        await call.answer("Не найдено", show_alert=True)
+        return
+    async with db.session() as session:
+        cur = await paymethods_service.is_enabled(session, mid)
+        await paymethods_service.set_enabled(session, mid, not cur)
+        await session.commit()
+    await _show_pay_method(call, db, config, mid)
+    await call.answer("Готово")
+
+
+@router.callback_query(F.data.startswith("pm_lbl:"))
+async def cb_pay_label_ask(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+    mid = call.data.split(":", 1)[1]
+    if mid not in paymethods_service.METHOD_IDS:
+        await call.answer("Не найдено", show_alert=True)
+        return
+    async with db.session() as session:
+        label = await paymethods_service.label(session, mid)
+    await state.set_state(APState.set_pay_label)
+    await state.update_data(pay_mid=mid)
+    await call.message.edit_text(
+        f"✏️ Текущий текст кнопки: <b>{label}</b>\n\n"
+        "Пришлите новый текст кнопки.\n<code>0</code> — вернуть по умолчанию.",
+        reply_markup=_cancel(f"pm:{mid}"),
+    )
+    await call.answer()
+
+
+@router.message(APState.set_pay_label)
+async def msg_pay_label(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    mid = data.get("pay_mid")
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите текст или 0.")
+        return
+    async with db.session() as session:
+        await paymethods_service.set_label(session, mid, None if raw == "0" else raw[:64])
+        await session.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_btn("⬅️ К способу", f"pm:{mid}")).as_markup()
+    await message.answer("✅ Текст кнопки обновлён", reply_markup=kb)
+
+
+@router.callback_query(F.data == "pm_head")
+async def cb_pay_heading_ask(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+    async with db.session() as session:
+        heading = await paymethods_service.heading(session)
+    await state.set_state(APState.set_pay_heading)
+    await call.message.edit_text(
+        f"📝 Текущий заголовок экрана оплаты:\n\n{heading}\n\n"
+        "Пришлите новый заголовок (можно премиум-эмодзи и форматирование).\n"
+        "<code>0</code> — вернуть по умолчанию.",
+        reply_markup=_cancel("pm_home"),
+    )
+    await call.answer()
+
+
+@router.message(APState.set_pay_heading)
+async def msg_pay_heading(message: Message, db: Database, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите текст или 0.")
+        return
+    value = None if raw == "0" else (message.html_text or message.text).strip()
+    async with db.session() as session:
+        await paymethods_service.set_heading(session, value)
+        await session.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_btn("⬅️ Назад", "pm_home")).as_markup()
+    await message.answer("✅ Заголовок экрана обновлён", reply_markup=kb)

@@ -21,6 +21,7 @@ from ..db.models import Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..payments import PaymentProvider
 from ..services import balance as balance_service
 from ..services import orders as order_service
+from ..services import paymethods as paymethods_service
 from ..services import rates as rates_service
 from ..services.balance import TOPUP_MAX, TOPUP_MIN
 from ..ui import render
@@ -112,30 +113,59 @@ async def cb_balance(
     await call.answer()
 
 
-# ── Пополнение (сначала сеть, затем сумма) ───────────────────────────────────
+def _provider_availability(config: BotConfig) -> dict:
+    """Карта provider_name -> доступен ли (настроен) провайдер."""
+    return {
+        "payhot": config.payhot_enabled,
+        "paydex": config.paydex_enabled,
+        "bolt": True,  # крипта всегда доступна (реальный провайдер или mock)
+    }
+
+
+def _rub_provider(method_id: str, payhot, paydex):
+    """Платёжный провайдер для рублёвого способа (card → PayHot, sbp → Paydex)."""
+    prov_name = paymethods_service.PROVIDER_OF.get(method_id)
+    if prov_name == "payhot":
+        return payhot
+    if prov_name == "paydex":
+        return paydex
+    return None
+
+
+# ── Пополнение (сначала способ, затем сумма) ─────────────────────────────────
 @router.callback_query(F.data == "topup")
-async def cb_topup(call: CallbackQuery, config: BotConfig, state: FSMContext) -> None:
+async def cb_topup(
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext
+) -> None:
     await state.clear()
+    available = _provider_availability(config)
+    async with db.session() as session:
+        methods = await paymethods_service.client_methods(session, available=available)
+        heading = await paymethods_service.heading(session)
     await render(
         call,
         banner="profile",
-        caption=texts.TOPUP_CHOOSE_PAYMENT,
-        reply_markup=kb.topup_methods_kb(config.payhot_method_list),
+        caption=heading,
+        reply_markup=kb.topup_methods_kb(methods),
     )
     await call.answer()
 
 
-# ── Пополнение ₽ через PayHot (карта / СБП / SberPay) ─────────────────────────
-@router.callback_query(F.data.startswith("tu_ph:"))
-async def cb_topup_payhot(
-    call: CallbackQuery, config: BotConfig, state: FSMContext
+# ── Пополнение ₽ (карта → PayHot / СБП → Paydex) ─────────────────────────────
+@router.callback_query(F.data.startswith("tu_rub:"))
+async def cb_topup_rub(
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
+    payhot: PaymentProvider = None, paydex: PaymentProvider = None,
 ) -> None:
     method = call.data.split(":", 1)[1].lower()
-    if method not in config.payhot_method_list:
+    available = _provider_availability(config)
+    async with db.session() as session:
+        methods = {m["id"]: m for m in await paymethods_service.client_methods(session, available=available)}
+    if method not in methods or _rub_provider(method, payhot, paydex) is None:
         await call.answer("Способ недоступен", show_alert=True)
         return
     await state.set_state(TopUpFlow.waiting_amount)
-    await state.update_data(kind="payhot", method=method)
+    await state.update_data(kind="rub", method=method)
     await render(
         call,
         banner="profile",
@@ -176,9 +206,6 @@ async def cb_topup_network(
     await call.answer()
 
 
-_PH_LABELS = {"card": "Банковская карта", "sbp": "СБП", "sberpay": "SberPay"}
-
-
 @router.message(TopUpFlow.waiting_amount)
 async def msg_topup_amount(
     message: Message,
@@ -187,11 +214,12 @@ async def msg_topup_amount(
     provider: PaymentProvider,
     state: FSMContext,
     payhot: PaymentProvider = None,
+    paydex: PaymentProvider = None,
 ) -> None:
     data = await state.get_data()
     kind = data.get("kind", "usdt")
     raw = (message.text or "").strip().replace(",", ".")
-    min_rub = int(TOPUP_MIN) if kind == "payhot" else _min_topup_rub()
+    min_rub = int(TOPUP_MIN) if kind == "rub" else _min_topup_rub()
     try:
         amount = Decimal(raw)
     except (InvalidOperation, ValueError):
@@ -201,10 +229,11 @@ async def msg_topup_amount(
         await message.answer(texts.TOPUP_BAD_AMOUNT.format(min=min_rub, max=TOPUP_MAX))
         return
 
-    # ── PayHot (₽: карта / СБП / SberPay) ────────────────────────────────────
-    if kind == "payhot":
+    # ── ₽ (карта → PayHot / СБП → Paydex) ────────────────────────────────────
+    if kind == "rub":
         method = (data.get("method") or "").lower()
-        if payhot is None or method not in config.payhot_method_list:
+        pay = _rub_provider(method, payhot, paydex)
+        if pay is None:
             await state.clear()
             await message.answer("Способ оплаты недоступен, начните пополнение заново.")
             return
@@ -214,14 +243,19 @@ async def msg_topup_amount(
                 session, message.from_user.id, message.from_user.username,
                 message.from_user.full_name,
             )
+            method_label = await paymethods_service.label(session, method)
             topup = await balance_service.create_topup(
                 session, user_id=message.from_user.id, amount_usd=amount
             )
+            notify_url = (
+                config.paydex_notify_url if pay.name == "paydex"
+                else config.payhot_notify_url
+            )
             try:
-                invoice = await payhot.create_invoice(
+                invoice = await pay.create_invoice(
                     amount=amount, client_ref=topup.client_ref,
                     description=f"Balance top-up {message.from_user.id}",
-                    notify_url=config.payhot_notify_url,
+                    notify_url=notify_url,
                     success_url=config.public_base_url,
                     network=method,
                 )
@@ -229,7 +263,7 @@ async def msg_topup_amount(
                 await session.rollback()
                 await message.answer("Не удалось создать счёт. Попробуйте другой способ или позже.")
                 raise
-            topup.provider = payhot.name
+            topup.provider = pay.name
             topup.provider_order_id = invoice.provider_order_id
             topup.checkout_url = invoice.checkout_url
             topup.network = invoice.network
@@ -241,7 +275,7 @@ async def msg_topup_amount(
         await render(
             message, banner="profile",
             caption=texts.TOPUP_CREATED_LINK.format(
-                credit=texts.rub(amount), method=_PH_LABELS.get(method, method)
+                credit=texts.rub(amount), method=method_label
             ),
             reply_markup=kb.topup_payment_kb(topup_id, invoice.checkout_url),
         )
@@ -310,7 +344,7 @@ async def msg_topup_amount(
 @router.callback_query(F.data.startswith("tucheck:"))
 async def cb_topup_check(
     call: CallbackQuery, db: Database, config: BotConfig, provider: PaymentProvider,
-    payhot: PaymentProvider = None,
+    payhot: PaymentProvider = None, paydex: PaymentProvider = None,
 ) -> None:
     topup_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -348,6 +382,8 @@ async def cb_topup_check(
 
         if topup.provider == "payhot" and payhot is not None:
             prov, ref = payhot, topup.provider_order_id
+        elif topup.provider == "paydex" and paydex is not None:
+            prov, ref = paydex, topup.provider_order_id
         else:
             prov, ref = provider, topup.client_ref
         if not ref:

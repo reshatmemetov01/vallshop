@@ -3,6 +3,7 @@
 from .base import Invoice, PaymentProvider, PaymentUpdate
 from .boltutil import BoltUtilProvider
 from .mock import MockProvider
+from .paydex import PaydexProvider
 from .payhot import PayHotProvider
 
 
@@ -16,6 +17,18 @@ def build_payhot(config):
         secret=config.payhot_secret,
         methods=config.payhot_method_list,
         mock=config.payhot_mock,
+    )
+
+
+def build_paydex(config):
+    """Собрать Paydex-провайдера (₽ по СБП) или None, если не настроен."""
+    if not getattr(config, "paydex_enabled", False):
+        return None
+    return PaydexProvider(
+        base_url=config.paydex_base_url,
+        api_key=config.paydex_api_key,
+        secret=config.paydex_secret,
+        mock=config.paydex_mock,
     )
 
 
@@ -42,6 +55,8 @@ __all__ = [
     "BoltUtilProvider",
     "MockProvider",
     "PayHotProvider",
+    "PaydexProvider",
     "build_provider",
     "build_payhot",
+    "build_paydex",
 ]

@@ -29,7 +29,7 @@ log = logging.getLogger("vallshop.web")
 
 def build_app(
     *, bot: Bot, db: Database, provider: PaymentProvider, liog: LioGamesClient,
-    config=None, payhot: PaymentProvider = None,
+    config=None, payhot: PaymentProvider = None, paydex: PaymentProvider = None,
 ) -> web.Application:
     app = web.Application()
 
@@ -87,6 +87,18 @@ def build_app(
         await _apply_payment(bot, db, liog, update)
         return web.json_response({"ok": True})
 
+    async def paydex_webhook(request: web.Request) -> web.Response:
+        if paydex is None:
+            return web.json_response({"ok": False}, status=404)
+        raw = await request.read()
+        if not paydex.verify_webhook(raw, dict(request.headers)):
+            log.warning("Paydex: вебхук с неверной подписью отклонён")
+            # Paydex: при неверной подписи ожидает 401.
+            return web.json_response({"ok": False}, status=401)
+        update = paydex.parse_webhook(raw)
+        await _apply_payment(bot, db, liog, update)
+        return web.json_response({"ok": True})
+
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/", landing_page)
     app.router.add_get("/offer", offer_page)
@@ -99,6 +111,7 @@ def build_app(
     for path in ("/bolt/webhook", "/bolt/callback", "/callback"):
         app.router.add_post(path, bolt_webhook)
     app.router.add_post("/payhot/webhook", payhot_webhook)
+    app.router.add_post("/paydex/webhook", paydex_webhook)
     return app
 
 
