@@ -44,12 +44,12 @@ def test_derive_and_target_roundtrip():
     assert smartprice.target_rub(cost, mk, rate) == Decimal("143")
 
 
-async def _mk(db, *, markup, price_rub, mode="smart", price_usd=None):
+async def _mk(db, *, markup, price_rub, mode="smart", price_usd=None, cost_usd=Decimal("1.00")):
     async with db.session() as s:
         p = Product(game="X", title="T"); s.add(p); await s.flush()
         v = Variant(
             product_id=p.id, title="60 UC", liog_product_id=0, liog_variation_id=-1,
-            cost_usd=Decimal("1.00"), source="fazercard", fzr_kind="topup",
+            cost_usd=cost_usd, source="fazercard", fzr_kind="topup",
             fzr_a="free_fire", fzr_b="o1",
             markup_percent=markup, price_rub=price_rub, price_usd=price_usd,
             price_mode=mode,
@@ -80,6 +80,40 @@ async def test_recompute_updates_when_cost_moves(db):
     async with db.session() as s:
         v = await s.get(Variant, vid)
         assert v.price_rub == Decimal("143")
+
+
+class _FakeBot:
+    """Записывает отправленные сообщения вместо реальной отправки в Telegram."""
+
+    def __init__(self):
+        self.messages = []
+
+    async def send_message(self, chat_id, text, *args, **kwargs):
+        self.messages.append((chat_id, text))
+
+
+@pytest.mark.asyncio
+async def test_alert_on_cost_drop(db):
+    # Было $1.02 (mock o1 даёт $1.00) → падение ~1.96% > 0.5% → алерт о падении.
+    fzr = FazerCardClient(mock=True)
+    await _mk(db, markup=Decimal("50"), price_rub=Decimal("143"), cost_usd=Decimal("1.02"))
+    bot = _FakeBot()
+    await smartprice.recompute_all(db, fzr, bot=bot, admin_ids=[1])
+    assert len(bot.messages) == 1
+    _chat, text = bot.messages[0]
+    assert "Цены упали" in text
+    assert "0.5" not in text or "−" in text  # есть процент падения
+    assert "без изменений" in text  # цена в пределах порога 1% не сдвинулась
+
+
+@pytest.mark.asyncio
+async def test_no_drop_alert_below_half_percent(db):
+    # Было $1.004 → падение ~0.4% < 0.5% → алерта нет.
+    fzr = FazerCardClient(mock=True)
+    await _mk(db, markup=Decimal("50"), price_rub=Decimal("143"), cost_usd=Decimal("1.004"))
+    bot = _FakeBot()
+    await smartprice.recompute_all(db, fzr, bot=bot, admin_ids=[1])
+    assert bot.messages == []
 
 
 @pytest.mark.asyncio

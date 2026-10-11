@@ -6,6 +6,7 @@
     хранится в ``price_rub`` как «липкая»;
   * порог 1%: мелкие изменения закупа цену не трогают;
   * при росте > 1% — уведомление администратору;
+  * при падении закупа > 0.5% — уведомление администратору (цену не меняет);
   * стоп-лосс: если цена оказалась ниже живого закупа — продажа блокируется.
 
 Работает только для поставщиков с живым закупом по API (пока FazerCard).
@@ -30,8 +31,9 @@ MODE_SMART = "smart"
 MODE_FIXED = "fixed"
 MODE_FLOAT = "float"
 
-TOLERANCE = Decimal("0.01")   # 1% — ниже порога цену не меняем
-ALERT_UP = Decimal("0.01")    # уведомляем при росте > 1%
+TOLERANCE = Decimal("0.01")        # 1% — ниже порога цену не меняем
+ALERT_UP = Decimal("0.01")         # уведомляем при росте > 1%
+ALERT_DOWN_COST = Decimal("0.005")  # уведомляем при падении закупа > 0.5%
 _ONE = Decimal("1")
 
 # Источники, умеющие отдавать живой закуп по API.
@@ -72,6 +74,7 @@ async def recompute_all(db: Database, fzr, *, bot=None, admin_ids=None) -> list:
     rate = rates_service.get_rate()
     changes: list = []
     alerts: list = []
+    drop_alerts: list = []
     async with db.session() as session:
         variants = list(
             await session.scalars(select(Variant).where(Variant.price_mode == MODE_SMART))
@@ -97,21 +100,41 @@ async def recompute_all(db: Database, fzr, *, bot=None, admin_ids=None) -> list:
                 changes.append((v.id, v.title, cur, target))
                 if target > cur * (Decimal(1) + ALERT_UP):
                     alerts.append((v.title, cur, target, old_cost, cost))
+            # Падение закупа > 0.5% — уведомляем (цену порог 1% может не тронуть).
+            if old_cost > 0 and cost < old_cost * (Decimal(1) - ALERT_DOWN_COST):
+                drop_alerts.append((v.title, cur, Decimal(v.price_rub), old_cost, cost))
         await session.commit()
 
-    if alerts and bot is not None and admin_ids:
+    if (alerts or drop_alerts) and bot is not None and admin_ids:
         from . import notify as notify_service
-        lines = ["📈 <b>Цены выросли (поднялся закуп):</b>", ""]
-        for title, old, new, old_cost, new_cost in alerts:
-            pct = (new - old) / old * 100
-            lines.append(
-                f"• {title}: {int(old)} → {int(new)} ₽ (+{pct:.1f}%)\n"
-                f"   закуп: {old_cost:.2f} → {new_cost:.2f} $"
-            )
-        try:
-            await notify_service.notify_admins(bot, admin_ids, "\n".join(lines))
-        except Exception:  # noqa: BLE001
-            log.warning("Не удалось отправить алерт о росте цен")
+        if alerts:
+            lines = ["📈 <b>Цены выросли (поднялся закуп):</b>", ""]
+            for title, old, new, old_cost, new_cost in alerts:
+                pct = (new - old) / old * 100
+                lines.append(
+                    f"• {title}: {int(old)} → {int(new)} ₽ (+{pct:.1f}%)\n"
+                    f"   закуп: {old_cost:.2f} → {new_cost:.2f} $"
+                )
+            try:
+                await notify_service.notify_admins(bot, admin_ids, "\n".join(lines))
+            except Exception:  # noqa: BLE001
+                log.warning("Не удалось отправить алерт о росте цен")
+        if drop_alerts:
+            lines = ["📉 <b>Цены упали (снизился закуп):</b>", ""]
+            for title, old_p, new_p, old_cost, new_cost in drop_alerts:
+                cost_pct = (old_cost - new_cost) / old_cost * 100
+                if new_p != old_p:
+                    price_line = f"{int(old_p)} → {int(new_p)} ₽"
+                else:
+                    price_line = f"{int(old_p)} ₽ (без изменений)"
+                lines.append(
+                    f"• {title}: {price_line}\n"
+                    f"   закуп: {old_cost:.2f} → {new_cost:.2f} $ (−{cost_pct:.1f}%)"
+                )
+            try:
+                await notify_service.notify_admins(bot, admin_ids, "\n".join(lines))
+            except Exception:  # noqa: BLE001
+                log.warning("Не удалось отправить алерт о падении закупа")
     return changes
 
 
