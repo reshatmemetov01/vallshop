@@ -93,27 +93,34 @@ class _FakeBot:
 
 
 @pytest.mark.asyncio
-async def test_alert_on_cost_drop(db):
-    # Было $1.02 (mock o1 даёт $1.00) → падение ~1.96% > 0.5% → алерт о падении.
+async def test_price_drops_and_alerts(db):
+    # Цель 143, а цена стоит 200 → падение > 1% → цена снижается + алерт о падении.
     fzr = FazerCardClient(mock=True)
-    await _mk(db, markup=Decimal("50"), price_rub=Decimal("143"), cost_usd=Decimal("1.02"))
+    vid = await _mk(db, markup=Decimal("50"), price_rub=Decimal("200"))
     bot = _FakeBot()
-    await smartprice.recompute_all(db, fzr, bot=bot, admin_ids=[1])
+    changes = await smartprice.recompute_all(db, fzr, bot=bot, admin_ids=[1])
+    assert len(changes) == 1
+    async with db.session() as s:
+        v = await s.get(Variant, vid)
+        assert v.price_rub == Decimal("143")  # цена снизилась автоматически
     assert len(bot.messages) == 1
     _chat, text = bot.messages[0]
     assert "Цены упали" in text
-    assert "0.5" not in text or "−" in text  # есть процент падения
-    assert "без изменений" in text  # цена в пределах порога 1% не сдвинулась
+    assert "200 → 143 ₽" in text
 
 
 @pytest.mark.asyncio
-async def test_no_drop_alert_below_half_percent(db):
-    # Было $1.004 → падение ~0.4% < 0.5% → алерта нет.
+async def test_no_drop_alert_within_tolerance(db):
+    # Цель 143, цена 144 → изменение < 1% → цена не меняется, алерта нет.
     fzr = FazerCardClient(mock=True)
-    await _mk(db, markup=Decimal("50"), price_rub=Decimal("143"), cost_usd=Decimal("1.004"))
+    vid = await _mk(db, markup=Decimal("50"), price_rub=Decimal("144"))
     bot = _FakeBot()
-    await smartprice.recompute_all(db, fzr, bot=bot, admin_ids=[1])
+    changes = await smartprice.recompute_all(db, fzr, bot=bot, admin_ids=[1])
+    assert changes == []
     assert bot.messages == []
+    async with db.session() as s:
+        v = await s.get(Variant, vid)
+        assert v.price_rub == Decimal("144")
 
 
 @pytest.mark.asyncio
