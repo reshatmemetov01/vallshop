@@ -257,7 +257,7 @@ async def msg_topup_amount(
                     description=f"Balance top-up {message.from_user.id}",
                     notify_url=notify_url,
                     success_url=config.public_base_url,
-                    network=method,
+                    network=paymethods_service.method_code(method),
                 )
             except Exception:  # noqa: BLE001
                 await session.rollback()

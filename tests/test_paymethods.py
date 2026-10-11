@@ -20,15 +20,36 @@ async def test_defaults(db):
     async with db.session() as s:
         methods = await pm.list_methods(s)
     ids = [m["id"] for m in methods]
-    assert ids == ["card", "sbp", "usdt"]
+    assert ids == ["card", "sbp", "sbp_ph", "usdt"]
     by_id = {m["id"]: m for m in methods}
     assert by_id["card"]["provider"] == "payhot"
     assert by_id["sbp"]["provider"] == "paydex"
+    assert by_id["sbp_ph"]["provider"] == "payhot"
     assert by_id["usdt"]["provider"] == "bolt"
-    # по умолчанию всё включено и тексты дефолтные
-    assert all(m["enabled"] for m in methods)
+    # по умолчанию включено всё, кроме резервной СБП PayHot
+    assert by_id["card"]["enabled"] and by_id["sbp"]["enabled"] and by_id["usdt"]["enabled"]
+    assert by_id["sbp_ph"]["enabled"] is False
     assert by_id["sbp"]["label"] == "СБП"
     assert by_id["card"]["label"] == "Банковская карта"
+
+
+def test_method_code():
+    # И основная, и резервная СБП уходят провайдеру как "sbp".
+    assert pm.method_code("sbp") == "sbp"
+    assert pm.method_code("sbp_ph") == "sbp"
+    assert pm.method_code("card") == "card"
+
+
+@pytest.mark.asyncio
+async def test_sbp_ph_hidden_until_enabled(db):
+    available = {"payhot": True, "paydex": True, "bolt": True}
+    async with db.session() as s:
+        shown = [m["id"] for m in await pm.client_methods(s, available=available)]
+        assert "sbp_ph" not in shown  # скрыта по умолчанию
+        await pm.set_enabled(s, "sbp_ph", True)
+        await s.commit()
+        shown2 = [m["id"] for m in await pm.client_methods(s, available=available)]
+    assert "sbp_ph" in shown2
 
 
 @pytest.mark.asyncio

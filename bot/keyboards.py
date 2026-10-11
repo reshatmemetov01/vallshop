@@ -313,6 +313,7 @@ def balance_kb() -> InlineKeyboardMarkup:
 _PAY_EMOJI = {
     "card": "5445353829304387411",
     "sbp": "5265074015868822600",
+    "sbp_ph": "5265074015868822600",
     "usdt": EMOJI["usdt"],
 }
 

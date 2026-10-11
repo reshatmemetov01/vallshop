@@ -18,24 +18,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import settings as settings_service
 
 # Порядок = порядок показа кнопок клиенту.
-METHOD_IDS: List[str] = ["card", "sbp", "usdt"]
+# ``sbp_ph`` — резервная СБП через PayHot (по умолчанию скрыта).
+METHOD_IDS: List[str] = ["card", "sbp", "sbp_ph", "usdt"]
 
-PROVIDER_OF = {"card": "payhot", "sbp": "paydex", "usdt": "bolt"}
+PROVIDER_OF = {"card": "payhot", "sbp": "paydex", "sbp_ph": "payhot", "usdt": "bolt"}
+
+# Код способа, который уходит провайдеру (у PayHot и Paydex СБП = "sbp").
+CODE_OF = {"card": "card", "sbp": "sbp", "sbp_ph": "sbp", "usdt": "usdt"}
 
 DEFAULT_LABEL = {
     "card": "Банковская карта",
     "sbp": "СБП",
+    "sbp_ph": "СБП (резерв)",
     "usdt": "USDT (крипта)",
 }
+
+# Видимость по умолчанию (резервная СБП PayHot скрыта, пока не включат).
+DEFAULT_ENABLED = {"sbp_ph": False}
 
 # Человеческие названия для админки.
 TITLE = {
     "card": "💳 Банковская карта (PayHot)",
     "sbp": "⚡ СБП (Paydex)",
+    "sbp_ph": "⚡ СБП — резерв (PayHot)",
     "usdt": "₮ USDT-крипта (BoltUtil)",
 }
 
 HEADING_KEY = "pay_heading"
+
+
+def method_code(mid: str) -> str:
+    """Код способа для провайдера (например, и sbp, и sbp_ph → 'sbp')."""
+    return CODE_OF.get(mid, mid)
 
 
 def _enabled_key(mid: str) -> str:
@@ -47,7 +61,8 @@ def _label_key(mid: str) -> str:
 
 
 async def is_enabled(session: AsyncSession, mid: str) -> bool:
-    return await settings_service.get_bool(session, _enabled_key(mid), default=True)
+    default = DEFAULT_ENABLED.get(mid, True)
+    return await settings_service.get_bool(session, _enabled_key(mid), default=default)
 
 
 async def set_enabled(session: AsyncSession, mid: str, value: bool) -> None:
