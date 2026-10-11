@@ -70,13 +70,12 @@ class StarsFlow(StatesGroup):
 async def _set_menu_keyboard(message: Message) -> None:
     """Выставить постоянную нижнюю кнопку «🏠 Меню».
 
-    Приём как у снятия клавиатуры: изменение reply-клавиатуры применяется к
-    чату и сохраняется даже после удаления сообщения-носителя, поэтому служебное
-    «⌛» сразу удаляем — чат остаётся чистым, а кнопка «Меню» остаётся внизу.
+    Reply-клавиатура живёт на сообщении-носителе: если его удалить, кнопка
+    пропадёт. Поэтому носитель НЕ удаляем — он несёт короткую подсказку, а
+    баннер меню отправляется следующим и становится последним на экране.
     """
     try:
-        m = await message.answer("⌛", reply_markup=kb.persistent_menu_kb())
-        await m.delete()
+        await message.answer(texts.MENU_KB_HINT, reply_markup=kb.persistent_menu_kb())
     except Exception:  # noqa: BLE001
         pass
 
