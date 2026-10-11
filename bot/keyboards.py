@@ -15,6 +15,8 @@ from aiogram.types import (
     CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -118,6 +120,20 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     if is_admin:
         kb.row(_b("Админ-панель", callback_data="admin", style="danger", icon=EMOJI["admin"]))
     return kb.as_markup()
+
+
+# Текст постоянной нижней кнопки «Меню» (reply-клавиатура).
+MENU_BUTTON_TEXT = "🏠 Меню"
+
+
+def persistent_menu_kb() -> ReplyKeyboardMarkup:
+    """Постоянная нижняя кнопка «Меню» — всегда видна, быстрый возврат в меню."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=MENU_BUTTON_TEXT)]],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Нажмите «🏠 Меню» для возврата",
+    )
 
 
 def faq_kb(

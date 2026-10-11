@@ -19,7 +19,6 @@ from aiogram.types import (
     InlineKeyboardButton,
     LinkPreviewOptions,
     Message,
-    ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -68,10 +67,15 @@ class StarsFlow(StatesGroup):
     confirming = State()
 
 
-async def _clear_reply_keyboard(message: Message) -> None:
-    """Убрать старую нижнюю reply-клавиатуру (всё меню теперь inline)."""
+async def _set_menu_keyboard(message: Message) -> None:
+    """Выставить постоянную нижнюю кнопку «🏠 Меню».
+
+    Приём как у снятия клавиатуры: изменение reply-клавиатуры применяется к
+    чату и сохраняется даже после удаления сообщения-носителя, поэтому служебное
+    «⌛» сразу удаляем — чат остаётся чистым, а кнопка «Меню» остаётся внизу.
+    """
     try:
-        m = await message.answer("⌛", reply_markup=ReplyKeyboardRemove())
+        m = await message.answer("⌛", reply_markup=kb.persistent_menu_kb())
         await m.delete()
     except Exception:  # noqa: BLE001
         pass
@@ -97,13 +101,14 @@ async def cmd_start(
         if is_new and ref_id:
             await referral_service.bind_referral(session, user, ref_id)
         await session.commit()
-    await _clear_reply_keyboard(message)
+    await _set_menu_keyboard(message)
     is_admin = config.is_admin(message.from_user.id)
     await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin))
 
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, config: BotConfig) -> None:
+    await _set_menu_keyboard(message)
     is_admin = config.is_admin(message.from_user.id)
     await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin))
 

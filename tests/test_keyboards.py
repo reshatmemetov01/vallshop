@@ -10,6 +10,15 @@ def _flat(markup):
     return [btn for row in markup.inline_keyboard for btn in row]
 
 
+def test_persistent_menu_kb():
+    m = kb.persistent_menu_kb()
+    assert m.is_persistent is True
+    assert m.resize_keyboard is True
+    # ровно одна кнопка «Меню» с ожидаемым текстом
+    assert len(m.keyboard) == 1 and len(m.keyboard[0]) == 1
+    assert m.keyboard[0][0].text == kb.MENU_BUTTON_TEXT == "🏠 Меню"
+
+
 def test_main_menu_one_row_with_icons_and_colors():
     markup = kb.main_menu_kb()
     # Каталог и Мой профиль — в одном (первом) ряду

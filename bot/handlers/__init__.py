@@ -12,6 +12,7 @@ from . import (
     admin_reviews,
     admin_stats,
     admin_ui,
+    menu_button,
     profile,
     referral,
     reviews,
@@ -21,6 +22,8 @@ from . import (
 
 def build_root_router() -> Router:
     root = Router()
+    # Постоянная кнопка «🏠 Меню» — первой, чтобы работала поверх любого FSM.
+    root.include_router(menu_button.router)
     root.include_router(admin.router)
     root.include_router(admin_ui.router)
     root.include_router(admin_codes.router)
