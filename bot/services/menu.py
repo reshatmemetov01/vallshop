@@ -33,8 +33,11 @@ class Entry:
 
 
 # Колонок в ряд для каждого меню.
-MENU_COLUMNS = {"main": 2, "profile": 1, "faq": 2}
-MENU_TITLES = {"main": "Главное меню", "profile": "Профиль", "faq": "FAQ / Правила"}
+MENU_COLUMNS = {"main": 2, "profile": 1, "faq": 2, "earn": 1}
+MENU_TITLES = {
+    "main": "Главное меню", "profile": "Профиль",
+    "faq": "FAQ / Правила", "earn": "Заработок",
+}
 # У каких меню есть редактируемый текст экрана и ключ настройки.
 MENU_CAPTION = {"main": "cap_main", "faq": "cap_faq"}
 
@@ -55,6 +58,10 @@ REGISTRY: List[Entry] = [
     Entry("faq.privacy",   "faq", "Политика конфиденциальности",   "5935757052042285202", None,      "url", "privacy", 20),
     Entry("faq.agreement", "faq", "Политика соглашения",           "6030445631921721471", None,      "url", "agreement", 30),
     Entry("faq.offer",     "faq", "Публичная оферта",              "6030445631921721471", "success", "url", "offer", 40, full_width=True),
+    # Заработок: Реферальная система + Франшиза (франшиза видна только в головном
+    # боте; её можно скрыть здесь, пока она в разработке).
+    Entry("earn.ref",       "earn", "Реферальная система", "5879905000972358125", "primary", "cb", "ref", 10, full_width=True),
+    Entry("earn.franchise", "earn", "🏪 Франшиза",         None,                  "success", "cb", "fr_home", 20, full_width=True),
 ]
 
 _BY_KEY: Dict[str, Entry] = {e.key: e for e in REGISTRY}

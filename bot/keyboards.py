@@ -250,10 +250,17 @@ def order_done_kb(order_id: int, variant_id: int) -> InlineKeyboardMarkup:
 
 
 def earn_kb(show_franchise: bool = False) -> InlineKeyboardMarkup:
+    """Меню «Заработок» из реестра оформления (видимость кнопок — в Оформлении).
+
+    Кнопка «Франшиза» показывается только в головном боте (show_franchise) и
+    только если не скрыта админом в разделе Оформление.
+    """
+    from .services import menu as menu_service
     kb = InlineKeyboardBuilder()
-    kb.row(_b("Реферальная система", callback_data="ref", style="primary", icon=EMOJI["referral"]))
-    if show_franchise:
-        kb.row(_b("🏪 Франшиза", callback_data="fr_home", style="success"))
+    for r in menu_service.menu_entries("earn"):
+        if r.key == "earn.franchise" and not show_franchise:
+            continue
+        kb.row(_b(r.text, callback_data=r.target, style=r.style, icon=r.emoji_id or None))
     kb.row(_b("Назад", callback_data="menu", icon=EMOJI["back"]))
     return kb.as_markup()
 

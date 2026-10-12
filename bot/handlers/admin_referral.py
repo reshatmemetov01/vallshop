@@ -71,6 +71,7 @@ async def _home(session) -> tuple[str, InlineKeyboardMarkup]:
     kb.row(_btn(f"Программа: {state} (переключить)", "rf_toggle"))
     kb.row(_btn("✏️ Процент", "rf_pct"), _btn("📝 Условия", "rf_terms"))
     kb.row(_btn("💵 Мин. USDT", "rf_minu"), _btn("💴 Мин. ₽", "rf_minr"))
+    kb.row(_btn("🏪 Мерчанты", "mch_home"))
     kb.row(_btn("⬅️ Назад", "a_home"))
     return caption, kb.as_markup()
 

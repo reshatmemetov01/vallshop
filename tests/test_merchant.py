@@ -176,6 +176,46 @@ async def test_create_merchant_onboarding(db):
     assert m.id in [x.id for x in await ms.active_merchants(db)]
 
 
+@pytest.mark.asyncio
+async def test_merchants_manage_and_delete(db):
+    from bot.services import merchants as ms
+    async with db.session() as s:
+        p = Product(game="X", title="T"); s.add(p); await s.flush()
+        v = Variant(product_id=p.id, title="v", liog_product_id=0, liog_variation_id=-1)
+        s.add(v); await s.flush()
+        m = await ms.create_merchant(
+            db, title="A", bot_token="t:1", bot_username="a_bot",
+            admin_user_id=9, admin_username="a",
+        )
+        # данные франшизы и головного (головной должен уцелеть)
+        s.add(User(id=50, merchant_id=m.id, balance=Decimal("10")))
+        s.add(User(id=50, merchant_id=0, balance=Decimal("99")))
+        s.add(Order(client_ref="o-m", user_id=50, merchant_id=m.id, variant_id=v.id, price_usd=5))
+        s.add(TopUp(client_ref="tu-m", user_id=50, merchant_id=m.id, amount_usd=5))
+        await s.commit()
+        mid = m.id
+
+    assert [x.id for x in await ms.list_all(db)] == [mid]  # головной не в списке
+    st = await ms.merchant_stats(db, mid)
+    assert st == {"users": 1, "orders": 1}
+
+    await ms.set_status(db, mid, "suspended")
+    assert (await ms.get_merchant(db, mid)).status == "suspended"
+    # головной нельзя приостановить/удалить
+    await ms.set_status(db, 0, "suspended")
+    assert (await ms.get_merchant(db, 0)).status == "active"
+    assert await ms.delete_merchant(db, 0) is False
+
+    assert await ms.delete_merchant(db, mid) is True
+    async with db.session() as s:
+        assert await s.get(Merchant, mid) is None
+        # данные франшизы удалены, головного — на месте
+        assert await bal.get_balance(s, 50, merchant_id=mid) == Decimal("0")
+        assert await bal.get_balance(s, 50, merchant_id=0) == Decimal("99")
+        from sqlalchemy import text as _t
+        assert (await s.execute(_t("SELECT COUNT(*) FROM orders WHERE merchant_id=:m"), {"m": mid})).scalar() == 0
+
+
 class _FakeBot:
     def __init__(self, bot_id):
         self.id = bot_id

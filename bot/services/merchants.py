@@ -9,10 +9,18 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, select, text
 
 from ..db import Database
-from ..db.models import HEAD_MERCHANT_ID, Merchant
+from ..db.models import (
+    HEAD_MERCHANT_ID,
+    Merchant,
+    Order,
+    Review,
+    TopUp,
+    User,
+)
 
 
 async def active_merchants(db: Database) -> List[Merchant]:
@@ -63,3 +71,57 @@ async def create_merchant(
         s.add(m)
         await s.commit()
         return m
+
+
+async def list_all(db: Database) -> List[Merchant]:
+    """Все франшизы (без головного), новые сверху."""
+    async with db.session() as s:
+        return list(await s.scalars(
+            select(Merchant).where(Merchant.id != HEAD_MERCHANT_ID).order_by(Merchant.id.desc())
+        ))
+
+
+async def set_status(db: Database, merchant_id: int, status: str) -> None:
+    async with db.session() as s:
+        m = await s.get(Merchant, merchant_id)
+        if m is not None and m.id != HEAD_MERCHANT_ID:
+            m.status = status
+            await s.commit()
+
+
+async def merchant_stats(db: Database, merchant_id: int) -> dict:
+    async with db.session() as s:
+        users = int(await s.scalar(
+            select(func.count()).select_from(User).where(User.merchant_id == merchant_id)
+        ) or 0)
+        orders = int(await s.scalar(
+            select(func.count()).select_from(Order).where(Order.merchant_id == merchant_id)
+        ) or 0)
+    return {"users": users, "orders": orders}
+
+
+async def delete_merchant(db: Database, merchant_id: int) -> bool:
+    """Удалить франшизу и все её данные (клиенты, заказы, пополнения, отзывы и т.п.).
+
+    Головной (0) удалять нельзя. Возвращает True, если удалено.
+    """
+    if merchant_id == HEAD_MERCHANT_ID:
+        return False
+    async with db.session() as s:
+        m = await s.get(Merchant, merchant_id)
+        if m is None:
+            return False
+        # платежи по заказам этой франшизы (FK order_id)
+        await s.execute(text(
+            "DELETE FROM payments WHERE order_id IN "
+            "(SELECT id FROM orders WHERE merchant_id = :mid)"
+        ), {"mid": merchant_id})
+        await s.execute(sa_delete(Order).where(Order.merchant_id == merchant_id))
+        await s.execute(sa_delete(TopUp).where(TopUp.merchant_id == merchant_id))
+        await s.execute(sa_delete(Review).where(Review.merchant_id == merchant_id))
+        for tbl in ("referral_earnings", "activation_requests", "vpn_subscriptions"):
+            await s.execute(text(f"DELETE FROM {tbl} WHERE merchant_id = :mid"), {"mid": merchant_id})
+        await s.execute(sa_delete(User).where(User.merchant_id == merchant_id))
+        await s.delete(m)
+        await s.commit()
+        return True
