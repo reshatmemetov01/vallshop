@@ -74,6 +74,14 @@ class Database:
             ("users", "ref_earned_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
             ("products", "button_style", "VARCHAR(16)"),
             ("products", "full_width", "BOOLEAN NOT NULL DEFAULT 0"),
+            # Франшиза (Фаза 1): принадлежность записи магазину (0 = головной).
+            ("users", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("orders", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("topups", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("reviews", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("referral_earnings", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("activation_requests", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("vpn_subscriptions", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
         ]
         added_source = False
         for table, column, ddl in wanted:
@@ -92,6 +100,30 @@ class Database:
                 text(
                     "UPDATE variants SET source='liogames' "
                     "WHERE liog_product_id IS NOT NULL AND liog_product_id > 0"
+                )
+            )
+
+        # Индексы по merchant_id (идемпотентно) — для будущих пер-мерчант выборок.
+        index_targets = [
+            "users", "orders", "topups", "reviews",
+            "referral_earnings", "activation_requests", "vpn_subscriptions",
+        ]
+        existing_tables = set(inspect(conn).get_table_names())
+        for table in index_targets:
+            if table in existing_tables:
+                conn.execute(
+                    text(
+                        f"CREATE INDEX IF NOT EXISTS ix_{table}_merchant_id "
+                        f"ON {table} (merchant_id)"
+                    )
+                )
+
+        # Сид головного магазина (merchant_id = 0): запись-владелец платформы.
+        if "merchants" in existing_tables:
+            conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO merchants (id, title, status) "
+                    "VALUES (0, 'VallShop (головной)', 'active')"
                 )
             )
 

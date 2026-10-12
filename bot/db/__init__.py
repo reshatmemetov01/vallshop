@@ -2,6 +2,8 @@
 
 from .base import Base, Database
 from .models import (
+    HEAD_MERCHANT_ID,
+    Merchant,
     Order,
     OrderStatus,
     Payment,
@@ -23,6 +25,8 @@ from .models import (
 __all__ = [
     "Base",
     "Database",
+    "HEAD_MERCHANT_ID",
+    "Merchant",
     "User",
     "Product",
     "Variant",

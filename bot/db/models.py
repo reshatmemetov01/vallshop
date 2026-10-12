@@ -28,6 +28,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
 
+# Головной магазин владельца платформы — merchant_id = 0 (не франшиза).
+# Все существующие данные принадлежат ему; франшизы получают id > 0.
+HEAD_MERCHANT_ID = 0
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Перечисления статусов
 # ──────────────────────────────────────────────────────────────────────────
@@ -60,10 +65,36 @@ class PaymentStatus(str, enum.Enum):
 # ──────────────────────────────────────────────────────────────────────────
 # Пользователи
 # ──────────────────────────────────────────────────────────────────────────
+class Merchant(Base):
+    """Франшиза: отдельный магазин-бот партнёра на том же движке.
+
+    ``id = 0`` (HEAD_MERCHANT_ID) — головной магазин владельца платформы.
+    Партнёрские франшизы получают ``id > 0``. На Фазе 1 реально работает
+    только головной; таблица и колонки ``merchant_id`` закладывают фундамент.
+    """
+
+    __tablename__ = "merchants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[Optional[str]] = mapped_column(String(255))        # название магазина
+    bot_token: Mapped[Optional[str]] = mapped_column(String(64), unique=True)
+    bot_username: Mapped[Optional[str]] = mapped_column(String(64))
+    admin_user_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)  # Telegram id владельца франшизы
+    admin_username: Mapped[Optional[str]] = mapped_column(String(64))
+    channel: Mapped[Optional[str]] = mapped_column(String(128))      # обязательная подписка
+    # "active" | "suspended"
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # Telegram user id
+    # Франшиза, которой принадлежит запись (0 = головной магазин).
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     username: Mapped[Optional[str]] = mapped_column(String(64))
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -216,6 +247,9 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     client_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -306,6 +340,9 @@ class ActivationRequest(Base):
     __tablename__ = "activation_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     code: Mapped[str] = mapped_column(String(64), index=True)
     product: Mapped[Optional[str]] = mapped_column(String(255))
     user_id: Mapped[int] = mapped_column(Integer, index=True)
@@ -334,6 +371,9 @@ class ReferralEarning(Base):
     __tablename__ = "referral_earnings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     referrer_id: Mapped[int] = mapped_column(Integer, index=True)   # кто получил
     referral_id: Mapped[int] = mapped_column(Integer, index=True)   # за кого (приглашённый)
     order_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
@@ -351,6 +391,9 @@ class VpnSubscription(Base):
     __tablename__ = "vpn_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     order_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
@@ -384,6 +427,9 @@ class Review(Base):
     __tablename__ = "reviews"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     order_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(64))
@@ -410,6 +456,9 @@ class TopUp(Base):
     __tablename__ = "topups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
     client_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
