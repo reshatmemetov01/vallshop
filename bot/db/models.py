@@ -90,10 +90,11 @@ class Merchant(Base):
 class User(Base):
     __tablename__ = "users"
 
+    # Составной ключ (id, merchant_id): один Telegram-пользователь может быть
+    # клиентом у нескольких мерчантов, у каждого — свой баланс и записи.
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # Telegram user id
-    # Франшиза, которой принадлежит запись (0 = головной магазин).
     merchant_id: Mapped[int] = mapped_column(
-        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+        Integer, primary_key=True, default=HEAD_MERCHANT_ID, server_default="0", index=True
     )
     username: Mapped[Optional[str]] = mapped_column(String(64))
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
@@ -109,8 +110,6 @@ class User(Base):
     ref_balance_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     ref_earned_usdt: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     ref_earned_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
-
-    orders: Mapped[List["Order"]] = relationship(back_populates="user")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -252,7 +251,9 @@ class Order(Base):
     )
     client_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # users теперь с составным ключом (id, merchant_id) — FK одностолбцовый не
+    # ставим, связываем по user_id + merchant_id в запросах.
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
     variant_id: Mapped[int] = mapped_column(ForeignKey("variants.id"))
 
     # Цена за единицу и количество; итог = price_usd * quantity.
@@ -280,7 +281,6 @@ class Order(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    user: Mapped["User"] = relationship(back_populates="orders")
     variant: Mapped["Variant"] = relationship()
     payment: Mapped[Optional["Payment"]] = relationship(
         back_populates="order", uselist=False, cascade="all, delete-orphan"
@@ -460,7 +460,7 @@ class TopUp(Base):
         Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
     )
     client_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
 
     amount_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2))  # сколько зачислить
     status: Mapped[TopUpStatus] = mapped_column(String(16), default=TopUpStatus.PENDING)
@@ -477,5 +477,3 @@ class TopUp(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-
-    user: Mapped["User"] = relationship()

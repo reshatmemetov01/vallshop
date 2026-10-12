@@ -101,7 +101,9 @@ async def _tick(
                     if auto:
                         # buy-on-demand оплачивался с баланса — возвращаем деньги.
                         refund = Decimal(fresh.price_usd) * (fresh.quantity or 1)
-                        await balance_service.credit(session, fresh.user_id, refund)
+                        await balance_service.credit(
+                            session, fresh.user_id, refund, merchant_id=fresh.merchant_id
+                        )
                         fresh.status = OrderStatus.REFUNDED
                         status = OrderStatus.REFUNDED
                         refunded = True
@@ -263,10 +265,11 @@ async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None
             fresh.status = TopUpStatus.PAID
             fresh.tx_hash = getattr(update, "tx_hash", None)
             fresh.paid_at = datetime.utcnow()
-            await balance_service.credit(session, fresh.user_id, fresh.amount_usd)
+            mid = fresh.merchant_id
+            await balance_service.credit(session, fresh.user_id, fresh.amount_usd, merchant_id=mid)
             await session.commit()
             user_id, credit = fresh.user_id, fresh.amount_usd
-            balance = await balance_service.get_balance(session, user_id)
+            balance = await balance_service.get_balance(session, user_id, merchant_id=mid)
 
         await _notify(
             bot, user_id,

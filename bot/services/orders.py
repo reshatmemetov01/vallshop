@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from liogames import LioGamesClient
 from fazercard import FazerCardClient, FazerCardError
 
-from ..db.models import Order, OrderStatus, User, Variant
+from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, User, Variant
 from . import balance as balance_service
 from . import referral as referral_service
 from . import settings as settings_service
@@ -63,11 +63,14 @@ def new_client_ref() -> str:
 
 
 async def ensure_user(
-    session: AsyncSession, user_id: int, username: Optional[str], full_name: Optional[str]
+    session: AsyncSession, user_id: int, username: Optional[str], full_name: Optional[str],
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> User:
-    user = await session.get(User, user_id)
+    user = await session.get(User, {"id": user_id, "merchant_id": merchant_id})
     if user is None:
-        user = User(id=user_id, username=username, full_name=full_name)
+        user = User(
+            id=user_id, merchant_id=merchant_id, username=username, full_name=full_name
+        )
         session.add(user)
         await session.flush()
     else:

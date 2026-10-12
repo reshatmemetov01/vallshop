@@ -24,6 +24,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..db.models import User
 from ..services import balance as balance_service
+from ..services.users import get_user
 from ..services import stats as stats_service
 from .. import texts
 
@@ -166,7 +167,7 @@ async def _find_user(session, raw: str):
     if not raw:
         return None
     if raw.isdigit():
-        u = await session.get(User, int(raw))
+        u = await get_user(session, int(raw))
         if u:
             return u
     return await session.scalar(
@@ -223,7 +224,7 @@ async def cb_bal_show(call: CallbackQuery, db: Database, state: FSMContext) -> N
     await state.clear()
     uid = int(call.data.split(":", 1)[1])
     async with db.session() as session:
-        user = await session.get(User, uid)
+        user = await get_user(session, uid)
         if not user:
             await call.answer("Не найден", show_alert=True)
             return
@@ -278,14 +279,14 @@ async def msg_bal_credit(message: Message, db: Database, state: FSMContext) -> N
         await message.answer("Введите положительное число, например 500")
         return
     async with db.session() as session:
-        user = await session.get(User, uid)
+        user = await get_user(session, uid)
         if not user:
             await state.clear()
             await message.answer("Пользователь не найден")
             return
         await balance_service.credit(session, uid, amount)
         await session.commit()
-        user = await session.get(User, uid)
+        user = await get_user(session, uid)
         caption, markup = await _bal_card(session, user)
     await state.clear()
     await message.answer(f"✅ Пополнено на {texts.rub(amount)}")
@@ -301,7 +302,7 @@ async def msg_bal_debit(message: Message, db: Database, state: FSMContext) -> No
         await message.answer("Введите положительное число, например 100")
         return
     async with db.session() as session:
-        user = await session.get(User, uid)
+        user = await get_user(session, uid)
         if not user:
             await state.clear()
             await message.answer("Пользователь не найден")
@@ -311,7 +312,7 @@ async def msg_bal_debit(message: Message, db: Database, state: FSMContext) -> No
         if take > 0:
             await balance_service.try_debit(session, uid, take)
             await session.commit()
-        user = await session.get(User, uid)
+        user = await get_user(session, uid)
         caption, markup = await _bal_card(session, user)
     await state.clear()
     await message.answer(f"✅ Списано {texts.rub(take)}")

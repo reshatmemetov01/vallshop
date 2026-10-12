@@ -103,6 +103,38 @@ class Database:
                 )
             )
 
+        # Фаза 2: составной ключ users (id, merchant_id). Один Telegram-юзер
+        # может быть клиентом у разных мерчантов со своим балансом у каждого.
+        # Перестройка старой таблицы (одностолбцовый ключ id) — атомарно, в той
+        # же транзакции create_all; защита: не трогаем, если ключ уже составной.
+        if "users" in set(inspect(conn).get_table_names()):
+            ucols = inspect(conn).get_columns("users")
+            pk_cols = {c["name"] for c in ucols if c.get("primary_key")}
+            if pk_cols == {"id"}:  # старый ключ → перестроить
+                new_cols = [
+                    ("id", "INTEGER NOT NULL"),
+                    ("merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+                    ("username", "VARCHAR(64)"),
+                    ("full_name", "VARCHAR(255)"),
+                    ("is_blocked", "BOOLEAN NOT NULL DEFAULT 0"),
+                    ("block_reason", "VARCHAR(255)"),
+                    ("balance", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+                    ("created_at", "DATETIME"),
+                    ("referred_by", "INTEGER"),
+                    ("ref_balance_usdt", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+                    ("ref_balance_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+                    ("ref_earned_usdt", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+                    ("ref_earned_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+                ]
+                existing = {c["name"] for c in ucols}
+                copy = ", ".join(n for n, _ in new_cols if n in existing)
+                ddl = ", ".join(f"{n} {t}" for n, t in new_cols)
+                conn.execute(text(f"CREATE TABLE users_new ({ddl}, PRIMARY KEY (id, merchant_id))"))
+                conn.execute(text(f"INSERT INTO users_new ({copy}) SELECT {copy} FROM users"))
+                conn.execute(text("DROP TABLE users"))
+                conn.execute(text("ALTER TABLE users_new RENAME TO users"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_referred_by ON users (referred_by)"))
+
         # Индексы по merchant_id (идемпотентно) — для будущих пер-мерчант выборок.
         index_targets = [
             "users", "orders", "topups", "reviews",

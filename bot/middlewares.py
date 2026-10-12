@@ -8,6 +8,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 
 from .db.models import User
+from .services.users import get_user
 
 
 class BlockedMiddleware(BaseMiddleware):
@@ -24,7 +25,7 @@ class BlockedMiddleware(BaseMiddleware):
         user = data.get("event_from_user")
         if user and config and db and not config.is_admin(user.id):
             async with db.session() as s:
-                u = await s.get(User, user.id)
+                u = await get_user(s, user.id)
                 if u is not None and u.is_blocked:
                     return None  # игнорируем
         return await handler(event, data)

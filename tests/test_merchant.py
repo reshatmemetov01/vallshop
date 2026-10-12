@@ -1,12 +1,14 @@
 """Фаза 1 франшизы: таблица merchants, колонка merchant_id, миграция старой БД."""
 
 import sqlite3
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
 
 from bot.db import Database, HEAD_MERCHANT_ID, Merchant, Order, TopUp, User
 from bot.db.models import Product, Variant
+from bot.services import balance as bal
 
 
 @pytest.fixture
@@ -42,7 +44,7 @@ async def test_user_defaults_to_head_merchant(db):
         s.add(User(id=1, username="buyer"))
         await s.commit()
     async with db.session() as s:
-        u = await s.get(User, 1)
+        u = await s.get(User, {"id": 1, "merchant_id": 0})
         assert u.merchant_id == HEAD_MERCHANT_ID == 0
 
 
@@ -59,6 +61,61 @@ async def test_order_and_topup_have_merchant_id(db):
         o = (await s.execute(text("SELECT merchant_id FROM orders"))).scalars().all()
         t = (await s.execute(text("SELECT merchant_id FROM topups"))).scalars().all()
     assert o == [0] and t == [0]
+
+
+@pytest.mark.asyncio
+async def test_same_user_two_merchants_separate_balance(db):
+    # Один Telegram id у двух мерчантов — отдельные записи и балансы.
+    async with db.session() as s:
+        s.add(User(id=5, merchant_id=0, balance=Decimal("100")))
+        s.add(User(id=5, merchant_id=1, balance=Decimal("0")))
+        await s.commit()
+    async with db.session() as s:
+        await bal.credit(s, 5, Decimal("30"), merchant_id=1)
+        await s.commit()
+    async with db.session() as s:
+        assert await bal.get_balance(s, 5, merchant_id=0) == Decimal("100")
+        assert await bal.get_balance(s, 5, merchant_id=1) == Decimal("30")
+        # списание у мерчанта 1 не трогает баланс головного
+        assert await bal.try_debit(s, 5, Decimal("20"), merchant_id=1) is True
+        await s.commit()
+        assert await bal.get_balance(s, 5, merchant_id=1) == Decimal("10")
+        assert await bal.get_balance(s, 5, merchant_id=0) == Decimal("100")
+
+
+@pytest.mark.asyncio
+async def test_migration_rebuilds_users_composite_pk(tmp_path):
+    # Старая users с одностолбцовым ключом id → перестраивается в составной.
+    dbfile = tmp_path / "legacy2.db"
+    con = sqlite3.connect(dbfile)
+    con.executescript(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(64), "
+        "balance NUMERIC(12,2) NOT NULL DEFAULT 0);"
+        "INSERT INTO users (id, username, balance) VALUES (42, 'old', 500);"
+    )
+    con.commit()
+    con.close()
+
+    database = Database(f"sqlite+aiosqlite:///{dbfile}")
+    await database.create_all()
+    try:
+        async with database.session() as s:
+            info = (await s.execute(text("PRAGMA table_info(users)"))).all()
+            pk = {r[1] for r in info if r[5] > 0}  # r[5] = pk-позиция
+            assert pk == {"id", "merchant_id"}
+            row = (await s.execute(
+                text("SELECT username, balance, merchant_id FROM users WHERE id=42")
+            )).first()
+            assert row[0] == "old" and int(row[1]) == 500 and row[2] == 0
+            # тот же id у другого мерчанта теперь сосуществует
+            await s.execute(text(
+                "INSERT INTO users (id, merchant_id, username) VALUES (42, 1, 'franchise')"
+            ))
+            await s.commit()
+            cnt = (await s.execute(text("SELECT COUNT(*) FROM users WHERE id=42"))).scalar()
+            assert cnt == 2
+    finally:
+        await database.dispose()
 
 
 @pytest.mark.asyncio

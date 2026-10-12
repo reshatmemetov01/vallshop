@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import Order, OrderStatus, ReferralEarning, User
+from .users import get_user
 from . import balance as balance_service
 from . import settings as settings_service
 
@@ -54,7 +55,7 @@ async def bind_referral(session: AsyncSession, user: User, referrer_id: int) -> 
         return False
     if referrer_id == user.id:
         return False
-    referrer = await session.get(User, referrer_id)
+    referrer = await get_user(session, referrer_id)
     if referrer is None:
         return False
     user.referred_by = referrer_id
@@ -76,7 +77,7 @@ async def accrue_for_order(session: AsyncSession, order: Order) -> None:
         return
     if not await settings_service.get_bool(session, settings_service.REF_ENABLED, True):
         return
-    buyer = await session.get(User, order.user_id)
+    buyer = await get_user(session, order.user_id)
     if not buyer or not buyer.referred_by:
         return
     # Идемпотентность: по одному заказу — одно начисление.
@@ -88,7 +89,7 @@ async def accrue_for_order(session: AsyncSession, order: Order) -> None:
     )
     if exists:
         return
-    referrer = await session.get(User, buyer.referred_by)
+    referrer = await get_user(session, buyer.referred_by)
     if referrer is None:
         return
     percent = await _percent(session)
@@ -117,7 +118,7 @@ async def reverse_for_order(session: AsyncSession, order: Order) -> None:
     )
     if earning is None:
         return
-    referrer = await session.get(User, earning.referrer_id)
+    referrer = await get_user(session, earning.referrer_id)
     if referrer is not None:
         if earning.currency == "RUB":
             cur = Decimal(referrer.ref_balance_rub or 0) - Decimal(earning.amount)
@@ -137,7 +138,7 @@ async def transfer_to_balance(
     Основной баланс магазина — рублёвый, поэтому перевод идёт с ₽-реф-баланса
     на основной ₽-баланс.
     """
-    user = await session.get(User, user_id)
+    user = await get_user(session, user_id)
     if user is None:
         return False, Decimal(0), Decimal(0)
     if currency == "USDT":
@@ -168,7 +169,7 @@ async def stats(session: AsyncSession, user_id: int) -> dict:
         .where(ReferralEarning.referrer_id == user_id,
                ReferralEarning.status == "credited")
     ) or 0)
-    user = await session.get(User, user_id)
+    user = await get_user(session, user_id)
     return {
         "invited": invited,
         "with_purchase": with_purchase,

@@ -30,6 +30,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..db.models import ActivationCode, User
 from ..services import activation as act
+from ..services.users import get_user
 from roblox import parse_robux_amount
 
 log = logging.getLogger("vallshop.admincodes")
@@ -273,7 +274,7 @@ async def msg_block(message: Message, db: Database, state: FSMContext) -> None:
         return
     uid, reason = int(parts[0]), parts[1]
     async with db.session() as s:
-        u = await s.get(User, uid)
+        u = await get_user(s, uid)
         if u is None:
             u = User(id=uid)
             s.add(u)
@@ -303,7 +304,7 @@ async def msg_unblock(message: Message, db: Database, state: FSMContext) -> None
         return
     uid = int(raw)
     async with db.session() as s:
-        u = await s.get(User, uid)
+        u = await get_user(s, uid)
         if u:
             u.is_blocked = False
             u.block_reason = None
@@ -364,7 +365,7 @@ async def msg_addusers(message: Message, db: Database, state: FSMContext) -> Non
             if not x.isdigit():
                 continue
             uid = int(x)
-            if await s.get(User, uid) is None:
+            if await get_user(s, uid) is None:
                 s.add(User(id=uid))
                 added += 1
         await s.commit()

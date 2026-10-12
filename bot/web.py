@@ -136,12 +136,15 @@ async def _apply_topup(bot, db: Database, update) -> None:
         topup.status = TopUpStatus.PAID
         topup.tx_hash = update.tx_hash
         topup.paid_at = datetime.utcnow()
-        await balance_service.credit(session, topup.user_id, topup.amount_usd)
+        merchant_id = topup.merchant_id
+        await balance_service.credit(
+            session, topup.user_id, topup.amount_usd, merchant_id=merchant_id
+        )
         await session.flush()
         user_id = topup.user_id
         credit = topup.amount_usd
         await session.commit()
-        balance = await balance_service.get_balance(session, user_id)
+        balance = await balance_service.get_balance(session, user_id, merchant_id=merchant_id)
 
     await _notify(
         bot,
