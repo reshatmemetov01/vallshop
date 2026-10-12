@@ -12,6 +12,7 @@ from . import (
     admin_reviews,
     admin_stats,
     admin_ui,
+    franchise,
     menu_button,
     profile,
     referral,
@@ -34,6 +35,7 @@ def build_root_router() -> Router:
     root.include_router(admin_stats.router)
     root.include_router(activation.router)
     root.include_router(referral.router)
+    root.include_router(franchise.router)
     root.include_router(reviews.router)
     root.include_router(profile.router)
     root.include_router(user.router)

@@ -257,6 +257,11 @@ async def main() -> None:
     from .db.models import HEAD_MERCHANT_ID
     from .services import merchants as merchants_service
 
+    # Вариант B (сейчас): боты франшиз поднимаются ТОЛЬКО при старте из БД.
+    # Новая франшиза активируется после перезапуска сервиса.
+    # TODO (вариант A, позже): горячий подъём бота франшизы в рантайме без
+    # перезапуска — зафиксировать версию aiogram и запускать polling нового
+    # бота по событию создания франшизы (см. bot/handlers/franchise.py).
     bot = _make_bot(config.bot_token)  # головной — для пуллеров/веба/уведомлений
     bots = [bot]
     bot_to_merchant = {bot.id: HEAD_MERCHANT_ID}

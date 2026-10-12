@@ -21,9 +21,16 @@ router = Router(name="referral")
 
 
 @router.callback_query(F.data == "earn")
-async def cb_earn(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_earn(
+    call: CallbackQuery, state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     await state.clear()
-    await render(call, banner="main", caption=texts.EARN_TITLE, reply_markup=kb.earn_kb())
+    # Франшизу можно создать только из головного магазина.
+    show_franchise = merchant_id == HEAD_MERCHANT_ID
+    await render(
+        call, banner="main", caption=texts.EARN_TITLE,
+        reply_markup=kb.earn_kb(show_franchise=show_franchise),
+    )
     await call.answer()
 
 

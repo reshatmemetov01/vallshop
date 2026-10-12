@@ -249,9 +249,11 @@ def order_done_kb(order_id: int, variant_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def earn_kb() -> InlineKeyboardMarkup:
+def earn_kb(show_franchise: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_b("Реферальная система", callback_data="ref", style="primary", icon=EMOJI["referral"]))
+    if show_franchise:
+        kb.row(_b("🏪 Франшиза", callback_data="fr_home", style="success"))
     kb.row(_b("Назад", callback_data="menu", icon=EMOJI["back"]))
     return kb.as_markup()
 

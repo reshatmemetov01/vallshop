@@ -158,6 +158,24 @@ async def test_active_merchants_registry(db):
     assert sorted(m.id for m in rows) == [1]  # головной (0), без токена и неактивные — вне списка
 
 
+@pytest.mark.asyncio
+async def test_create_merchant_onboarding(db):
+    from bot.services import merchants as ms
+    assert await ms.merchant_for_admin(db, 555) is None
+    m = await ms.create_merchant(
+        db, title="Shop A", bot_token="999:TOKEN", bot_username="shopa_bot",
+        admin_user_id=555, admin_username="partner",
+    )
+    assert m.id > 0 and m.status == "active"
+    # одна франшиза на аккаунт — находится по admin_user_id
+    found = await ms.merchant_for_admin(db, 555)
+    assert found is not None and found.id == m.id
+    # токен занят, и бот попадает в активный реестр
+    assert await ms.token_in_use(db, "999:TOKEN") is True
+    assert await ms.token_in_use(db, "000:OTHER") is False
+    assert m.id in [x.id for x in await ms.active_merchants(db)]
+
+
 class _FakeBot:
     def __init__(self, bot_id):
         self.id = bot_id
