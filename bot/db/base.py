@@ -85,6 +85,8 @@ class Database:
             # Франшиза (P1): наценка по умолчанию и баланс заработка мерчанта.
             ("merchants", "default_markup", "NUMERIC(6,2) NOT NULL DEFAULT 0"),
             ("merchants", "earnings_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+            # Франшиза (P1.2): маржа мерчанта по заказу (₽).
+            ("orders", "merchant_margin", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
         ]
         added_source = False
         for table, column, ddl in wanted:

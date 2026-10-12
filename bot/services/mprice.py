@@ -62,6 +62,28 @@ async def client_price(
     return _apply(owner_price, ov.mode, ov.markup_percent, ov.price_rub, dm)
 
 
+async def markup_price(
+    session: AsyncSession, merchant_id: int, variant_id: int, owner_price: Decimal
+) -> Decimal:
+    """Цена клиента для флоу с динамической ценой (Steam/Stars): только % наценки.
+
+    Цена зависит от суммы, поэтому фикс-режим здесь не применяется — берём
+    индивидуальную %-наценку номинала (если задана в режиме markup), иначе
+    наценку по умолчанию мерчанта. Стоп-лосс: не ниже цены владельца.
+    """
+    owner = round_price_rub(Decimal(owner_price))
+    if merchant_id == HEAD_MERCHANT_ID:
+        return owner
+    ov = await get_override(session, merchant_id, variant_id)
+    dm = await default_markup(session, merchant_id)
+    if ov is not None and ov.mode == "markup" and ov.markup_percent is not None:
+        pct = Decimal(ov.markup_percent)
+    else:
+        pct = dm
+    price = round_price_rub(owner * (Decimal(1) + pct / Decimal(100)))
+    return price if price > owner else owner
+
+
 async def client_prices(
     session: AsyncSession, merchant_id: int, owner_prices: Dict[int, Decimal]
 ) -> Dict[int, Decimal]:
@@ -87,6 +109,28 @@ async def client_prices(
         else:
             out[vid] = _apply(owner, ov.mode, ov.markup_percent, ov.price_rub, dm)
     return out
+
+
+# ── Баланс заработка мерчанта (маржа) ─────────────────────────────────────────
+async def accrue_earnings(session: AsyncSession, merchant_id: int, amount: Decimal) -> None:
+    """Начислить маржу на баланс заработка мерчанта (головного — не трогаем)."""
+    if merchant_id == HEAD_MERCHANT_ID or Decimal(amount) <= 0:
+        return
+    m = await session.get(Merchant, merchant_id)
+    if m is not None:
+        m.earnings_rub = Decimal(m.earnings_rub or 0) + Decimal(amount)
+        await session.flush()
+
+
+async def reverse_earnings(session: AsyncSession, merchant_id: int, amount: Decimal) -> None:
+    """Сторнировать маржу (возврат заказа). Баланс не уходит ниже нуля."""
+    if merchant_id == HEAD_MERCHANT_ID or Decimal(amount) <= 0:
+        return
+    m = await session.get(Merchant, merchant_id)
+    if m is not None:
+        new = Decimal(m.earnings_rub or 0) - Decimal(amount)
+        m.earnings_rub = new if new > 0 else Decimal(0)
+        await session.flush()
 
 
 # ── Админка мерчанта (запись) ────────────────────────────────────────────────

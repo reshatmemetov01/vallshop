@@ -23,6 +23,7 @@ from ..db import Database
 from ..db.models import Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..services import balance as balance_service
 from ..services import catalog as catalog_service
+from ..services import mprice as mprice_service
 from ..services import notify as notify_service
 from ..services import orders as order_service
 from ..services import referral as referral_service
@@ -117,6 +118,9 @@ async def _tick(
                         status = OrderStatus.REFUNDED
                         refunded = True
                         await referral_service.reverse_for_order(session, fresh)
+                        await mprice_service.reverse_earnings(
+                            session, fresh.merchant_id, fresh.merchant_margin or Decimal(0)
+                        )
                         refund_text = await settings_service.get(
                             session, settings_service.REFUND_TEXT, texts.FULFILL_REFUNDED
                         )

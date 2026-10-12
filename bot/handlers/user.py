@@ -26,6 +26,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..services import catalog as catalog_service
 from ..services import menu as menu_service
+from ..services import mprice as mprice_service
 from ..services import notify as notify_service
 from ..services import referral as referral_service
 from ..services import orders as order_service
@@ -34,7 +35,7 @@ from ..services import steam as steam_service
 from ..services import stock as stock_service
 from ..services.balance import get_balance
 from ..services.orders import InsufficientBalance, OutOfStock, SupplierError
-from ..services.pricing import price_label, price_rub_value, sale_price
+from ..services.pricing import price_rub_value
 from ..db.models import HEAD_MERCHANT_ID, OrderStatus
 from fazercard import FazerCardClient
 from ..ui import render
@@ -44,6 +45,16 @@ from .. import texts
 router = Router()
 
 MAX_QTY_CAP = 50  # верхний предел количества за одну покупку
+
+
+async def _client_price(session, merchant_id: int, variant, config: BotConfig) -> Decimal:
+    """Цена для клиента текущего магазина (для головного — цена владельца).
+
+    Поверх цены владельца (``price_rub_value``) накладывается ценовой слой
+    мерчанта (наценка/фикс + стоп-лосс). Для головного возвращает цену владельца.
+    """
+    owner = price_rub_value(variant, config.default_markup_percent)
+    return await mprice_service.client_price(session, merchant_id, variant.id, owner)
 
 
 class BuyFlow(StatesGroup):
@@ -165,7 +176,7 @@ async def cb_catalog(call: CallbackQuery, db: Database, state: FSMContext) -> No
 @router.callback_query(F.data.startswith("prod:"))
 async def cb_product(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     product_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -204,7 +215,11 @@ async def cb_product(
             return
 
         variants = await catalog_service.list_variants(session, product_id)
-        prices = {v.id: price_label(v, config.default_markup_percent) for v in variants}
+        owner_prices = {v.id: price_rub_value(v, config.default_markup_percent) for v in variants}
+        client_prices = await mprice_service.client_prices(session, merchant_id, owner_prices)
+        prices = {
+            vid: (texts.rub(p) if p > 0 else "—") for vid, p in client_prices.items()
+        }
         stock = await stock_service.counts_by_variant(session, [v.id for v in variants])
 
     if not variants:
@@ -235,7 +250,7 @@ async def cb_product(
 @router.callback_query(F.data.startswith("var:"))
 async def cb_variant(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     await state.clear()  # сбросить незавершённый сбор данных топапа (в т.ч. отмену)
     variant_id = int(call.data.split(":", 1)[1])
@@ -255,7 +270,7 @@ async def cb_variant(
         return
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, variant_id)
-        price = sale_price(variant, config.default_markup_percent)
+        client_price = await _client_price(session, merchant_id, variant, config)
         in_stock = await stock_service.available_count(session, variant_id)
         ondemand = variant.source == "fazercard"
         is_vpn = variant.source == "vpnresellers"
@@ -277,9 +292,10 @@ async def cb_variant(
         note = f"в наличии: {in_stock} шт ✅"
     else:
         note = texts.OUT_OF_STOCK_NOTE
+    price_str = texts.rub(client_price) if client_price > 0 else "—"
     caption = (
         f"<b>{variant.title}</b>\n"
-        f"Цена: <b>{price_label(variant, config.default_markup_percent)}</b>\n"
+        f"Цена: <b>{price_str}</b>\n"
         f"Статус: {note}"
     )
     await render(call, banner="catalog", caption=caption, reply_markup=kb.buy_kb(variant_id, back=back))
@@ -295,7 +311,7 @@ async def _render_quantity(
         if not variant or not variant.is_active:
             await call.answer("Недоступно", show_alert=True)
             return
-        price = price_rub_value(variant, config.default_markup_percent)
+        price = await _client_price(session, merchant_id, variant, config)
         in_stock = await stock_service.available_count(session, variant_id)
         balance = await get_balance(session, call.from_user.id, merchant_id)
         ondemand = variant.source == "fazercard"
@@ -361,7 +377,7 @@ async def cb_buy(
         await _start_stars(call, db, state)
         return
     if needs_fields:
-        await _start_topup(call, config, fzr, state, variant)
+        await _start_topup(call, db, config, fzr, state, variant, merchant_id)
         return
     await _render_quantity(call, db, config, fzr, variant_id, 1, merchant_id)
 
@@ -385,8 +401,11 @@ def _needs_fields(variant) -> bool:
 
 
 # ── Покупка топапа: сбор данных игрока (fields) ──────────────────────────────
-async def _start_topup(call, config, fzr, state, variant) -> None:
-    price = price_rub_value(variant, config.default_markup_percent)
+async def _start_topup(
+    call, db, config, fzr, state, variant, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    async with db.session() as session:
+        price = await _client_price(session, merchant_id, variant, config)
     note = None
     if variant.fzr_a in ("telegram_stars", "telegram_premium"):
         # Telegram Stars/Premium: нужен только @username получателя.
@@ -508,7 +527,10 @@ async def cb_topup_confirm(
             await state.clear()
             await call.answer("Недоступно", show_alert=True)
             return
-        unit_price = price_rub_value(variant, config.default_markup_percent)
+        owner_price = price_rub_value(variant, config.default_markup_percent)
+        unit_price = await mprice_service.client_price(
+            session, merchant_id, variant.id, owner_price
+        )
         await order_service.ensure_user(
             session, call.from_user.id, call.from_user.username,
             call.from_user.full_name, merchant_id,
@@ -517,7 +539,7 @@ async def cb_topup_confirm(
             order, codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
                 unit_price=unit_price, quantity=1, merchant_id=merchant_id,
-                fzr=fzr, topup_fields=answers,
+                owner_unit_price=owner_price, fzr=fzr, topup_fields=answers,
             )
         except InsufficientBalance:
             await session.rollback()
@@ -709,17 +731,23 @@ async def msg_steam_amount(
         markup = await steam_service.get_markup(session)
         lo, hi = await steam_service.get_limits(session)
         balance = await get_balance(session, message.from_user.id, merchant_id)
-    price = steam_service.price_rub(amount, currency, fzr_rates, markup=markup)
+    owner_price = steam_service.price_rub(amount, currency, fzr_rates, markup=markup)
     c_usd = steam_service.cost_usd(amount, currency, fzr_rates)
-    if price < lo or price > hi:
+    if owner_price < lo or owner_price > hi:
         await message.answer(
             texts.STEAM_AMOUNT_RANGE.format(
-                min=texts.rub(lo), max=texts.rub(hi), price=texts.rub(price)
+                min=texts.rub(lo), max=texts.rub(hi), price=texts.rub(owner_price)
             )
         )
         return
+    # Цена клиента франшизы = цена владельца + %-наценка мерчанта (для головного — равна).
+    async with db.session() as session:
+        svid = data.get("svid")
+        price = await mprice_service.markup_price(session, merchant_id, svid, owner_price)
     amt_str = _fmt_amount(amount)
-    await state.update_data(amount=amt_str, price=str(price), cost_usd=str(c_usd))
+    await state.update_data(
+        amount=amt_str, price=str(price), owner_price=str(owner_price), cost_usd=str(c_usd)
+    )
     await state.set_state(SteamFlow.confirming)
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text=f"✅ Оплатить {texts.rub(price)}", callback_data="sbuy"))
@@ -743,6 +771,7 @@ async def cb_steam_buy(
     login, currency = data.get("login", ""), data.get("currency", "RUB")
     amount = data.get("amount", "")
     price = Decimal(data.get("price", "0"))
+    owner_price = Decimal(data.get("owner_price", data.get("price", "0")))
     cost_usd = data.get("cost_usd", "0")
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, vid)
@@ -757,7 +786,8 @@ async def cb_steam_buy(
         try:
             order, _codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
-                unit_price=price, quantity=1, merchant_id=merchant_id, fzr=fzr,
+                unit_price=price, quantity=1, merchant_id=merchant_id,
+                owner_unit_price=owner_price, fzr=fzr,
                 topup_fields={
                     "steam_login": login, "amount": amount,
                     "currency": currency, "_cost_usd": cost_usd,
@@ -899,9 +929,16 @@ async def msg_stars_quantity(
     if qty < lo or qty > hi:
         await message.answer(texts.STARS_QTY_RANGE.format(min=lo, max=hi))
         return
-    price = stars_service.price_rub(qty, pps, markup=markup)
+    owner_price = stars_service.price_rub(qty, pps, markup=markup)
     c_usd = stars_service.cost_usd(qty, pps)
-    await state.update_data(qty=qty, price=str(price), cost_usd=str(c_usd))
+    # Цена клиента франшизы = цена владельца + %-наценка мерчанта (для головного — равна).
+    async with db.session() as session:
+        price = await mprice_service.markup_price(
+            session, merchant_id, data.get("stvid"), owner_price
+        )
+    await state.update_data(
+        qty=qty, price=str(price), owner_price=str(owner_price), cost_usd=str(c_usd)
+    )
     await state.set_state(StarsFlow.confirming)
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text=f"✅ Оплатить {texts.rub(price)}", callback_data="stbuy"))
@@ -925,6 +962,7 @@ async def cb_stars_buy(
     uname = data.get("username", "")
     qty = int(data.get("qty", 0))
     price = Decimal(data.get("price", "0"))
+    owner_price = Decimal(data.get("owner_price", data.get("price", "0")))
     cost_usd = data.get("cost_usd", "0")
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, vid)
@@ -939,7 +977,8 @@ async def cb_stars_buy(
         try:
             order, _codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
-                unit_price=price, quantity=1, merchant_id=merchant_id, fzr=fzr,
+                unit_price=price, quantity=1, merchant_id=merchant_id,
+                owner_unit_price=owner_price, fzr=fzr,
                 topup_fields={
                     "telegram_username": uname, "stars_qty": qty,
                     "_cost_usd": cost_usd,
@@ -1020,7 +1059,10 @@ async def cb_confirm(
         is_vpn = variant.source == "vpnresellers"
         if is_vpn:
             qty = 1
-        unit_price = price_rub_value(variant, config.default_markup_percent)
+        owner_price = price_rub_value(variant, config.default_markup_percent)
+        unit_price = await mprice_service.client_price(
+            session, merchant_id, variant.id, owner_price
+        )
         await order_service.ensure_user(
             session,
             user_id=call.from_user.id,
@@ -1036,6 +1078,7 @@ async def cb_confirm(
                 unit_price=unit_price,
                 quantity=qty,
                 merchant_id=merchant_id,
+                owner_unit_price=owner_price,
                 fzr=fzr,
                 vpn=vpn,
                 public_base_url=config.public_base_url,

@@ -24,6 +24,7 @@ from fazercard import FazerCardClient, FazerCardError
 
 from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, User, Variant
 from . import balance as balance_service
+from . import mprice as mprice_service
 from . import referral as referral_service
 from . import settings as settings_service
 from . import stock as stock_service
@@ -110,6 +111,7 @@ async def purchase_from_balance(
     unit_price: Decimal,
     quantity: int,
     merchant_id: int = HEAD_MERCHANT_ID,
+    owner_unit_price: Optional[Decimal] = None,
     fzr: Optional[FazerCardClient] = None,
     topup_fields: Optional[dict] = None,
     vpn=None,
@@ -139,6 +141,13 @@ async def purchase_from_balance(
 
     total = Decimal(unit_price) * quantity
 
+    # Маржа мерчанта: (цена клиента − цена владельца) × кол-во. Для головного
+    # (owner_unit_price не передан или равен unit_price) маржа = 0.
+    owner_total = Decimal(owner_unit_price if owner_unit_price is not None else unit_price) * quantity
+    margin = total - owner_total
+    if margin < 0:
+        margin = Decimal(0)
+
     order = await create_order(
         session,
         user_id=user_id,
@@ -147,10 +156,15 @@ async def purchase_from_balance(
         quantity=quantity,
         merchant_id=merchant_id,
     )
+    order.merchant_margin = margin
 
     # 1) Списываем деньги (атомарно, только если хватает).
     if not await balance_service.try_debit(session, user_id, total, merchant_id=merchant_id):
         raise InsufficientBalance()
+
+    # Начисляем маржу на баланс заработка мерчанта в той же транзакции: если
+    # выдача ниже упадёт с исключением — вызывающий откатит сессию и начисление.
+    await mprice_service.accrue_earnings(session, merchant_id, margin)
 
     # 2) Выдача по источнику.
     if variant.source == "fazercard":
@@ -444,10 +458,11 @@ async def deliver_topup_manual(session: AsyncSession, order: Order) -> None:
 async def cancel_order_manual(session: AsyncSession, order: Order) -> Decimal:
     """Отменить заказ: вернуть деньги на баланс покупателя. Возвращает сумму."""
     refund = Decimal(order.price_usd) * (order.quantity or 1)
-    await balance_service.credit(session, order.user_id, refund)
+    await balance_service.credit(session, order.user_id, refund, merchant_id=order.merchant_id)
     order.status = OrderStatus.REFUNDED
     await session.flush()
     await referral_service.reverse_for_order(session, order)
+    await mprice_service.reverse_earnings(session, order.merchant_id, order.merchant_margin or Decimal(0))
     return refund
 
 

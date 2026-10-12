@@ -297,6 +297,10 @@ class Order(Base):
     # Фактическая себестоимость заказа в USD (для товаров с плавающей закупкой,
     # напр. Steam-пополнение). None — считать по variant.cost_usd × quantity.
     cost_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+    # Маржа мерчанта по заказу (₽): (цена клиента − цена владельца) × кол-во.
+    # Для головного (merchant_id=0) = 0. Начисляется на баланс заработка при
+    # покупке и сторнируется при возврате.
+    merchant_margin: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
