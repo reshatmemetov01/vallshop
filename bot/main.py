@@ -290,9 +290,12 @@ async def main() -> None:
     dp["bots_by_merchant"] = bots_by_merchant
 
     from .middlewares import BlockedMiddleware, MerchantMiddleware
-    # MerchantMiddleware — первым: кладёт merchant_id, который использует Blocked.
-    dp.message.middleware(MerchantMiddleware(bot_to_merchant))
-    dp.callback_query.middleware(MerchantMiddleware(bot_to_merchant))
+    # MerchantMiddleware — ВНЕШНИЙ (outer): кладёт merchant_id ДО фильтров роутеров,
+    # иначе фильтры (напр. доступ в кабинет мерчанта) видят только дефолт 0.
+    # Внутренний middleware выполняется после фильтров — для merchant_id это поздно.
+    dp.message.outer_middleware(MerchantMiddleware(bot_to_merchant))
+    dp.callback_query.outer_middleware(MerchantMiddleware(bot_to_merchant))
+    # Blocked — внутренний: merchant_id уже проставлен внешним MerchantMiddleware.
     dp.message.middleware(BlockedMiddleware())
     dp.callback_query.middleware(BlockedMiddleware())
 

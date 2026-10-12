@@ -7,6 +7,7 @@ import pytest
 
 from bot.db import Database, HEAD_MERCHANT_ID, Merchant
 from bot.handlers.merchant_admin import IsMerchantAdminCb
+from bot.middlewares import MerchantMiddleware
 from bot.services import merchants as ms
 
 
@@ -53,3 +54,22 @@ async def test_cabinet_filter(db):
     assert await flt(_call(999), db, merchant_id=mid) is False
     # тот же владелец, но головной бот — нет кабинета
     assert await flt(_call(555), db, merchant_id=HEAD_MERCHANT_ID) is False
+
+
+@pytest.mark.asyncio
+async def test_merchant_id_reaches_filter_via_outer_middleware(db):
+    # Регрессия: merchant_id должен быть в data ДО фильтра (outer middleware),
+    # иначе кнопка кабинета «грузит» и не открывается.
+    mid = await _merchant(db, admin_user_id=555)
+    mw = MerchantMiddleware({222: mid})       # бот 222 → эта франшиза
+    captured = {}
+
+    async def handler(event, data):
+        flt = IsMerchantAdminCb()
+        captured["ok"] = await flt(event, data["db"], data.get("merchant_id", HEAD_MERCHANT_ID))
+        return "done"
+
+    data = {"bot": SimpleNamespace(id=222), "db": db}
+    await mw(handler, _call(555), data)
+    assert data["merchant_id"] == mid          # middleware проставил merchant_id
+    assert captured["ok"] is True              # фильтр увидел его и дал доступ
