@@ -13,7 +13,7 @@ from aiogram.types import InlineKeyboardButton
 
 from ..config import BotConfig
 from ..db import Database
-from ..db.models import Order, OrderStatus, Variant
+from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, Variant
 from ..services import menu as menu_service
 from ..services import notify as notify_service
 from ..services import reviews as review_service
@@ -91,6 +91,7 @@ async def msg_review_text(
             amount_usd=Decimal(order.price_usd) * (order.quantity or 1),
             rating=rating,
             text=text,
+            merchant_id=order.merchant_id,
         )
         review_id = review.id
         await session.commit()
@@ -125,10 +126,15 @@ def _reviews_page_kb(page: int, total_pages: int) -> "InlineKeyboardBuilder":
     return kb_b
 
 
-async def _show_reviews(call: CallbackQuery, db: Database, page: int) -> None:
+async def _show_reviews(
+    call: CallbackQuery, db: Database, page: int,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
-        total = await review_service.count_published(session)
-        items = await review_service.list_published(session, page=page)
+        total = await review_service.count_published(session, merchant_id)
+        items = await review_service.list_published(
+            session, page=page, merchant_id=merchant_id
+        )
     if total == 0:
         caption = f"{texts.REVIEWS_TITLE}\n\n{texts.REVIEWS_EMPTY}"
         kb_b = InlineKeyboardBuilder()
@@ -150,14 +156,19 @@ async def _show_reviews(call: CallbackQuery, db: Database, page: int) -> None:
 
 
 @router.callback_query(F.data == "reviews")
-async def cb_reviews(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_reviews(
+    call: CallbackQuery, db: Database, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     await state.clear()
-    await _show_reviews(call, db, 0)
+    await _show_reviews(call, db, 0, merchant_id)
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("revpage:"))
-async def cb_reviews_page(call: CallbackQuery, db: Database) -> None:
+async def cb_reviews_page(
+    call: CallbackQuery, db: Database, merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     page = int(call.data.split(":", 1)[1])
-    await _show_reviews(call, db, max(0, page))
+    await _show_reviews(call, db, max(0, page), merchant_id)
     await call.answer()

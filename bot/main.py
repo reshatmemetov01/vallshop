@@ -27,7 +27,7 @@ from .services.poller import (
 log = logging.getLogger("vallshop")
 
 
-async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, paydex=None) -> None:
+async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, paydex=None, bots=None) -> None:
     """Запустить aiohttp-сервер вебхуков, если задан PUBLIC_BASE_URL."""
     from aiohttp import web
 
@@ -35,7 +35,7 @@ async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, payd
 
     app = build_app(
         bot=bot, db=db, provider=provider, liog=liog, config=config,
-        payhot=payhot, paydex=paydex,
+        payhot=payhot, paydex=paydex, bots=bots,
     )
     runner = web.AppRunner(app)
     await runner.setup()
@@ -306,12 +306,16 @@ async def main() -> None:
             log.warning("Не удалось установить команды меню (bot id=%s)", b.id)
 
     tasks = [
-        asyncio.create_task(run_fulfillment_poller(bot, db, liog, fzr, config)),
-        asyncio.create_task(run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex)),
+        asyncio.create_task(
+            run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant)
+        ),
+        asyncio.create_task(
+            run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex, bots=bots_by_merchant)
+        ),
         asyncio.create_task(run_smartprice_poller(bot, db, fzr, config)),
     ]
     if config.public_base_url:
-        await _run_web(config, bot, db, provider, liog, payhot, paydex)
+        await _run_web(config, bot, db, provider, liog, payhot, paydex, bots=bots_by_merchant)
 
     log.info(
         "Старт. Ботов: %s (франшиз: %s). Провайдер оплаты: %s. Админы: %s",

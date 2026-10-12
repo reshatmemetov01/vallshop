@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 
 from ..config import BotConfig
 from ..db import Database
-from ..db.models import Order, OrderStatus, TopUp, TopUpStatus, Variant
+from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..payments import PaymentProvider
 from ..services import balance as balance_service
 from ..services import orders as order_service
@@ -60,10 +60,14 @@ def _status_ru(status: str) -> str:
     }.get(str(status), str(status))
 
 
-async def _profile_caption(session, config: BotConfig, user_id: int) -> str:
-    balance = await balance_service.get_balance(session, user_id)
+async def _profile_caption(
+    session, config: BotConfig, user_id: int, merchant_id: int = HEAD_MERCHANT_ID
+) -> str:
+    balance = await balance_service.get_balance(session, user_id, merchant_id)
     orders = await session.scalar(
-        select(func.count()).select_from(Order).where(Order.user_id == user_id)
+        select(func.count()).select_from(Order).where(
+            Order.user_id == user_id, Order.merchant_id == merchant_id
+        )
     )
     return texts.PROFILE.format(
         user_id=user_id,
@@ -72,38 +76,47 @@ async def _profile_caption(session, config: BotConfig, user_id: int) -> str:
     )
 
 
-async def _show_profile(event, db: Database, config: BotConfig, user_id: int) -> None:
+async def _show_profile(
+    event, db: Database, config: BotConfig, user_id: int,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
-        caption = await _profile_caption(session, config, user_id)
+        caption = await _profile_caption(session, config, user_id, merchant_id)
     await render(event, banner="profile", caption=caption, reply_markup=kb.profile_kb())
 
 
 @router.message(F.text == "🟢 Мой профиль")
-async def msg_profile(message: Message, db: Database, config: BotConfig) -> None:
+async def msg_profile(
+    message: Message, db: Database, config: BotConfig,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
         await order_service.ensure_user(
-            session, message.from_user.id, message.from_user.username, message.from_user.full_name
+            session, message.from_user.id, message.from_user.username,
+            message.from_user.full_name, merchant_id,
         )
         await session.commit()
-    await _show_profile(message, db, config, message.from_user.id)
+    await _show_profile(message, db, config, message.from_user.id, merchant_id)
 
 
 @router.callback_query(F.data == "profile")
 async def cb_profile(
-    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     await state.clear()
-    await _show_profile(call, db, config, call.from_user.id)
+    await _show_profile(call, db, config, call.from_user.id, merchant_id)
     await call.answer()
 
 
 @router.callback_query(F.data == "balance")
 async def cb_balance(
-    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     await state.clear()
     async with db.session() as session:
-        balance = await balance_service.get_balance(session, call.from_user.id)
+        balance = await balance_service.get_balance(session, call.from_user.id, merchant_id)
     await render(
         call,
         banner="profile",
@@ -215,6 +228,7 @@ async def msg_topup_amount(
     state: FSMContext,
     payhot: PaymentProvider = None,
     paydex: PaymentProvider = None,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     data = await state.get_data()
     kind = data.get("kind", "usdt")
@@ -241,11 +255,12 @@ async def msg_topup_amount(
         async with db.session() as session:
             await order_service.ensure_user(
                 session, message.from_user.id, message.from_user.username,
-                message.from_user.full_name,
+                message.from_user.full_name, merchant_id,
             )
             method_label = await paymethods_service.label(session, method)
             topup = await balance_service.create_topup(
-                session, user_id=message.from_user.id, amount_usd=amount
+                session, user_id=message.from_user.id, amount_usd=amount,
+                merchant_id=merchant_id,
             )
             notify_url = (
                 config.paydex_notify_url if pay.name == "paydex"
@@ -295,11 +310,13 @@ async def msg_topup_amount(
 
     async with db.session() as session:
         await order_service.ensure_user(
-            session, message.from_user.id, message.from_user.username, message.from_user.full_name
+            session, message.from_user.id, message.from_user.username,
+            message.from_user.full_name, merchant_id,
         )
         # amount_usd хранит сумму ЗАЧИСЛЕНИЯ — теперь это рубли.
         topup = await balance_service.create_topup(
-            session, user_id=message.from_user.id, amount_usd=amount
+            session, user_id=message.from_user.id, amount_usd=amount,
+            merchant_id=merchant_id,
         )
         try:
             invoice = await provider.create_invoice(
@@ -353,8 +370,9 @@ async def cb_topup_check(
             await call.answer("Пополнение не найдено", show_alert=True)
             return
 
+        mid = topup.merchant_id
         if topup.status == TopUpStatus.PAID:
-            balance = await balance_service.get_balance(session, call.from_user.id)
+            balance = await balance_service.get_balance(session, call.from_user.id, mid)
             await render(
                 call, banner="profile",
                 caption=texts.TOPUP_SUCCESS.format(
@@ -397,9 +415,9 @@ async def cb_topup_check(
         topup.status = TopUpStatus.PAID
         topup.tx_hash = update.tx_hash
         topup.paid_at = datetime.utcnow()
-        await balance_service.credit(session, call.from_user.id, topup.amount_usd)
+        await balance_service.credit(session, call.from_user.id, topup.amount_usd, merchant_id=mid)
         await session.commit()
-        balance = await balance_service.get_balance(session, call.from_user.id)
+        balance = await balance_service.get_balance(session, call.from_user.id, mid)
 
     await render(
         call,
@@ -415,12 +433,15 @@ async def cb_topup_check(
 
 # ── Списки ─────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "myorders")
-async def cb_my_orders(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_my_orders(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
         rows = await session.execute(
             select(Order, Variant.title)
             .join(Variant, Variant.id == Order.variant_id)
-            .where(Order.user_id == call.from_user.id)
+            .where(Order.user_id == call.from_user.id, Order.merchant_id == merchant_id)
             .order_by(Order.id.desc())
             .limit(15)
         )
@@ -447,9 +468,12 @@ async def cb_my_orders(call: CallbackQuery, db: Database, config: BotConfig) -> 
 
 
 @router.callback_query(F.data == "mytopups")
-async def cb_my_topups(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_my_topups(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
-        topups = await balance_service.list_topups(session, call.from_user.id)
+        topups = await balance_service.list_topups(session, call.from_user.id, merchant_id)
 
     if not topups:
         caption = texts.MY_TOPUPS_TITLE + "\n\n" + texts.NO_TOPUPS

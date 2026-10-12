@@ -30,6 +30,7 @@ log = logging.getLogger("vallshop.web")
 def build_app(
     *, bot: Bot, db: Database, provider: PaymentProvider, liog: LioGamesClient,
     config=None, payhot: PaymentProvider = None, paydex: PaymentProvider = None,
+    bots: dict | None = None,
 ) -> web.Application:
     app = web.Application()
 
@@ -73,7 +74,7 @@ def build_app(
         update = provider.parse_webhook(raw)
         # Обработка идемпотентна. BoltUtil требует РОВНО {"status":"SUCCESS"},
         # иначе продолжит повторные попытки доставки.
-        await _apply_payment(bot, db, liog, update)
+        await _apply_payment(bot, db, liog, update, bots)
         return web.json_response({"status": "SUCCESS"})
 
     async def payhot_webhook(request: web.Request) -> web.Response:
@@ -84,7 +85,7 @@ def build_app(
             log.warning("PayHot: вебхук с неверной подписью отклонён")
             return web.json_response({"ok": False}, status=403)
         update = payhot.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update)
+        await _apply_payment(bot, db, liog, update, bots)
         return web.json_response({"ok": True})
 
     async def paydex_webhook(request: web.Request) -> web.Response:
@@ -96,7 +97,7 @@ def build_app(
             # Paydex: при неверной подписи ожидает 401.
             return web.json_response({"ok": False}, status=401)
         update = paydex.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update)
+        await _apply_payment(bot, db, liog, update, bots)
         return web.json_response({"ok": True})
 
     app.router.add_get("/healthz", healthz)
@@ -115,20 +116,27 @@ def build_app(
     return app
 
 
-async def _apply_payment(bot, db: Database, liog, update) -> None:
+def _pick_bot(bots, merchant_id, default):
+    """Бот франшизы для уведомления клиента (по merchant_id), иначе головной."""
+    if bots:
+        return bots.get(merchant_id, default)
+    return default
+
+
+async def _apply_payment(bot, db: Database, liog, update, bots=None) -> None:
     if update.status != "paid":
         return
 
     # Пополнение баланса? (client_ref вида tu-...)
     ref = update.client_ref or ""
     if ref.startswith("tu-"):
-        await _apply_topup(bot, db, update)
+        await _apply_topup(bot, db, update, bots)
         return
 
-    await _apply_order_payment(bot, db, liog, update)
+    await _apply_order_payment(bot, db, liog, update, bots)
 
 
-async def _apply_topup(bot, db: Database, update) -> None:
+async def _apply_topup(bot, db: Database, update, bots=None) -> None:
     async with db.session() as session:
         topup = await balance_service.get_topup_by_ref(session, update.client_ref)
         if topup is None or topup.status == TopUpStatus.PAID:
@@ -147,7 +155,7 @@ async def _apply_topup(bot, db: Database, update) -> None:
         balance = await balance_service.get_balance(session, user_id, merchant_id=merchant_id)
 
     await _notify(
-        bot,
+        _pick_bot(bots, merchant_id, bot),
         user_id,
         texts.TOPUP_SUCCESS.format(
             credit=texts.rub(credit), balance=texts.rub(balance)
@@ -155,7 +163,7 @@ async def _apply_topup(bot, db: Database, update) -> None:
     )
 
 
-async def _apply_order_payment(bot, db: Database, liog, update) -> None:
+async def _apply_order_payment(bot, db: Database, liog, update, bots=None) -> None:
     async with db.session() as session:
         payment = None
         if update.provider_order_id:
@@ -192,16 +200,18 @@ async def _apply_order_payment(bot, db: Database, liog, update) -> None:
         variant = await catalog_service.get_variant(session, order.variant_id)
         status = await order_service.fulfill(session, order, variant, liog)
         user_id = order.user_id
+        mid = order.merchant_id
         code = order.delivery_code
         ref = order.client_ref
         await session.commit()
 
+    cbot = _pick_bot(bots, mid, bot)
     if status == OrderStatus.COMPLETED and code:
-        await _notify(bot, user_id, texts.DELIVERY_SUCCESS.format(code=code))
+        await _notify(cbot, user_id, texts.DELIVERY_SUCCESS.format(code=code))
     elif status == OrderStatus.FULFILLING:
-        await _notify(bot, user_id, texts.FULFILLING)
+        await _notify(cbot, user_id, texts.FULFILLING)
     else:
-        await _notify(bot, user_id, texts.FULFILL_FAILED.format(ref=ref))
+        await _notify(cbot, user_id, texts.FULFILL_FAILED.format(ref=ref))
 
 
 async def _notify(bot: Bot, user_id: int, text: str) -> None:

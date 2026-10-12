@@ -39,6 +39,13 @@ FULFILL_STUCK_MINUTES = 30
 _STUCK_SENTINEL = "⏳ завис в обработке у поставщика (нет финального статуса)"
 
 
+def _pick_bot(bots, merchant_id, default):
+    """Бот франшизы для уведомления клиента (по merchant_id), иначе головной."""
+    if bots:
+        return bots.get(merchant_id, default)
+    return default
+
+
 async def run_fulfillment_poller(
     bot: Bot,
     db: Database,
@@ -46,11 +53,12 @@ async def run_fulfillment_poller(
     fzr: FazerCardClient | None = None,
     config: BotConfig | None = None,
     interval: float = 20.0,
+    bots: dict | None = None,
 ) -> None:
     """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard)."""
     while True:
         try:
-            await _tick(bot, db, liog, fzr, config)
+            await _tick(bot, db, liog, fzr, config, bots)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — поллер не должен падать
@@ -64,6 +72,7 @@ async def _tick(
     liog: LioGamesClient,
     fzr: FazerCardClient | None,
     config: BotConfig | None = None,
+    bots: dict | None = None,
 ) -> None:
     async with db.session() as session:
         orders = list(
@@ -121,6 +130,7 @@ async def _tick(
                 status = await order_service.poll_topup(session, fresh, liog)
 
             user_id = fresh.user_id
+            merchant_id = fresh.merchant_id
             code = fresh.delivery_code
             ref = fresh.client_ref
             order_id = fresh.id
@@ -141,17 +151,18 @@ async def _tick(
         admin_ids = list(config.admin_ids) if config else []
         amount_str = texts.rub(refund_amount)
         done_kb = kb.order_done_kb(order_id, variant_id)
+        cbot = _pick_bot(bots, merchant_id, bot)  # уведомление клиенту — через бота его магазина
         if status == OrderStatus.COMPLETED and code:
             await _notify(
-                bot, user_id, texts.DELIVERY_SUCCESS.format(code=code), done_kb
+                cbot, user_id, texts.DELIVERY_SUCCESS.format(code=code), done_kb
             )
         elif status == OrderStatus.COMPLETED:
             # Доставка на аккаунт/username без кода (топап/Telegram) — настраиваемый текст.
             if delivered_text:
-                await _notify(bot, user_id, delivered_text, done_kb)
+                await _notify(cbot, user_id, delivered_text, done_kb)
         elif status == OrderStatus.REFUNDED and refunded:
             await _notify(
-                bot, user_id,
+                cbot, user_id,
                 settings_service.fmt(
                     refund_text or texts.FULFILL_REFUNDED, ref=ref, amount=amount_str
                 ),
@@ -169,7 +180,7 @@ async def _tick(
                 "Откройте «Админ-панель → Текущие заказы → Не выполненные».",
             )
         elif status == OrderStatus.FAILED:
-            await _notify(bot, user_id, texts.FULFILL_FAILED.format(ref=ref))
+            await _notify(cbot, user_id, texts.FULFILL_FAILED.format(ref=ref))
             await notify_service.notify_admins(
                 bot, admin_ids,
                 f"⚠️ Заказ #{order_id} (<b>{item_name}</b>): ошибка выдачи.\n"
@@ -210,7 +221,8 @@ async def run_smartprice_poller(
 
 
 async def run_topup_poller(
-    bot: Bot, db: Database, provider, payhot=None, paydex=None, interval: float = 30.0
+    bot: Bot, db: Database, provider, payhot=None, paydex=None, interval: float = 30.0,
+    bots: dict | None = None,
 ) -> None:
     """Фоновая авто-проверка пополнений (подстраховка вебхука).
 
@@ -219,7 +231,7 @@ async def run_topup_poller(
     идемпотентны (повтор с вебхуком безопасен)."""
     while True:
         try:
-            await _topup_tick(bot, db, provider, payhot, paydex)
+            await _topup_tick(bot, db, provider, payhot, paydex, bots)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -236,7 +248,7 @@ def _provider_and_ref(topup, provider, payhot, paydex=None):
     return provider, topup.client_ref
 
 
-async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None) -> None:
+async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, bots: dict | None = None) -> None:
     async with db.session() as session:
         pending = list(
             await session.scalars(
@@ -272,7 +284,7 @@ async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None
             balance = await balance_service.get_balance(session, user_id, merchant_id=mid)
 
         await _notify(
-            bot, user_id,
+            _pick_bot(bots, mid, bot), user_id,
             texts.TOPUP_SUCCESS.format(
                 credit=texts.rub(credit), balance=texts.rub(balance)
             ),

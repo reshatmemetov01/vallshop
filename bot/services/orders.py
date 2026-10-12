@@ -86,10 +86,12 @@ async def create_order(
     variant: Variant,
     price_usd: Decimal,
     quantity: int = 1,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> Order:
     order = Order(
         client_ref=new_client_ref(),
         user_id=user_id,
+        merchant_id=merchant_id,
         variant_id=variant.id,
         price_usd=price_usd,
         quantity=quantity,
@@ -107,6 +109,7 @@ async def purchase_from_balance(
     variant: Variant,
     unit_price: Decimal,
     quantity: int,
+    merchant_id: int = HEAD_MERCHANT_ID,
     fzr: Optional[FazerCardClient] = None,
     topup_fields: Optional[dict] = None,
     vpn=None,
@@ -142,10 +145,11 @@ async def purchase_from_balance(
         variant=variant,
         price_usd=unit_price,
         quantity=quantity,
+        merchant_id=merchant_id,
     )
 
     # 1) Списываем деньги (атомарно, только если хватает).
-    if not await balance_service.try_debit(session, user_id, total):
+    if not await balance_service.try_debit(session, user_id, total, merchant_id=merchant_id):
         raise InsufficientBalance()
 
     # 2) Выдача по источнику.

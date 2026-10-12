@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import Review
+from ..db.models import HEAD_MERCHANT_ID, Review
 
 PAGE_SIZE = 5
 
@@ -24,9 +24,11 @@ async def create_review(
     amount_usd: Optional[Decimal],
     rating: int,
     text: str,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> Review:
     review = Review(
         order_id=order_id,
+        merchant_id=merchant_id,
         user_id=user_id,
         username=username,
         variant_id=variant_id,
@@ -74,22 +76,27 @@ async def list_all(session: AsyncSession, limit: int = 50) -> List[Review]:
     )
 
 
-async def count_published(session: AsyncSession) -> int:
+async def count_published(
+    session: AsyncSession, merchant_id: int = HEAD_MERCHANT_ID
+) -> int:
     return int(
         await session.scalar(
-            select(func.count()).select_from(Review).where(Review.status == "published")
+            select(func.count()).select_from(Review).where(
+                Review.status == "published", Review.merchant_id == merchant_id
+            )
         )
         or 0
     )
 
 
 async def list_published(
-    session: AsyncSession, *, page: int = 0, page_size: int = PAGE_SIZE
+    session: AsyncSession, *, page: int = 0, page_size: int = PAGE_SIZE,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> List[Review]:
     return list(
         await session.scalars(
             select(Review)
-            .where(Review.status == "published")
+            .where(Review.status == "published", Review.merchant_id == merchant_id)
             .order_by(Review.id.desc())
             .offset(page * page_size)
             .limit(page_size)

@@ -13,7 +13,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import Order, OrderStatus, ReferralEarning, User
+from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, ReferralEarning, User
 from .users import get_user
 from . import balance as balance_service
 from . import settings as settings_service
@@ -55,7 +55,7 @@ async def bind_referral(session: AsyncSession, user: User, referrer_id: int) -> 
         return False
     if referrer_id == user.id:
         return False
-    referrer = await get_user(session, referrer_id)
+    referrer = await get_user(session, referrer_id, user.merchant_id)
     if referrer is None:
         return False
     user.referred_by = referrer_id
@@ -77,7 +77,7 @@ async def accrue_for_order(session: AsyncSession, order: Order) -> None:
         return
     if not await settings_service.get_bool(session, settings_service.REF_ENABLED, True):
         return
-    buyer = await get_user(session, order.user_id)
+    buyer = await get_user(session, order.user_id, order.merchant_id)
     if not buyer or not buyer.referred_by:
         return
     # Идемпотентность: по одному заказу — одно начисление.
@@ -89,7 +89,7 @@ async def accrue_for_order(session: AsyncSession, order: Order) -> None:
     )
     if exists:
         return
-    referrer = await get_user(session, buyer.referred_by)
+    referrer = await get_user(session, buyer.referred_by, order.merchant_id)
     if referrer is None:
         return
     percent = await _percent(session)
@@ -102,6 +102,7 @@ async def accrue_for_order(session: AsyncSession, order: Order) -> None:
     referrer.ref_balance_rub = Decimal(referrer.ref_balance_rub or 0) + amount
     referrer.ref_earned_rub = Decimal(referrer.ref_earned_rub or 0) + amount
     session.add(ReferralEarning(
+        merchant_id=order.merchant_id,
         referrer_id=referrer.id, referral_id=buyer.id, order_id=order.id,
         kind="purchase_percent", currency=currency, amount=amount, status="credited",
     ))
@@ -118,7 +119,7 @@ async def reverse_for_order(session: AsyncSession, order: Order) -> None:
     )
     if earning is None:
         return
-    referrer = await get_user(session, earning.referrer_id)
+    referrer = await get_user(session, earning.referrer_id, earning.merchant_id)
     if referrer is not None:
         if earning.currency == "RUB":
             cur = Decimal(referrer.ref_balance_rub or 0) - Decimal(earning.amount)
@@ -131,14 +132,15 @@ async def reverse_for_order(session: AsyncSession, order: Order) -> None:
 
 
 async def transfer_to_balance(
-    session: AsyncSession, user_id: int, currency: str = "RUB"
+    session: AsyncSession, user_id: int, currency: str = "RUB",
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> tuple[bool, Decimal, Decimal]:
     """Перевести весь реф-баланс на основной. Возвращает (ok, amount, need_min).
 
     Основной баланс магазина — рублёвый, поэтому перевод идёт с ₽-реф-баланса
     на основной ₽-баланс.
     """
-    user = await get_user(session, user_id)
+    user = await get_user(session, user_id, merchant_id)
     if user is None:
         return False, Decimal(0), Decimal(0)
     if currency == "USDT":
@@ -155,21 +157,26 @@ async def transfer_to_balance(
         user.ref_balance_usdt = Decimal(0)
     else:
         user.ref_balance_rub = Decimal(0)
-    await balance_service.credit(session, user_id, bal)  # основной баланс в ₽
+    await balance_service.credit(session, user_id, bal, merchant_id=merchant_id)  # основной ₽-баланс
     await session.flush()
     return True, bal, minv
 
 
-async def stats(session: AsyncSession, user_id: int) -> dict:
+async def stats(
+    session: AsyncSession, user_id: int, merchant_id: int = HEAD_MERCHANT_ID
+) -> dict:
     invited = int(await session.scalar(
-        select(func.count()).select_from(User).where(User.referred_by == user_id)
+        select(func.count()).select_from(User).where(
+            User.referred_by == user_id, User.merchant_id == merchant_id
+        )
     ) or 0)
     with_purchase = int(await session.scalar(
         select(func.count(func.distinct(ReferralEarning.referral_id)))
         .where(ReferralEarning.referrer_id == user_id,
+               ReferralEarning.merchant_id == merchant_id,
                ReferralEarning.status == "credited")
     ) or 0)
-    user = await get_user(session, user_id)
+    user = await get_user(session, user_id, merchant_id)
     return {
         "invited": invited,
         "with_purchase": with_purchase,

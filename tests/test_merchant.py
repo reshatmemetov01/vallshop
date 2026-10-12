@@ -119,6 +119,34 @@ async def test_migration_rebuilds_users_composite_pk(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_purchase_scoped_to_merchant(db):
+    from bot.services import orders as order_service
+    from bot.services import stock as stock_service
+    async with db.session() as s:
+        p = Product(game="X", title="T"); s.add(p); await s.flush()
+        v = Variant(product_id=p.id, title="code", liog_product_id=1, liog_variation_id=2,
+                    cost_usd=Decimal("1.00"))
+        s.add(v); await s.flush()
+        await stock_service.add_codes(s, v.id, ["CODE-1"])
+        # один и тот же Telegram id у двух мерчантов, у каждого свой баланс
+        s.add(User(id=7, merchant_id=0, balance=Decimal("100")))
+        s.add(User(id=7, merchant_id=1, balance=Decimal("100")))
+        await s.commit()
+        vid = v.id
+    async with db.session() as s:
+        v = await s.get(Variant, vid)
+        order, codes = await order_service.purchase_from_balance(
+            s, user_id=7, variant=v, unit_price=Decimal("50"), quantity=1, merchant_id=1,
+        )
+        await s.commit()
+        assert order.merchant_id == 1 and codes == ["CODE-1"]
+    async with db.session() as s:
+        # списалось у мерчанта 1, баланс головного не тронут
+        assert await bal.get_balance(s, 7, merchant_id=1) == Decimal("50")
+        assert await bal.get_balance(s, 7, merchant_id=0) == Decimal("100")
+
+
+@pytest.mark.asyncio
 async def test_active_merchants_registry(db):
     from bot.services import merchants as ms
     async with db.session() as s:

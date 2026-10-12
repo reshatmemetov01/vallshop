@@ -35,7 +35,7 @@ from ..services import stock as stock_service
 from ..services.balance import get_balance
 from ..services.orders import InsufficientBalance, OutOfStock, SupplierError
 from ..services.pricing import price_label, price_rub_value, sale_price
-from ..db.models import OrderStatus
+from ..db.models import HEAD_MERCHANT_ID, OrderStatus
 from fazercard import FazerCardClient
 from ..ui import render
 from .. import keyboards as kb
@@ -83,18 +83,19 @@ async def _set_menu_keyboard(message: Message) -> None:
 @router.message(CommandStart())
 async def cmd_start(
     message: Message, db: Database, config: BotConfig, state: FSMContext,
-    command: CommandObject = None,
+    command: CommandObject = None, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     await state.clear()
     ref_id = referral_service.parse_ref_payload(command.args if command else None)
     async with db.session() as session:
-        from ..db.models import User as _User
-        is_new = await session.get(_User, message.from_user.id) is None
+        from ..services.users import get_user
+        is_new = await get_user(session, message.from_user.id, merchant_id) is None
         user = await order_service.ensure_user(
             session,
             user_id=message.from_user.id,
             username=message.from_user.username,
             full_name=message.from_user.full_name,
+            merchant_id=merchant_id,
         )
         # Привязываем пригласившего только для новых пользователей.
         if is_new and ref_id:
@@ -287,7 +288,7 @@ async def cb_variant(
 
 async def _render_quantity(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    variant_id: int, qty: int,
+    variant_id: int, qty: int, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, variant_id)
@@ -296,7 +297,7 @@ async def _render_quantity(
             return
         price = price_rub_value(variant, config.default_markup_percent)
         in_stock = await stock_service.available_count(session, variant_id)
-        balance = await get_balance(session, call.from_user.id)
+        balance = await get_balance(session, call.from_user.id, merchant_id)
         ondemand = variant.source == "fazercard"
         is_vpn = variant.source == "vpnresellers"
         live = None
@@ -345,7 +346,7 @@ async def _render_quantity(
 @router.callback_query(F.data.startswith("buy:"))
 async def cb_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -362,15 +363,16 @@ async def cb_buy(
     if needs_fields:
         await _start_topup(call, config, fzr, state, variant)
         return
-    await _render_quantity(call, db, config, fzr, variant_id, 1)
+    await _render_quantity(call, db, config, fzr, variant_id, 1, merchant_id)
 
 
 @router.callback_query(F.data.startswith("qty:"))
 async def cb_qty(
-    call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient
+    call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     _, vid, n = call.data.split(":", 2)
-    await _render_quantity(call, db, config, fzr, int(vid), int(n))
+    await _render_quantity(call, db, config, fzr, int(vid), int(n), merchant_id)
 
 
 def _needs_fields(variant) -> bool:
@@ -496,7 +498,7 @@ async def cb_select_field(call: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(BuyFlow.confirming, F.data == "tbuy")
 async def cb_topup_confirm(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     data = await state.get_data()
     vid, answers = data["vid"], data["answers"]
@@ -508,12 +510,14 @@ async def cb_topup_confirm(
             return
         unit_price = price_rub_value(variant, config.default_markup_percent)
         await order_service.ensure_user(
-            session, call.from_user.id, call.from_user.username, call.from_user.full_name
+            session, call.from_user.id, call.from_user.username,
+            call.from_user.full_name, merchant_id,
         )
         try:
             order, codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
-                unit_price=unit_price, quantity=1, fzr=fzr, topup_fields=answers,
+                unit_price=unit_price, quantity=1, merchant_id=merchant_id,
+                fzr=fzr, topup_fields=answers,
             )
         except InsufficientBalance:
             await session.rollback()
@@ -550,7 +554,7 @@ async def cb_topup_confirm(
         )
         await session.commit()
         total = unit_price
-        balance = await get_balance(session, call.from_user.id)
+        balance = await get_balance(session, call.from_user.id, merchant_id)
         item_name = variant.title
 
     if status == OrderStatus.NEEDS_ACTION:
@@ -687,7 +691,8 @@ async def cb_steam_currency(call: CallbackQuery, db: Database, state: FSMContext
 
 @router.message(SteamFlow.amount)
 async def msg_steam_amount(
-    message: Message, db: Database, fzr: FazerCardClient, state: FSMContext
+    message: Message, db: Database, fzr: FazerCardClient, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     raw = (message.text or "").strip().replace(",", ".").replace(" ", "")
     try:
@@ -703,7 +708,7 @@ async def msg_steam_amount(
         fzr_rates = await steam_service.get_fzr_rates(fzr)
         markup = await steam_service.get_markup(session)
         lo, hi = await steam_service.get_limits(session)
-        balance = await get_balance(session, message.from_user.id)
+        balance = await get_balance(session, message.from_user.id, merchant_id)
     price = steam_service.price_rub(amount, currency, fzr_rates, markup=markup)
     c_usd = steam_service.cost_usd(amount, currency, fzr_rates)
     if price < lo or price > hi:
@@ -731,7 +736,7 @@ async def msg_steam_amount(
 @router.callback_query(SteamFlow.confirming, F.data == "sbuy")
 async def cb_steam_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     data = await state.get_data()
     vid = data.get("svid")
@@ -746,12 +751,13 @@ async def cb_steam_buy(
             await call.answer("Недоступно", show_alert=True)
             return
         await order_service.ensure_user(
-            session, call.from_user.id, call.from_user.username, call.from_user.full_name
+            session, call.from_user.id, call.from_user.username,
+            call.from_user.full_name, merchant_id,
         )
         try:
             order, _codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
-                unit_price=price, quantity=1, fzr=fzr,
+                unit_price=price, quantity=1, merchant_id=merchant_id, fzr=fzr,
                 topup_fields={
                     "steam_login": login, "amount": amount,
                     "currency": currency, "_cost_usd": cost_usd,
@@ -789,7 +795,7 @@ async def cb_steam_buy(
             session, variant, "pending_text", texts.PENDING_NOTE_DEFAULT
         )
         await session.commit()
-        balance = await get_balance(session, call.from_user.id)
+        balance = await get_balance(session, call.from_user.id, merchant_id)
 
     await state.clear()
     if status == OrderStatus.NEEDS_ACTION:
@@ -872,7 +878,8 @@ async def msg_stars_username(
 
 @router.message(StarsFlow.quantity)
 async def msg_stars_quantity(
-    message: Message, db: Database, fzr: FazerCardClient, state: FSMContext
+    message: Message, db: Database, fzr: FazerCardClient, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     raw = (message.text or "").strip().replace(" ", "")
     try:
@@ -888,7 +895,7 @@ async def msg_stars_quantity(
         pps, api_min, api_max = await stars_service.get_quote(fzr)
         lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
         markup = await stars_service.get_markup(session)
-        balance = await get_balance(session, message.from_user.id)
+        balance = await get_balance(session, message.from_user.id, merchant_id)
     if qty < lo or qty > hi:
         await message.answer(texts.STARS_QTY_RANGE.format(min=lo, max=hi))
         return
@@ -911,7 +918,7 @@ async def msg_stars_quantity(
 @router.callback_query(StarsFlow.confirming, F.data == "stbuy")
 async def cb_stars_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     data = await state.get_data()
     vid = data.get("stvid")
@@ -926,12 +933,13 @@ async def cb_stars_buy(
             await call.answer("Недоступно", show_alert=True)
             return
         await order_service.ensure_user(
-            session, call.from_user.id, call.from_user.username, call.from_user.full_name
+            session, call.from_user.id, call.from_user.username,
+            call.from_user.full_name, merchant_id,
         )
         try:
             order, _codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
-                unit_price=price, quantity=1, fzr=fzr,
+                unit_price=price, quantity=1, merchant_id=merchant_id, fzr=fzr,
                 topup_fields={
                     "telegram_username": uname, "stars_qty": qty,
                     "_cost_usd": cost_usd,
@@ -969,7 +977,7 @@ async def cb_stars_buy(
             session, variant, "pending_text", texts.PENDING_NOTE_DEFAULT
         )
         await session.commit()
-        balance = await get_balance(session, call.from_user.id)
+        balance = await get_balance(session, call.from_user.id, merchant_id)
 
     await state.clear()
     if status == OrderStatus.NEEDS_ACTION:
@@ -998,7 +1006,8 @@ async def cb_stars_buy(
 
 @router.callback_query(F.data.startswith("confirm:"))
 async def cb_confirm(
-    call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient, vpn=None
+    call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
+    vpn=None, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     _, vid, n = call.data.split(":", 2)
     variant_id, qty = int(vid), int(n)
@@ -1017,6 +1026,7 @@ async def cb_confirm(
             user_id=call.from_user.id,
             username=call.from_user.username,
             full_name=call.from_user.full_name,
+            merchant_id=merchant_id,
         )
         try:
             order, codes = await order_service.purchase_from_balance(
@@ -1025,6 +1035,7 @@ async def cb_confirm(
                 variant=variant,
                 unit_price=unit_price,
                 quantity=qty,
+                merchant_id=merchant_id,
                 fzr=fzr,
                 vpn=vpn,
                 public_base_url=config.public_base_url,
@@ -1067,7 +1078,7 @@ async def cb_confirm(
         )
         await session.commit()
         total = unit_price * qty
-        balance = await get_balance(session, call.from_user.id)
+        balance = await get_balance(session, call.from_user.id, merchant_id)
         item_name = variant.title
 
     if needs_action:

@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery
 
 from ..config import BotConfig
 from ..db import Database
+from ..db.models import HEAD_MERCHANT_ID
 from ..services import referral as referral_service
 from ..services import settings as settings_service
 from ..ui import render
@@ -26,7 +27,10 @@ async def cb_earn(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer()
 
 
-async def _referral_screen(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def _referral_screen(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
         enabled = await settings_service.get_bool(
             session, settings_service.REF_ENABLED, True
@@ -35,7 +39,7 @@ async def _referral_screen(call: CallbackQuery, db: Database, config: BotConfig)
             await render(call, banner="main", caption=texts.REFERRAL_DISABLED,
                          reply_markup=kb.earn_kb())
             return
-        st = await referral_service.stats(session, call.from_user.id)
+        st = await referral_service.stats(session, call.from_user.id, merchant_id)
         terms = await referral_service.terms_text(session)
         min_raw = await settings_service.get(session, settings_service.REF_MIN_WD_RUB)
         min_rub = Decimal(min_raw) if min_raw else referral_service.DEFAULT_MIN_RUB
@@ -70,17 +74,23 @@ async def _referral_screen(call: CallbackQuery, db: Database, config: BotConfig)
 
 
 @router.callback_query(F.data == "ref")
-async def cb_ref(call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext) -> None:
+async def cb_ref(
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     await state.clear()
-    await _referral_screen(call, db, config)
+    await _referral_screen(call, db, config, merchant_id)
     await call.answer()
 
 
 @router.callback_query(F.data == "ref_transfer")
-async def cb_ref_transfer(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_ref_transfer(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     async with db.session() as session:
         ok, amount, need = await referral_service.transfer_to_balance(
-            session, call.from_user.id, "RUB"
+            session, call.from_user.id, "RUB", merchant_id
         )
         await session.commit()
     if not ok:
@@ -89,4 +99,4 @@ async def cb_ref_transfer(call: CallbackQuery, db: Database, config: BotConfig) 
         )
         return
     await call.answer(f"Переведено {texts.rub(amount)} на основной баланс ✅", show_alert=True)
-    await _referral_screen(call, db, config)
+    await _referral_screen(call, db, config, merchant_id)
