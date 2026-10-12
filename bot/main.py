@@ -250,10 +250,27 @@ async def main() -> None:
     from vpnresellers import VPNResellersClient
     vpn = VPNResellersClient.from_env()
 
-    bot = Bot(
-        token=config.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    def _make_bot(token: str) -> Bot:
+        return Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+    # Головной бот (merchant_id = 0) + боты активных франшиз.
+    from .db.models import HEAD_MERCHANT_ID
+    from .services import merchants as merchants_service
+
+    bot = _make_bot(config.bot_token)  # головной — для пуллеров/веба/уведомлений
+    bots = [bot]
+    bot_to_merchant = {bot.id: HEAD_MERCHANT_ID}
+    bots_by_merchant = {HEAD_MERCHANT_ID: bot}
+    for m in await merchants_service.active_merchants(db):
+        try:
+            mb = _make_bot(m.bot_token)
+        except Exception:  # noqa: BLE001 — битый токен не должен ронять весь сервис
+            log.warning("Франшиза #%s: не удалось поднять бота (токен?)", m.id)
+            continue
+        bots.append(mb)
+        bot_to_merchant[mb.id] = m.id
+        bots_by_merchant[m.id] = mb
+
     dp = Dispatcher(storage=MemoryStorage())
 
     # Внедрение зависимостей в хендлеры (aiogram прокидывает по имени параметра).
@@ -265,22 +282,28 @@ async def main() -> None:
     dp["liog"] = liog
     dp["fzr"] = fzr
     dp["vpn"] = vpn
+    dp["bots_by_merchant"] = bots_by_merchant
 
-    from .middlewares import BlockedMiddleware
+    from .middlewares import BlockedMiddleware, MerchantMiddleware
+    # MerchantMiddleware — первым: кладёт merchant_id, который использует Blocked.
+    dp.message.middleware(MerchantMiddleware(bot_to_merchant))
+    dp.callback_query.middleware(MerchantMiddleware(bot_to_merchant))
     dp.message.middleware(BlockedMiddleware())
     dp.callback_query.middleware(BlockedMiddleware())
 
     dp.include_router(build_root_router())
 
-    # Команды в меню бота (кнопка «/» у поля ввода).
+    # Команды в меню каждого бота (кнопка «/» у поля ввода).
     from aiogram.types import BotCommand
-    try:
-        await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить / главное меню"),
-            BotCommand(command="menu", description="Открыть меню"),
-        ])
-    except Exception:  # noqa: BLE001
-        log.warning("Не удалось установить команды меню")
+    commands = [
+        BotCommand(command="start", description="Запустить / главное меню"),
+        BotCommand(command="menu", description="Открыть меню"),
+    ]
+    for b in bots:
+        try:
+            await b.set_my_commands(commands)
+        except Exception:  # noqa: BLE001
+            log.warning("Не удалось установить команды меню (bot id=%s)", b.id)
 
     tasks = [
         asyncio.create_task(run_fulfillment_poller(bot, db, liog, fzr, config)),
@@ -291,16 +314,16 @@ async def main() -> None:
         await _run_web(config, bot, db, provider, liog, payhot, paydex)
 
     log.info(
-        "Старт бота. Провайдер оплаты: %s. Админы: %s",
-        provider.name,
-        config.admin_ids,
+        "Старт. Ботов: %s (франшиз: %s). Провайдер оплаты: %s. Админы: %s",
+        len(bots), len(bots) - 1, provider.name, config.admin_ids,
     )
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(*bots)
     finally:
         for t in tasks:
             t.cancel()
-        await bot.session.close()
+        for b in bots:
+            await b.session.close()
         await db.dispose()
 
 

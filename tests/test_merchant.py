@@ -119,6 +119,43 @@ async def test_migration_rebuilds_users_composite_pk(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_active_merchants_registry(db):
+    from bot.services import merchants as ms
+    async with db.session() as s:
+        s.add(Merchant(id=1, title="A", bot_token="111:AAA", status="active"))
+        s.add(Merchant(id=2, title="B", bot_token=None, status="active"))          # нет токена
+        s.add(Merchant(id=3, title="C", bot_token="333:CCC", status="suspended"))  # не активен
+        await s.commit()
+    rows = await ms.active_merchants(db)
+    assert sorted(m.id for m in rows) == [1]  # головной (0), без токена и неактивные — вне списка
+
+
+class _FakeBot:
+    def __init__(self, bot_id):
+        self.id = bot_id
+
+
+@pytest.mark.asyncio
+async def test_merchant_middleware_injects_id():
+    from bot.middlewares import MerchantMiddleware
+    mw = MerchantMiddleware({111: 0, 222: 7})
+    seen = {}
+
+    async def handler(event, data):
+        seen.update(data)
+        return "ok"
+
+    assert await mw(handler, object(), {"bot": _FakeBot(222)}) == "ok"
+    assert seen["merchant_id"] == 7          # известный бот франшизы
+    seen.clear()
+    await mw(handler, object(), {"bot": _FakeBot(999)})
+    assert seen["merchant_id"] == 0          # неизвестный бот → головной
+    seen.clear()
+    await mw(handler, object(), {})
+    assert seen["merchant_id"] == 0          # нет бота → головной
+
+
+@pytest.mark.asyncio
 async def test_migration_adds_merchant_id_to_legacy_db(tmp_path):
     # Старая БД: таблица users без merchant_id и без таблицы merchants.
     dbfile = tmp_path / "legacy.db"
