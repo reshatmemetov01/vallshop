@@ -115,10 +115,12 @@ def _render_menu(menu: str, url_map: Optional[dict] = None):
     return kb
 
 
-def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
+def main_menu_kb(is_admin: bool = False, is_merchant_admin: bool = False) -> InlineKeyboardMarkup:
     kb = _render_menu("main")
     if is_admin:
         kb.row(_b("Админ-панель", callback_data="admin", style="danger", icon=EMOJI["admin"]))
+    if is_merchant_admin:
+        kb.row(_b("🏪 Кабинет франшизы", callback_data="ma_home", style="success"))
     return kb.as_markup()
 
 

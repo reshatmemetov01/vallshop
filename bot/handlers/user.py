@@ -26,6 +26,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..services import catalog as catalog_service
 from ..services import menu as menu_service
+from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
 from ..services import notify as notify_service
 from ..services import referral as referral_service
@@ -114,14 +115,18 @@ async def cmd_start(
         await session.commit()
     await _set_menu_keyboard(message)
     is_admin = config.is_admin(message.from_user.id)
-    await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin))
+    is_madmin = await merchants_service.admin_merchant(db, message.from_user.id, merchant_id) is not None
+    await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin, is_madmin))
 
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message, config: BotConfig) -> None:
+async def cmd_menu(
+    message: Message, db: Database, config: BotConfig, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     await _set_menu_keyboard(message)
     is_admin = config.is_admin(message.from_user.id)
-    await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin))
+    is_madmin = await merchants_service.admin_merchant(db, message.from_user.id, merchant_id) is not None
+    await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin, is_madmin))
 
 
 @router.message(F.text == "🛍 Каталог")
@@ -133,9 +138,12 @@ async def msg_catalog(message: Message, db: Database) -> None:
 
 
 @router.callback_query(F.data == "menu")
-async def cb_menu(call: CallbackQuery, config: BotConfig) -> None:
+async def cb_menu(
+    call: CallbackQuery, db: Database, config: BotConfig, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     is_admin = config.is_admin(call.from_user.id)
-    await render(call, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin))
+    is_madmin = await merchants_service.admin_merchant(db, call.from_user.id, merchant_id) is not None
+    await render(call, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin, is_madmin))
     await call.answer()
 
 

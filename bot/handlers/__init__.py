@@ -15,6 +15,7 @@ from . import (
     admin_ui,
     franchise,
     menu_button,
+    merchant_admin,
     profile,
     referral,
     reviews,
@@ -38,6 +39,7 @@ def build_root_router() -> Router:
     root.include_router(activation.router)
     root.include_router(referral.router)
     root.include_router(franchise.router)
+    root.include_router(merchant_admin.router)
     root.include_router(reviews.router)
     root.include_router(profile.router)
     root.include_router(user.router)

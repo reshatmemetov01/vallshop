@@ -52,6 +52,21 @@ async def merchant_for_admin(db: Database, admin_user_id: int) -> Optional[Merch
         )
 
 
+async def admin_merchant(db: Database, user_id: int, merchant_id: int) -> Optional[Merchant]:
+    """Вернуть франшизу, если ``user_id`` — её владелец в этом боте (иначе None).
+
+    Используется для входа в кабинет мерчанта в его собственном боте: головной
+    (merchant_id = 0) кабинета франшизы не имеет.
+    """
+    if merchant_id == HEAD_MERCHANT_ID:
+        return None
+    async with db.session() as s:
+        m = await s.get(Merchant, merchant_id)
+    if m is not None and m.id != HEAD_MERCHANT_ID and m.admin_user_id == user_id:
+        return m
+    return None
+
+
 async def token_in_use(db: Database, bot_token: str) -> bool:
     async with db.session() as s:
         found = await s.scalar(select(Merchant.id).where(Merchant.bot_token == bot_token))
