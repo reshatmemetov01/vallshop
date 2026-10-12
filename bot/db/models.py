@@ -84,7 +84,29 @@ class Merchant(Base):
     channel: Mapped[Optional[str]] = mapped_column(String(128))      # обязательная подписка
     # "active" | "suspended"
     status: Mapped[str] = mapped_column(String(16), default="active")
+    # Наценка мерчанта по умолчанию (%) поверх цены владельца; применяется к
+    # товарам без индивидуальной цены (см. MerchantVariantPrice).
+    default_markup: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=0, server_default="0")
+    # Баланс заработка мерчанта (₽) — накопленная маржа, доступная к выводу.
+    earnings_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class MerchantVariantPrice(Base):
+    """Цена мерчанта на конкретный номинал (поверх цены владельца).
+
+    ``mode="markup"`` — наценка % от цены владельца; ``mode="fixed"`` — ручная
+    ₽-цена (не ниже цены владельца, см. стоп-лосс в services.mprice).
+    Записи нет → применяется наценка по умолчанию мерчанта (Merchant.default_markup).
+    """
+
+    __tablename__ = "merchant_variant_price"
+
+    merchant_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    variant_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mode: Mapped[str] = mapped_column(String(12), default="markup")  # markup | fixed
+    markup_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    price_rub: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
 
 
 class User(Base):

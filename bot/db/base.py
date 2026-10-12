@@ -82,6 +82,9 @@ class Database:
             ("referral_earnings", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("activation_requests", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("vpn_subscriptions", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            # Франшиза (P1): наценка по умолчанию и баланс заработка мерчанта.
+            ("merchants", "default_markup", "NUMERIC(6,2) NOT NULL DEFAULT 0"),
+            ("merchants", "earnings_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
         ]
         added_source = False
         for table, column, ddl in wanted:

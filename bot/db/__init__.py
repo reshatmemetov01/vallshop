@@ -4,6 +4,7 @@ from .base import Base, Database
 from .models import (
     HEAD_MERCHANT_ID,
     Merchant,
+    MerchantVariantPrice,
     Order,
     OrderStatus,
     Payment,
@@ -27,6 +28,7 @@ __all__ = [
     "Database",
     "HEAD_MERCHANT_ID",
     "Merchant",
+    "MerchantVariantPrice",
     "User",
     "Product",
     "Variant",
