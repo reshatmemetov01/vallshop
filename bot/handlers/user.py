@@ -154,18 +154,27 @@ async def cb_noop(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "faq")
 async def cb_faq(
-    call: CallbackQuery, config: BotConfig, state: FSMContext,
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
     merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     await state.clear()
     caption = menu_service.caption("faq", texts.FAQ, merchant_id)
-    if not config.offer_url and config.support_contact:
-        caption += texts.FAQ_NO_OFFER.format(support=config.support_contact)
+    offer, agreement, privacy = config.offer_url, config.agreement_url, config.privacy_url
+    support = config.support_contact
+    if merchant_id != HEAD_MERCHANT_ID:
+        # Франшиза: свои контакты/ссылки (если заданы), иначе кнопка скрыта.
+        from ..services import msettings as msettings_service
+        async with db.session() as session:
+            vals = await msettings_service.all_for(session, merchant_id)
+        offer = vals.get(msettings_service.URL_OFFER)
+        agreement = vals.get(msettings_service.URL_AGREEMENT)
+        privacy = vals.get(msettings_service.URL_PRIVACY)
+        support = vals.get(msettings_service.SUPPORT)
+    if not offer and support:
+        caption += texts.FAQ_NO_OFFER.format(support=support)
     await render(
         call, banner="faq", caption=caption,
-        reply_markup=kb.faq_kb(
-            config.offer_url, config.agreement_url, config.privacy_url, merchant_id
-        ),
+        reply_markup=kb.faq_kb(offer, agreement, privacy, merchant_id, support_url=support),
     )
     await call.answer()
 

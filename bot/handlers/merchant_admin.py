@@ -26,10 +26,40 @@ from ..config import BotConfig
 from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID, Merchant
 from ..services import catalog as catalog_service
+from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
+from ..services import msettings as msettings_service
 from ..services.pricing import price_rub_value
 from .. import texts
+from .. import ui as ui_service
+
+# Меню, которые владелец франшизы может оформлять (earn.franchise — служебная,
+# в боте франшизы не показывается, поэтому из редактора исключаем).
+APP_MENUS = ["main", "profile", "faq", "earn"]
+_HIDDEN_KEYS = {"earn.franchise"}
+
+# Экраны-баннеры (имя → подпись) и контакты (ключ → подпись).
+BANNER_SCREENS = [
+    ("main", "Главный"), ("catalog", "Каталог"), ("profile", "Профиль"),
+    ("reviews", "Отзывы"), ("faq", "FAQ"),
+]
+CONTACTS = [
+    (msettings_service.SUPPORT, "Техподдержка"),
+    (msettings_service.URL_OFFER, "Оферта"),
+    (msettings_service.URL_AGREEMENT, "Соглашение"),
+    (msettings_service.URL_PRIVACY, "Конфиденциальность"),
+]
+
+
+def _norm_contact(raw: str) -> str:
+    """Нормализовать контакт: @username/username → https://t.me/..., url — как есть."""
+    raw = raw.strip()
+    if raw.startswith(("http://", "https://", "tg://")):
+        return raw
+    if raw.startswith("@"):
+        return "https://t.me/" + raw[1:]
+    return "https://t.me/" + raw
 
 router = Router(name="merchant_admin")
 
@@ -64,6 +94,11 @@ class MerchAdmin(StatesGroup):
     set_default = State()
     set_markup = State()   # data: vid
     set_fixed = State()    # data: vid
+    set_caption = State()  # data: menu
+    set_label = State()    # data: key
+    set_emoji = State()    # data: key
+    set_banner = State()   # data: banner
+    set_contact = State()  # data: ckey
 
 
 def _b(text: str, data: str) -> InlineKeyboardButton:
@@ -103,6 +138,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
     kb = InlineKeyboardBuilder()
     kb.row(_b("📈 Наценка по умолчанию", "ma_setdef"))
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
+    kb.row(_b("🎨 Оформление", "mo_home"))
     kb.row(_b("⬅️ В меню", "menu"))
     await _edit(call, caption, kb)
 
@@ -334,3 +370,396 @@ async def msg_set_fixed(message: Message, db: Database, config: BotConfig,
     await message.answer(
         f"✅ Фикс-цена номинала: <b>{texts.rub(val)}</b>", reply_markup=kb.as_markup()
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Оформление франшизы (O2): тексты экранов + кнопки меню
+# ══════════════════════════════════════════════════════════════════════════════
+async def _show_oform_home(call: CallbackQuery) -> None:
+    kb = InlineKeyboardBuilder()
+    for menu in APP_MENUS:
+        kb.row(_b(f"🔘 {menu_service.MENU_TITLES.get(menu, menu)}", f"mo_menu:{menu}"))
+    kb.row(_b("🖼 Баннеры", "mo_banners"))
+    kb.row(_b("📞 Контакты и ссылки", "mo_contacts"))
+    kb.row(_b("♻️ Сбросить оформление", "mo_reset"))
+    kb.row(_b("⬅️ В кабинет", "ma_home"))
+    await _edit(
+        call,
+        "🎨 <b>Оформление</b>\n\nНастройте текст экранов и кнопки меню своего бота.\n"
+        "Выберите раздел меню для настройки:",
+        kb,
+    )
+
+
+@router.callback_query(F.data == "mo_home")
+async def cb_oform_home(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show_oform_home(call)
+    await call.answer()
+
+
+async def _show_menu(call: CallbackQuery, menu: str, merchant_id: int) -> None:
+    kb = InlineKeyboardBuilder()
+    for r in menu_service.menu_entries(menu, merchant_id, only_enabled=False):
+        if r.key in _HIDDEN_KEYS:
+            continue
+        mark = "🟢" if r.enabled else "🔴"
+        kb.row(_b(f"{mark} {r.text}", f"mo_btn:{r.key}"))
+    if menu in menu_service.MENU_CAPTION:
+        kb.row(_b("📝 Текст экрана", f"mo_cap:{menu}"))
+    kb.row(_b("⬅️ Назад", "mo_home"))
+    title = menu_service.MENU_TITLES.get(menu, menu)
+    await _edit(
+        call,
+        f"🎨 <b>{title}</b>\nВыберите кнопку (🟢 — видна клиентам, 🔴 — скрыта):",
+        kb,
+    )
+
+
+@router.callback_query(F.data.startswith("mo_menu:"))
+async def cb_oform_menu(call: CallbackQuery, state: FSMContext,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_menu(call, call.data.split(":", 1)[1], merchant_id)
+    await call.answer()
+
+
+async def _show_button(call: CallbackQuery, key: str, merchant_id: int) -> None:
+    r = menu_service.resolved(key, merchant_id)
+    e = menu_service.get_entry(key)
+    if not r or not e:
+        await call.answer("Не найдено", show_alert=True)
+        return
+    emoji_state = "🙂 есть" if r.emoji_id else "— нет"
+    vis = "🟢 видна" if r.enabled else "🔴 скрыта"
+    caption = (
+        f"🔧 <b>Кнопка</b>\n"
+        f"Меню: {menu_service.MENU_TITLES.get(e.menu, e.menu)}\n"
+        f"Текст: <b>{r.text}</b>\n"
+        f"Эмодзи: {emoji_state}\n"
+        f"Видимость: {vis}"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("✏️ Текст", f"mo_lbl:{key}"), _b("🙂 Эмодзи", f"mo_emo:{key}"))
+    kb.row(_b("🔼 Вверх", f"mo_up:{key}"), _b("🔽 Вниз", f"mo_dn:{key}"))
+    tog = "🔴 Скрыть" if r.enabled else "🟢 Показать"
+    kb.row(_b(tog, f"mo_tog:{key}"))
+    kb.row(_b("⬅️ Назад", f"mo_menu:{e.menu}"))
+    await _edit(call, caption, kb)
+
+
+@router.callback_query(F.data.startswith("mo_btn:"))
+async def cb_oform_button(call: CallbackQuery, state: FSMContext,
+                          merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_button(call, call.data.split(":", 1)[1], merchant_id)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mo_tog:"))
+async def cb_oform_toggle(call: CallbackQuery, db: Database,
+                          merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    key = call.data.split(":", 1)[1]
+    await menu_service.toggle(db, key, merchant_id)
+    await _show_button(call, key, merchant_id)
+    await call.answer("Готово")
+
+
+@router.callback_query(F.data.startswith("mo_up:"))
+async def cb_oform_up(call: CallbackQuery, db: Database,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    key = call.data.split(":", 1)[1]
+    await menu_service.move(db, key, -1, merchant_id)
+    await _show_button(call, key, merchant_id)
+    await call.answer("⬆️")
+
+
+@router.callback_query(F.data.startswith("mo_dn:"))
+async def cb_oform_down(call: CallbackQuery, db: Database,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    key = call.data.split(":", 1)[1]
+    await menu_service.move(db, key, +1, merchant_id)
+    await _show_button(call, key, merchant_id)
+    await call.answer("⬇️")
+
+
+# ── Текст кнопки ─────────────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("mo_lbl:"))
+async def cb_oform_label_ask(call: CallbackQuery, state: FSMContext,
+                             merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    key = call.data.split(":", 1)[1]
+    r = menu_service.resolved(key, merchant_id)
+    await state.set_state(MerchAdmin.set_label)
+    await state.update_data(key=key)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", f"mo_btn:{key}"))
+    await _edit(
+        call,
+        f"✏️ Текущий текст: <b>{r.text if r else ''}</b>\n\n"
+        "Пришлите новый текст кнопки.\n<code>0</code> — вернуть по умолчанию.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.set_label)
+async def msg_oform_label(message: Message, db: Database, state: FSMContext,
+                          merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    data = await state.get_data()
+    key = data.get("key")
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите текст или 0.")
+        return
+    await menu_service.set_label(db, key, None if raw == "0" else raw[:255], merchant_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ К кнопке", f"mo_btn:{key}")).as_markup()
+    await message.answer("✅ Текст кнопки обновлён", reply_markup=kb)
+
+
+# ── Эмодзи кнопки ────────────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("mo_emo:"))
+async def cb_oform_emoji_ask(call: CallbackQuery, state: FSMContext) -> None:
+    key = call.data.split(":", 1)[1]
+    await state.set_state(MerchAdmin.set_emoji)
+    await state.update_data(key=key)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", f"mo_btn:{key}"))
+    await _edit(
+        call,
+        "🙂 Пришлите <b>премиум-эмодзи</b> (одним символом) — оно станет иконкой кнопки.\n"
+        "<code>-</code> — убрать эмодзи.\n<code>0</code> — вернуть по умолчанию.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.set_emoji)
+async def msg_oform_emoji(message: Message, db: Database, state: FSMContext,
+                          merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    data = await state.get_data()
+    key = data.get("key")
+    raw = (message.text or "").strip()
+    if raw == "0":
+        emoji_id = None
+    elif raw == "-":
+        emoji_id = ""
+    else:
+        cid = None
+        for ent in (message.entities or []):
+            if ent.type == "custom_emoji" and getattr(ent, "custom_emoji_id", None):
+                cid = ent.custom_emoji_id
+                break
+        if not cid:
+            await message.answer(
+                "Не нашёл премиум-эмодзи в сообщении. Пришлите именно премиум-эмодзи, "
+                "либо <code>-</code> (убрать) / <code>0</code> (по умолчанию)."
+            )
+            return
+        emoji_id = cid
+    await menu_service.set_emoji(db, key, emoji_id, merchant_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ К кнопке", f"mo_btn:{key}")).as_markup()
+    await message.answer("✅ Эмодзи кнопки обновлено", reply_markup=kb)
+
+
+# ── Текст экрана (приветствие / FAQ) ─────────────────────────────────────────
+@router.callback_query(F.data.startswith("mo_cap:"))
+async def cb_oform_caption_ask(call: CallbackQuery, state: FSMContext) -> None:
+    menu = call.data.split(":", 1)[1]
+    await state.set_state(MerchAdmin.set_caption)
+    await state.update_data(menu=menu)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", f"mo_menu:{menu}"))
+    await _edit(
+        call,
+        "📝 Пришлите новый <b>текст экрана</b> (можно премиум-эмодзи и форматирование).\n"
+        "<code>0</code> — вернуть текст по умолчанию.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.set_caption)
+async def msg_oform_caption(message: Message, db: Database, state: FSMContext,
+                            merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    data = await state.get_data()
+    menu = data.get("menu")
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите текст или 0.")
+        return
+    value = None if raw == "0" else (message.html_text or message.text).strip()
+    await menu_service.set_caption(db, menu, value, merchant_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", f"mo_menu:{menu}")).as_markup()
+    await message.answer("✅ Текст экрана обновлён", reply_markup=kb)
+
+
+# ── Сброс оформления к шаблону ───────────────────────────────────────────────
+@router.callback_query(F.data == "mo_reset")
+async def cb_oform_reset_ask(call: CallbackQuery) -> None:
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("♻️ Да, сбросить", "mo_reset_ok"))
+    kb.row(_b("⬅️ Отмена", "mo_home"))
+    await _edit(
+        call,
+        "♻️ Сбросить всё оформление к базовому шаблону?\n"
+        "Тексты экранов и правки кнопок вернутся к стандартным. Баннеры не затрагиваются.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "mo_reset_ok")
+async def cb_oform_reset(call: CallbackQuery, db: Database, state: FSMContext,
+                         merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await menu_service.reset_all(db, merchant_id)
+    await _show_oform_home(call)
+    await call.answer("Сброшено ✅")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Оформление франшизы (O3): баннеры-картинки + контакты/ссылки
+# ══════════════════════════════════════════════════════════════════════════════
+async def _show_banners(call: CallbackQuery, db: Database, merchant_id: int) -> None:
+    async with db.session() as s:
+        vals = await msettings_service.all_for(s, merchant_id)
+    kb = InlineKeyboardBuilder()
+    for name, title in BANNER_SCREENS:
+        has = msettings_service.banner_key(name) in vals
+        mark = "🖼" if has else "—"
+        kb.row(_b(f"{mark} {title}", f"mo_bn:{name}"))
+    kb.row(_b("⬅️ Назад", "mo_home"))
+    await _edit(
+        call,
+        "🖼 <b>Баннеры</b>\n\nЗагрузите свою картинку для каждого экрана. "
+        "Пока баннер не загружен — экран показывается без картинки (только текст).\n"
+        "🖼 — свой баннер задан, — — без картинки.",
+        kb,
+    )
+
+
+@router.callback_query(F.data == "mo_banners")
+async def cb_banners(call: CallbackQuery, db: Database, state: FSMContext,
+                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_banners(call, db, merchant_id)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mo_bn:"))
+async def cb_banner_one(call: CallbackQuery, db: Database, state: FSMContext,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    name = call.data.split(":", 1)[1]
+    title = dict(BANNER_SCREENS).get(name, name)
+    async with db.session() as s:
+        cur = await msettings_service.get(s, merchant_id, msettings_service.banner_key(name))
+    await state.set_state(MerchAdmin.set_banner)
+    await state.update_data(banner=name)
+    kb = InlineKeyboardBuilder()
+    if cur:
+        kb.row(_b("🗑 Убрать баннер", f"mo_bnclr:{name}"))
+    kb.row(_b("⬅️ Назад", "mo_banners"))
+    await _edit(
+        call,
+        f"🖼 <b>Баннер экрана «{title}»</b>\n\n"
+        "Пришлите картинку (как фото) — она станет баннером этого экрана.\n"
+        f"Статус: {'задан свой' if cur else 'без картинки'}.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.set_banner, F.photo)
+async def msg_banner_photo(message: Message, db: Database, state: FSMContext,
+                           merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    data = await state.get_data()
+    name = data.get("banner")
+    file_id = message.photo[-1].file_id
+    async with db.session() as s:
+        await msettings_service.set(s, merchant_id, msettings_service.banner_key(name), file_id)
+        await s.commit()
+    ui_service.set_banner_override(merchant_id, name, file_id)  # живой кэш рендера
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ К баннерам", "mo_banners")).as_markup()
+    await message.answer("✅ Баннер обновлён", reply_markup=kb)
+
+
+@router.message(MerchAdmin.set_banner)
+async def msg_banner_notphoto(message: Message) -> None:
+    await message.answer("Пришлите именно картинку (фото), либо вернитесь кнопкой «Назад».")
+
+
+@router.callback_query(F.data.startswith("mo_bnclr:"))
+async def cb_banner_clear(call: CallbackQuery, db: Database, state: FSMContext,
+                          merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    name = call.data.split(":", 1)[1]
+    async with db.session() as s:
+        await msettings_service.set(s, merchant_id, msettings_service.banner_key(name), None)
+        await s.commit()
+    ui_service.set_banner_override(merchant_id, name, None)
+    await _show_banners(call, db, merchant_id)
+    await call.answer("Баннер убран")
+
+
+# ── Контакты и ссылки ────────────────────────────────────────────────────────
+async def _show_contacts(call: CallbackQuery, db: Database, merchant_id: int) -> None:
+    async with db.session() as s:
+        vals = await msettings_service.all_for(s, merchant_id)
+    kb = InlineKeyboardBuilder()
+    lines = ["📞 <b>Контакты и ссылки</b>\n"]
+    for key, title in CONTACTS:
+        v = vals.get(key)
+        lines.append(f"• {title}: {'<code>' + v + '</code>' if v else '—'}")
+        kb.row(_b(f"✏️ {title}", f"mo_ct:{key}"))
+    kb.row(_b("⬅️ Назад", "mo_home"))
+    await _edit(call, "\n".join(lines), kb)
+
+
+@router.callback_query(F.data == "mo_contacts")
+async def cb_contacts(call: CallbackQuery, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_contacts(call, db, merchant_id)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mo_ct:"))
+async def cb_contact_ask(call: CallbackQuery, state: FSMContext) -> None:
+    key = call.data.split(":", 1)[1]
+    title = dict(CONTACTS).get(key, key)
+    await state.set_state(MerchAdmin.set_contact)
+    await state.update_data(ckey=key)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "mo_contacts"))
+    hint = ("@username или ссылка t.me" if key == msettings_service.SUPPORT
+            else "полная ссылка (https://…)")
+    await _edit(
+        call,
+        f"✏️ <b>{title}</b>\n\nПришлите значение ({hint}).\n"
+        "<code>0</code> — убрать.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.set_contact)
+async def msg_contact(message: Message, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    data = await state.get_data()
+    key = data.get("ckey")
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите значение или 0.")
+        return
+    if raw == "0":
+        value = None
+    elif key == msettings_service.SUPPORT:
+        value = _norm_contact(raw)
+    else:
+        value = raw  # ссылки оферты/политики — как есть
+    async with db.session() as s:
+        await msettings_service.set(s, merchant_id, key, value)
+        await s.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ К контактам", "mo_contacts")).as_markup()
+    await message.answer("✅ Сохранено", reply_markup=kb)

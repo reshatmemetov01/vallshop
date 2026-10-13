@@ -85,7 +85,11 @@ def _render_menu(menu: str, url_map: Optional[dict] = None, merchant_id: int = 0
 
     def _mk(r):
         if r.kind == "url":
-            url = SUPPORT_URL if r.target == "support" else url_map.get(r.target)
+            if r.target == "support":
+                # Франшиза — свой контакт (из url_map); головной — дефолт платформы.
+                url = url_map.get("support") or (SUPPORT_URL if merchant_id == 0 else None)
+            else:
+                url = url_map.get(r.target)
             if not url:
                 return None  # нет ссылки — пропускаем
             return _b(r.text, url=url, style=r.style, icon=r.emoji_id or None)
@@ -145,9 +149,11 @@ def faq_kb(
     agreement_url: Optional[str] = None,
     privacy_url: Optional[str] = None,
     merchant_id: int = 0,
+    support_url: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     kb = _render_menu("faq", {
-        "offer": offer_url, "agreement": agreement_url, "privacy": privacy_url,
+        "offer": offer_url, "agreement": agreement_url,
+        "privacy": privacy_url, "support": support_url,
     }, merchant_id=merchant_id)
     kb.row(_b("Меню", callback_data="menu", icon=EMOJI["back"]))
     return kb.as_markup()
