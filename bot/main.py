@@ -276,6 +276,20 @@ async def main() -> None:
         bot_to_merchant[mb.id] = m.id
         bots_by_merchant[m.id] = mb
 
+    # Оформление: карта бот→мерчант и персональные баннеры франшиз в кэш рендера.
+    from . import ui as ui_service
+    from .services import msettings as msettings_service
+    ui_service.configure(bot_to_merchant)
+    async with db.session() as _s:
+        _grouped = await msettings_service.all_grouped(_s)
+    _overrides = {
+        (mid, k[len("banner_"):]): v
+        for mid, vals in _grouped.items()
+        for k, v in vals.items()
+        if k.startswith("banner_") and v
+    }
+    ui_service.set_banner_overrides(_overrides)
+
     dp = Dispatcher(storage=MemoryStorage())
 
     # Внедрение зависимостей в хендлеры (aiogram прокидывает по имени параметра).

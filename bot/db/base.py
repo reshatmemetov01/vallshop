@@ -87,6 +87,8 @@ class Database:
             ("merchants", "earnings_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
             # Франшиза (P1.2): маржа мерчанта по заказу (₽).
             ("orders", "merchant_margin", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
+            # Франшиза (Оформление O1): пер-мерчантные правки кнопок меню.
+            ("menu_buttons", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
         ]
         added_source = False
         for table, column, ddl in wanted:
@@ -139,6 +141,40 @@ class Database:
                 conn.execute(text("DROP TABLE users"))
                 conn.execute(text("ALTER TABLE users_new RENAME TO users"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_referred_by ON users (referred_by)"))
+
+        # Оформление O1: составной ключ menu_buttons (key, merchant_id) — у каждого
+        # магазина свой слой правок кнопок. Перестройка старой таблицы (ключ key)
+        # в той же транзакции; защита: не трогаем, если ключ уже составной.
+        if "menu_buttons" in set(inspect(conn).get_table_names()):
+            mcols = inspect(conn).get_columns("menu_buttons")
+            pk = {c["name"] for c in mcols if c.get("primary_key")}
+            if pk == {"key"}:  # старый одностолбцовый ключ → перестроить
+                new_cols = [
+                    ("key", "VARCHAR(64) NOT NULL"),
+                    ("merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+                    ("label", "VARCHAR(255)"),
+                    ("emoji_id", "VARCHAR(32)"),
+                    ("enabled", "BOOLEAN NOT NULL DEFAULT 1"),
+                    ("sort_order", "INTEGER"),
+                ]
+                existing = {c["name"] for c in mcols}
+                copy = ", ".join(n for n, _ in new_cols if n in existing)
+                ddl = ", ".join(f"{n} {t}" for n, t in new_cols)
+                conn.execute(text(f"CREATE TABLE menu_buttons_new ({ddl}, PRIMARY KEY (key, merchant_id))"))
+                conn.execute(text(f"INSERT INTO menu_buttons_new ({copy}) SELECT {copy} FROM menu_buttons"))
+                conn.execute(text("DROP TABLE menu_buttons"))
+                conn.execute(text("ALTER TABLE menu_buttons_new RENAME TO menu_buttons"))
+
+        # Оформление O1: перенести тексты экранов головного (cap_main/cap_faq) из
+        # глобального settings в merchant_settings(0) — дальше оформление читается
+        # оттуда единообразно для всех магазинов. Идемпотентно (OR IGNORE).
+        _tables = set(inspect(conn).get_table_names())
+        if "merchant_settings" in _tables and "settings" in _tables:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO merchant_settings (merchant_id, key, value) "
+                "SELECT 0, key, value FROM settings "
+                "WHERE key IN ('cap_main', 'cap_faq') AND value IS NOT NULL"
+            ))
 
         # Индексы по merchant_id (идемпотентно) — для будущих пер-мерчант выборок.
         index_targets = [

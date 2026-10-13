@@ -34,6 +34,6 @@ async def msg_menu_button(
     await render(
         message,
         banner="main",
-        caption=menu_service.caption("main", texts.START),
-        reply_markup=kb.main_menu_kb(is_admin, is_madmin),
+        caption=menu_service.caption("main", texts.START, merchant_id),
+        reply_markup=kb.main_menu_kb(is_admin, is_madmin, merchant_id),
     )

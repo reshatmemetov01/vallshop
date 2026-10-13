@@ -64,7 +64,8 @@ async def cb_rate(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(ReviewFlow.waiting_text)
 async def msg_review_text(
-    message: Message, db: Database, config: BotConfig, state: FSMContext
+    message: Message, db: Database, config: BotConfig, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     data = await state.get_data()
     order_id = data.get("order_id")
@@ -106,8 +107,8 @@ async def msg_review_text(
     # Сразу возвращаем в главное меню.
     is_admin = config.is_admin(message.from_user.id)
     await render(
-        message, banner="main", caption=menu_service.caption("main", texts.START),
-        reply_markup=kb.main_menu_kb(is_admin),
+        message, banner="main", caption=menu_service.caption("main", texts.START, merchant_id),
+        reply_markup=kb.main_menu_kb(is_admin, merchant_id=merchant_id),
     )
 
 

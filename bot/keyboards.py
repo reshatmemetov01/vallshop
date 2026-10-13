@@ -75,8 +75,8 @@ def _b(
 
 
 # ── Главное меню (настраивается в «Оформление») ───────────────────────────────
-def _render_menu(menu: str, url_map: Optional[dict] = None):
-    """Собрать ряды кнопок меню из реестра с учётом переопределений админа."""
+def _render_menu(menu: str, url_map: Optional[dict] = None, merchant_id: int = 0):
+    """Собрать ряды кнопок меню из реестра с учётом переопределений магазина."""
     from .services import menu as menu_service
 
     url_map = url_map or {}
@@ -100,7 +100,7 @@ def _render_menu(menu: str, url_map: Optional[dict] = None):
             kb.row(*buf)
             buf.clear()
 
-    for r in menu_service.menu_entries(menu):
+    for r in menu_service.menu_entries(menu, merchant_id):
         btn = _mk(r)
         if btn is None:
             continue
@@ -115,8 +115,10 @@ def _render_menu(menu: str, url_map: Optional[dict] = None):
     return kb
 
 
-def main_menu_kb(is_admin: bool = False, is_merchant_admin: bool = False) -> InlineKeyboardMarkup:
-    kb = _render_menu("main")
+def main_menu_kb(
+    is_admin: bool = False, is_merchant_admin: bool = False, merchant_id: int = 0
+) -> InlineKeyboardMarkup:
+    kb = _render_menu("main", merchant_id=merchant_id)
     if is_admin:
         kb.row(_b("Админ-панель", callback_data="admin", style="danger", icon=EMOJI["admin"]))
     if is_merchant_admin:
@@ -142,10 +144,11 @@ def faq_kb(
     offer_url: Optional[str] = None,
     agreement_url: Optional[str] = None,
     privacy_url: Optional[str] = None,
+    merchant_id: int = 0,
 ) -> InlineKeyboardMarkup:
     kb = _render_menu("faq", {
         "offer": offer_url, "agreement": agreement_url, "privacy": privacy_url,
-    })
+    }, merchant_id=merchant_id)
     kb.row(_b("Меню", callback_data="menu", icon=EMOJI["back"]))
     return kb.as_markup()
 
@@ -251,7 +254,7 @@ def order_done_kb(order_id: int, variant_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def earn_kb(show_franchise: bool = False) -> InlineKeyboardMarkup:
+def earn_kb(show_franchise: bool = False, merchant_id: int = 0) -> InlineKeyboardMarkup:
     """Меню «Заработок» из реестра оформления (видимость кнопок — в Оформлении).
 
     Кнопка «Франшиза» показывается только в головном боте (show_franchise) и
@@ -259,7 +262,7 @@ def earn_kb(show_franchise: bool = False) -> InlineKeyboardMarkup:
     """
     from .services import menu as menu_service
     kb = InlineKeyboardBuilder()
-    for r in menu_service.menu_entries("earn"):
+    for r in menu_service.menu_entries("earn", merchant_id):
         if r.key == "earn.franchise" and not show_franchise:
             continue
         kb.row(_b(r.text, callback_data=r.target, style=r.style, icon=r.emoji_id or None))
@@ -323,8 +326,8 @@ def network_label(net: str) -> str:
 
 
 # ── Профиль ───────────────────────────────────────────────────────────────────
-def profile_kb() -> InlineKeyboardMarkup:
-    kb = _render_menu("profile")
+def profile_kb(merchant_id: int = 0) -> InlineKeyboardMarkup:
+    kb = _render_menu("profile", merchant_id=merchant_id)
     kb.row(_b("Меню", callback_data="menu", icon=EMOJI["back"]))
     return kb.as_markup()
 

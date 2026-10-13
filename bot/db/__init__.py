@@ -10,6 +10,7 @@ from .models import (
     Payment,
     PaymentStatus,
     MenuButton,
+    MerchantSetting,
     Product,
     ReferralEarning,
     Review,
@@ -43,6 +44,7 @@ __all__ = [
     "Setting",
     "Review",
     "MenuButton",
+    "MerchantSetting",
     "ReferralEarning",
     "VpnSubscription",
 ]

@@ -434,17 +434,34 @@ class VpnSubscription(Base):
 class MenuButton(Base):
     """Переопределения оформления кнопок меню (раздел «Оформление»).
 
-    Ключ — стабильный id кнопки из реестра (bot/services/menu.py).
-    Пустые поля = значение по умолчанию из реестра.
+    Ключ — стабильный id кнопки из реестра (bot/services/menu.py), в паре с
+    ``merchant_id`` (0 = головной, >0 = франшиза). У каждого магазина свой слой
+    правок; пустой слой → значения по умолчанию из реестра.
     """
 
     __tablename__ = "menu_buttons"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=HEAD_MERCHANT_ID)
     label: Mapped[Optional[str]] = mapped_column(String(255))       # None = дефолт
     emoji_id: Mapped[Optional[str]] = mapped_column(String(32))     # None = дефолт, "" = без эмодзи
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[Optional[int]] = mapped_column(Integer)      # None = дефолт
+
+
+class MerchantSetting(Base):
+    """Пер-мерчантные настройки оформления (тексты экранов, баннеры, контакты).
+
+    Ключ-значение в разрезе магазина (``merchant_id``). Используется только для
+    оформления франшиз; глобальные операционные настройки живут в ``Setting``.
+    Пустой набор у новой франшизы → базовый шаблон из реестра/ассетов.
+    """
+
+    __tablename__ = "merchant_settings"
+
+    merchant_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=HEAD_MERCHANT_ID)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class Review(Base):

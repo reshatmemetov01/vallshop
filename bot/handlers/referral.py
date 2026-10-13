@@ -29,7 +29,7 @@ async def cb_earn(
     show_franchise = merchant_id == HEAD_MERCHANT_ID
     await render(
         call, banner="main", caption=texts.EARN_TITLE,
-        reply_markup=kb.earn_kb(show_franchise=show_franchise),
+        reply_markup=kb.earn_kb(show_franchise=show_franchise, merchant_id=merchant_id),
     )
     await call.answer()
 
@@ -44,7 +44,7 @@ async def _referral_screen(
         )
         if not enabled:
             await render(call, banner="main", caption=texts.REFERRAL_DISABLED,
-                         reply_markup=kb.earn_kb())
+                         reply_markup=kb.earn_kb(merchant_id=merchant_id))
             return
         st = await referral_service.stats(session, call.from_user.id, merchant_id)
         terms = await referral_service.terms_text(session)

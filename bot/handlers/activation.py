@@ -27,7 +27,7 @@ import roblox
 
 from ..config import BotConfig
 from ..db import Database
-from ..db.models import ActivationRequest
+from ..db.models import ActivationRequest, HEAD_MERCHANT_ID
 from ..services import activation as act
 from ..services import menu as menu_service
 from ..ui import render
@@ -81,10 +81,13 @@ async def cb_activate(call: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "act_cancel")
-async def cb_act_cancel(call: CallbackQuery, config: BotConfig, state: FSMContext) -> None:
+async def cb_act_cancel(
+    call: CallbackQuery, config: BotConfig, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     await state.clear()
     is_admin = config.is_admin(call.from_user.id)
-    await render(call, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin))
+    await render(call, banner="main", caption=menu_service.caption("main", texts.START, merchant_id), reply_markup=kb.main_menu_kb(is_admin, merchant_id=merchant_id))
     await call.answer("Отменено")
 
 

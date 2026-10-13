@@ -13,8 +13,8 @@ from typing import Dict, List, Optional
 from sqlalchemy import select
 
 from ..db import Database
-from ..db.models import MenuButton
-from ..services import settings as settings_service
+from ..db.models import HEAD_MERCHANT_ID, MenuButton
+from ..services import msettings as msettings_service
 
 log = logging.getLogger("vallshop.menu")
 
@@ -66,9 +66,11 @@ REGISTRY: List[Entry] = [
 
 _BY_KEY: Dict[str, Entry] = {e.key: e for e in REGISTRY}
 
-# Кэш переопределений: key -> {"label","emoji_id","enabled","sort_order"}
-_overrides: Dict[str, dict] = {}
-_captions: Dict[str, str] = {}
+# Кэш переопределений в разрезе магазина:
+#   _overrides[merchant_id][key] -> {"label","emoji_id","enabled","sort_order"}
+#   _captions[merchant_id][skey] -> текст экрана
+_overrides: Dict[int, Dict[str, dict]] = {}
+_captions: Dict[int, Dict[str, str]] = {}
 
 
 @dataclass
@@ -84,8 +86,8 @@ class Resolved:
     full_width: bool
 
 
-def _resolve_one(e: Entry) -> Resolved:
-    ov = _overrides.get(e.key, {})
+def _resolve_one(e: Entry, merchant_id: int = HEAD_MERCHANT_ID) -> Resolved:
+    ov = _overrides.get(merchant_id, {}).get(e.key, {})
     label = ov.get("label")
     emoji = ov.get("emoji_id", "__default__")
     return Resolved(
@@ -101,8 +103,10 @@ def _resolve_one(e: Entry) -> Resolved:
     )
 
 
-def menu_entries(menu: str, *, only_enabled: bool = True) -> List[Resolved]:
-    items = [_resolve_one(e) for e in REGISTRY if e.menu == menu]
+def menu_entries(
+    menu: str, merchant_id: int = HEAD_MERCHANT_ID, *, only_enabled: bool = True
+) -> List[Resolved]:
+    items = [_resolve_one(e, merchant_id) for e in REGISTRY if e.menu == menu]
     if only_enabled:
         items = [r for r in items if r.enabled]
     items.sort(key=lambda r: (r.order, r.key))
@@ -113,16 +117,16 @@ def get_entry(key: str) -> Optional[Entry]:
     return _BY_KEY.get(key)
 
 
-def resolved(key: str) -> Optional[Resolved]:
+def resolved(key: str, merchant_id: int = HEAD_MERCHANT_ID) -> Optional[Resolved]:
     e = _BY_KEY.get(key)
-    return _resolve_one(e) if e else None
+    return _resolve_one(e, merchant_id) if e else None
 
 
-def caption(menu: str, default: str) -> str:
-    """Текст экрана с учётом переопределения (настройка cap_<menu>)."""
+def caption(menu: str, default: str, merchant_id: int = HEAD_MERCHANT_ID) -> str:
+    """Текст экрана с учётом переопределения магазина (ключ cap_<menu>)."""
     skey = MENU_CAPTION.get(menu)
-    if skey and _captions.get(skey):
-        return _captions[skey]
+    if skey and _captions.get(merchant_id, {}).get(skey):
+        return _captions[merchant_id][skey]
     return default
 
 
@@ -132,64 +136,70 @@ async def load(db: Database) -> None:
     try:
         async with db.session() as session:
             rows = list(await session.scalars(select(MenuButton)))
-            _overrides = {
-                r.key: {
+            ov: Dict[int, Dict[str, dict]] = {}
+            for r in rows:
+                ov.setdefault(r.merchant_id, {})[r.key] = {
                     "label": r.label,
                     "emoji_id": r.emoji_id if r.emoji_id is not None else "__default__",
                     "enabled": bool(r.enabled),
                     "sort_order": r.sort_order,
                 }
-                for r in rows
+            _overrides = ov
+            grouped = await msettings_service.all_grouped(session)
+            cap_keys = set(MENU_CAPTION.values())
+            _captions = {
+                mid: {k: v for k, v in vals.items() if k in cap_keys}
+                for mid, vals in grouped.items()
             }
-            caps = {}
-            for skey in set(MENU_CAPTION.values()):
-                v = await settings_service.get(session, skey)
-                if v:
-                    caps[skey] = v
-            _captions = caps
     except Exception:  # noqa: BLE001 — кэш не должен ронять бота
         log.exception("Не удалось загрузить оформление меню")
 
 
-async def _get_or_create(session, key: str) -> MenuButton:
-    row = await session.get(MenuButton, key)
+async def _get_or_create(session, key: str, merchant_id: int) -> MenuButton:
+    row = await session.get(MenuButton, {"key": key, "merchant_id": merchant_id})
     if row is None:
         e = _BY_KEY[key]
-        row = MenuButton(key=key, enabled=True, sort_order=e.order)
+        row = MenuButton(key=key, merchant_id=merchant_id, enabled=True, sort_order=e.order)
         session.add(row)
         await session.flush()
     return row
 
 
-async def set_label(db: Database, key: str, label: Optional[str]) -> None:
+async def set_label(
+    db: Database, key: str, label: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     async with db.session() as session:
-        row = await _get_or_create(session, key)
+        row = await _get_or_create(session, key, merchant_id)
         row.label = label  # None = сброс к дефолту
         await session.commit()
     await load(db)
 
 
-async def set_emoji(db: Database, key: str, emoji_id: Optional[str]) -> None:
+async def set_emoji(
+    db: Database, key: str, emoji_id: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     """emoji_id: строка id, "" (без эмодзи) или None (сброс к дефолту)."""
     async with db.session() as session:
-        row = await _get_or_create(session, key)
+        row = await _get_or_create(session, key, merchant_id)
         row.emoji_id = emoji_id
         await session.commit()
     await load(db)
 
 
-async def toggle(db: Database, key: str) -> None:
+async def toggle(db: Database, key: str, merchant_id: int = HEAD_MERCHANT_ID) -> None:
     async with db.session() as session:
-        row = await _get_or_create(session, key)
+        row = await _get_or_create(session, key, merchant_id)
         row.enabled = not bool(row.enabled)
         await session.commit()
     await load(db)
 
 
-async def move(db: Database, key: str, direction: int) -> None:
+async def move(
+    db: Database, key: str, direction: int, merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     """Переместить кнопку вверх (-1) или вниз (+1) внутри её меню."""
     e = _BY_KEY[key]
-    ordered = menu_entries(e.menu, only_enabled=False)
+    ordered = menu_entries(e.menu, merchant_id, only_enabled=False)
     idx = next((i for i, r in enumerate(ordered) if r.key == key), None)
     if idx is None:
         return
@@ -198,29 +208,36 @@ async def move(db: Database, key: str, direction: int) -> None:
         return
     a, b = ordered[idx], ordered[swap]
     async with db.session() as session:
-        ra = await _get_or_create(session, a.key)
-        rb = await _get_or_create(session, b.key)
+        ra = await _get_or_create(session, a.key, merchant_id)
+        rb = await _get_or_create(session, b.key, merchant_id)
         ra.sort_order, rb.sort_order = b.order, a.order
         await session.commit()
     await load(db)
 
 
-async def reset_all(db: Database) -> None:
-    """Сбросить всё оформление к значениям по умолчанию (реестр)."""
+async def reset_all(db: Database, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    """Сбросить оформление магазина к значениям по умолчанию (реестр)."""
     from sqlalchemy import delete as sa_delete
+    from ..db.models import MerchantSetting
     async with db.session() as session:
-        await session.execute(sa_delete(MenuButton))
-        for skey in set(MENU_CAPTION.values()):
-            await settings_service.set(session, skey, None)
+        await session.execute(sa_delete(MenuButton).where(MenuButton.merchant_id == merchant_id))
+        await session.execute(
+            sa_delete(MerchantSetting).where(
+                MerchantSetting.merchant_id == merchant_id,
+                MerchantSetting.key.in_(set(MENU_CAPTION.values())),
+            )
+        )
         await session.commit()
     await load(db)
 
 
-async def set_caption(db: Database, menu: str, text: Optional[str]) -> None:
+async def set_caption(
+    db: Database, menu: str, text: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     skey = MENU_CAPTION.get(menu)
     if not skey:
         return
     async with db.session() as session:
-        await settings_service.set(session, skey, text)
+        await msettings_service.set(session, merchant_id, skey, text)
         await session.commit()
     await load(db)

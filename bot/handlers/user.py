@@ -116,7 +116,7 @@ async def cmd_start(
     await _set_menu_keyboard(message)
     is_admin = config.is_admin(message.from_user.id)
     is_madmin = await merchants_service.admin_merchant(db, message.from_user.id, merchant_id) is not None
-    await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin, is_madmin))
+    await render(message, banner="main", caption=menu_service.caption("main", texts.START, merchant_id), reply_markup=kb.main_menu_kb(is_admin, is_madmin, merchant_id))
 
 
 @router.message(Command("menu"))
@@ -126,7 +126,7 @@ async def cmd_menu(
     await _set_menu_keyboard(message)
     is_admin = config.is_admin(message.from_user.id)
     is_madmin = await merchants_service.admin_merchant(db, message.from_user.id, merchant_id) is not None
-    await render(message, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin, is_madmin))
+    await render(message, banner="main", caption=menu_service.caption("main", texts.START, merchant_id), reply_markup=kb.main_menu_kb(is_admin, is_madmin, merchant_id))
 
 
 @router.message(F.text == "🛍 Каталог")
@@ -143,7 +143,7 @@ async def cb_menu(
 ) -> None:
     is_admin = config.is_admin(call.from_user.id)
     is_madmin = await merchants_service.admin_merchant(db, call.from_user.id, merchant_id) is not None
-    await render(call, banner="main", caption=menu_service.caption("main", texts.START), reply_markup=kb.main_menu_kb(is_admin, is_madmin))
+    await render(call, banner="main", caption=menu_service.caption("main", texts.START, merchant_id), reply_markup=kb.main_menu_kb(is_admin, is_madmin, merchant_id))
     await call.answer()
 
 
@@ -153,15 +153,18 @@ async def cb_noop(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "faq")
-async def cb_faq(call: CallbackQuery, config: BotConfig, state: FSMContext) -> None:
+async def cb_faq(
+    call: CallbackQuery, config: BotConfig, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     await state.clear()
-    caption = menu_service.caption("faq", texts.FAQ)
+    caption = menu_service.caption("faq", texts.FAQ, merchant_id)
     if not config.offer_url and config.support_contact:
         caption += texts.FAQ_NO_OFFER.format(support=config.support_contact)
     await render(
         call, banner="faq", caption=caption,
         reply_markup=kb.faq_kb(
-            config.offer_url, config.agreement_url, config.privacy_url
+            config.offer_url, config.agreement_url, config.privacy_url, merchant_id
         ),
     )
     await call.answer()

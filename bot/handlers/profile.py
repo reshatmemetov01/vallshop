@@ -82,7 +82,7 @@ async def _show_profile(
 ) -> None:
     async with db.session() as session:
         caption = await _profile_caption(session, config, user_id, merchant_id)
-    await render(event, banner="profile", caption=caption, reply_markup=kb.profile_kb())
+    await render(event, banner="profile", caption=caption, reply_markup=kb.profile_kb(merchant_id))
 
 
 @router.message(F.text == "🟢 Мой профиль")
