@@ -136,14 +136,15 @@ async def _show_reviews(
         items = await review_service.list_published(
             session, page=page, merchant_id=merchant_id
         )
+    title = menu_service.caption("reviews", texts.REVIEWS_TITLE, merchant_id)
     if total == 0:
-        caption = f"{texts.REVIEWS_TITLE}\n\n{texts.REVIEWS_EMPTY}"
+        caption = f"{title}\n\n{texts.REVIEWS_EMPTY}"
         kb_b = InlineKeyboardBuilder()
         kb_b.row(InlineKeyboardButton(text="Меню", callback_data="menu"))
         await render(call, banner="reviews", caption=caption, reply_markup=kb_b.as_markup())
         return
     total_pages = (total + review_service.PAGE_SIZE - 1) // review_service.PAGE_SIZE
-    lines = [f"{texts.REVIEWS_TITLE}", f"Всего отзывов: <b>{total}</b>", ""]
+    lines = [f"{title}", f"Всего отзывов: <b>{total}</b>", ""]
     for r in items:
         who = f"@{r.username}" if r.username else "покупатель"
         lines.append(f"{_stars(r.rating)}  ·  <b>{r.product_title or '—'}</b>")

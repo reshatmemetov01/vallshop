@@ -27,8 +27,9 @@ async def cb_earn(
     await state.clear()
     # Франшизу можно создать только из головного магазина.
     show_franchise = merchant_id == HEAD_MERCHANT_ID
+    from ..services import menu as menu_service
     await render(
-        call, banner="main", caption=texts.EARN_TITLE,
+        call, banner="main", caption=menu_service.caption("earn", texts.EARN_TITLE, merchant_id),
         reply_markup=kb.earn_kb(show_franchise=show_franchise, merchant_id=merchant_id),
     )
     await call.answer()

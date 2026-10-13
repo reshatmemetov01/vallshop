@@ -381,18 +381,40 @@ async def msg_set_fixed(message: Message, db: Database, config: BotConfig,
 # ══════════════════════════════════════════════════════════════════════════════
 async def _show_oform_home(call: CallbackQuery) -> None:
     kb = InlineKeyboardBuilder()
+    kb.row(_b("📝 Тексты экранов", "mo_texts"))
     for menu in APP_MENUS:
-        kb.row(_b(f"🔘 {menu_service.MENU_TITLES.get(menu, menu)}", f"mo_menu:{menu}"))
+        kb.row(_b(f"🔘 Кнопки: {menu_service.MENU_TITLES.get(menu, menu)}", f"mo_menu:{menu}"))
     kb.row(_b("🖼 Баннеры", "mo_banners"))
     kb.row(_b("📞 Контакты и ссылки", "mo_contacts"))
     kb.row(_b("♻️ Сбросить оформление", "mo_reset"))
     kb.row(_b("⬅️ В кабинет", "ma_home"))
     await _edit(
         call,
-        "🎨 <b>Оформление</b>\n\nНастройте текст экранов и кнопки меню своего бота.\n"
-        "Выберите раздел меню для настройки:",
+        "🎨 <b>Оформление</b>\n\nНастройте тексты экранов, кнопки меню, баннеры и "
+        "контакты своего бота.",
         kb,
     )
+
+
+# ── Тексты экранов (все экраны) ──────────────────────────────────────────────
+async def _show_texts(call: CallbackQuery) -> None:
+    kb = InlineKeyboardBuilder()
+    for key, title, _hint in menu_service.SCREEN_TEXTS:
+        kb.row(_b(f"📝 {title}", f"mo_cap:{key}"))
+    kb.row(_b("⬅️ Назад", "mo_home"))
+    await _edit(
+        call,
+        "📝 <b>Тексты экранов</b>\n\nВыберите экран, чтобы изменить его текст "
+        "(тот, что показывается после нажатия кнопки).",
+        kb,
+    )
+
+
+@router.callback_query(F.data == "mo_texts")
+async def cb_oform_texts(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show_texts(call)
+    await call.answer()
 
 
 @router.callback_query(F.data == "mo_home")
@@ -409,8 +431,6 @@ async def _show_menu(call: CallbackQuery, menu: str, merchant_id: int) -> None:
             continue
         mark = "🟢" if r.enabled else "🔴"
         kb.row(_b(f"{mark} {r.text}", f"mo_btn:{r.key}"))
-    if menu in menu_service.MENU_CAPTION:
-        kb.row(_b("📝 Текст экрана", f"mo_cap:{menu}"))
     kb.row(_b("⬅️ Назад", "mo_home"))
     title = menu_service.MENU_TITLES.get(menu, menu)
     await _edit(
@@ -565,17 +585,21 @@ async def msg_oform_emoji(message: Message, db: Database, state: FSMContext,
     await message.answer("✅ Эмодзи кнопки обновлено", reply_markup=kb)
 
 
-# ── Текст экрана (приветствие / FAQ) ─────────────────────────────────────────
+# ── Текст экрана (любой экран) ───────────────────────────────────────────────
 @router.callback_query(F.data.startswith("mo_cap:"))
 async def cb_oform_caption_ask(call: CallbackQuery, state: FSMContext) -> None:
-    menu = call.data.split(":", 1)[1]
+    screen = call.data.split(":", 1)[1]
+    title = menu_service.SCREEN_TITLES.get(screen, screen)
+    hint = menu_service.SCREEN_HINTS.get(screen, "")
     await state.set_state(MerchAdmin.set_caption)
-    await state.update_data(menu=menu)
-    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", f"mo_menu:{menu}"))
+    await state.update_data(menu=screen)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "mo_texts"))
+    extra = (f"\n\nДоступные подстановки: <code>{hint}</code> — вставьте их в текст, "
+             "чтобы показать значения." if hint else "")
     await _edit(
         call,
-        "📝 Пришлите новый <b>текст экрана</b> (можно премиум-эмодзи и форматирование).\n"
-        "<code>0</code> — вернуть текст по умолчанию.",
+        f"📝 <b>{title}</b>\n\nПришлите новый текст экрана (можно премиум-эмодзи и "
+        f"форматирование).\n<code>0</code> — вернуть текст по умолчанию.{extra}",
         kb,
     )
     await call.answer()
@@ -593,7 +617,7 @@ async def msg_oform_caption(message: Message, db: Database, state: FSMContext,
     value = None if raw == "0" else (message.html_text or message.text).strip()
     await menu_service.set_caption(db, menu, value, merchant_id)
     await state.clear()
-    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", f"mo_menu:{menu}")).as_markup()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ К текстам", "mo_texts")).as_markup()
     await message.answer("✅ Текст экрана обновлён", reply_markup=kb)
 
 

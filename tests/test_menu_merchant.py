@@ -64,6 +64,30 @@ async def test_new_franchise_uses_minimal_template(db):
 
 
 @pytest.mark.asyncio
+async def test_all_screen_texts_editable_per_merchant(db):
+    # Любой экран (не только main/faq) редактируется отдельно для каждого магазина.
+    await menu_service.set_caption(db, "catalog", "Витрина франшизы", merchant_id=1)
+    await menu_service.set_caption(db, "reviews", "Наши отзывы", merchant_id=1)
+    assert menu_service.caption("catalog", "DEF", 1) == "Витрина франшизы"
+    assert menu_service.caption("reviews", "DEF", 1) == "Наши отзывы"
+    # у головного и другой франшизы — дефолт
+    assert menu_service.caption("catalog", "DEF", 0) == "DEF"
+    assert menu_service.caption("catalog", "DEF", 2) == "DEF"
+
+
+@pytest.mark.asyncio
+async def test_profile_placeholders_formatted(db):
+    # Профиль с плейсхолдерами: своя правка сохраняет подстановки.
+    await menu_service.set_caption(db, "profile", "Баланс: {balance} · Заказов: {orders}", merchant_id=1)
+    out = menu_service.caption("profile", "DEF", 1, balance="100 ₽", orders=5, user_id=7)
+    assert out == "Баланс: 100 ₽ · Заказов: 5"
+    # неизвестный плейсхолдер в шаблоне не роняет экран
+    await menu_service.set_caption(db, "profile", "{balance} {unknown}", merchant_id=1)
+    out2 = menu_service.caption("profile", "DEF", 1, balance="50 ₽")
+    assert out2 == "50 ₽ {unknown}"
+
+
+@pytest.mark.asyncio
 async def test_franchise_default_uses_shop_title(db):
     # Нейтральное приветствие подставляет название магазина франшизы.
     from bot.db import Merchant

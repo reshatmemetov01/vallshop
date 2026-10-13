@@ -137,7 +137,7 @@ async def msg_catalog(
         products = await catalog_service.list_products(
             session, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
         )
-    caption = texts.CHOOSE_PRODUCT if products else texts.CATALOG_EMPTY
+    caption = menu_service.caption("catalog", texts.CHOOSE_PRODUCT, merchant_id) if products else texts.CATALOG_EMPTY
     await render(message, banner="catalog", caption=caption, reply_markup=kb.products_kb(products))
 
 
@@ -193,7 +193,7 @@ async def cb_catalog(
         products = await catalog_service.list_products(
             session, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
         )
-    caption = texts.CHOOSE_PRODUCT if products else texts.CATALOG_EMPTY
+    caption = menu_service.caption("catalog", texts.CHOOSE_PRODUCT, merchant_id) if products else texts.CATALOG_EMPTY
     # Верхний уровень — сеткой по 2 в ряд (категории-плитки).
     await render(
         call, banner="catalog", caption=caption,

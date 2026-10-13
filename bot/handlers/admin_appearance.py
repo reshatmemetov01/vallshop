@@ -54,8 +54,9 @@ def _cancel(back: str) -> InlineKeyboardMarkup:
 async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     kb = InlineKeyboardBuilder()
+    kb.row(_btn("📝 Тексты экранов", "ap_texts"))
     for m, title in menu_service.MENU_TITLES.items():
-        kb.row(_btn(f"📋 {title}", f"ap_menu:{m}"))
+        kb.row(_btn(f"📋 Кнопки: {title}", f"ap_menu:{m}"))
     kb.row(_btn("💳 Способы оплаты", "pm_home"))
     kb.row(_btn("♻️ Перевести Цены", "ap_migprices"))
     kb.row(_btn("♻️ Сбросить к стандартному", "ap_reset"))
@@ -140,8 +141,6 @@ async def _show_menu(call: CallbackQuery, menu: str) -> None:
     for r in menu_service.menu_entries(menu, only_enabled=False):
         mark = "🟢" if r.enabled else "🔴"
         kb.row(_btn(f"{mark} {r.text}", f"ap_btn:{r.key}"))
-    if menu in menu_service.MENU_CAPTION:
-        kb.row(_btn("📝 Текст экрана", f"ap_cap:{menu}"))
     kb.row(_btn("⬅️ Назад", "ap_home"))
     title = menu_service.MENU_TITLES.get(menu, menu)
     await call.message.edit_text(
@@ -285,16 +284,34 @@ async def msg_emoji(message: Message, db: Database, state: FSMContext) -> None:
     await message.answer("✅ Эмодзи кнопки обновлено", reply_markup=kb)
 
 
-# ── Текст экрана (приветствие / FAQ) ─────────────────────────────────────────
+# ── Тексты экранов (любой экран) ─────────────────────────────────────────────
+@router.callback_query(F.data == "ap_texts")
+async def cb_texts(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    for key, title, _hint in menu_service.SCREEN_TEXTS:
+        kb.row(_btn(f"📝 {title}", f"ap_cap:{key}"))
+    kb.row(_btn("⬅️ Назад", "ap_home"))
+    await call.message.edit_text(
+        "📝 <b>Тексты экранов</b>\n\nВыберите экран, чтобы изменить его текст.",
+        reply_markup=kb.as_markup(),
+    )
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("ap_cap:"))
 async def cb_caption_ask(call: CallbackQuery, state: FSMContext) -> None:
-    menu = call.data.split(":", 1)[1]
+    screen = call.data.split(":", 1)[1]
+    title = menu_service.SCREEN_TITLES.get(screen, screen)
+    hint = menu_service.SCREEN_HINTS.get(screen, "")
     await state.set_state(APState.set_caption)
-    await state.update_data(menu=menu)
+    await state.update_data(menu=screen)
+    extra = (f"\n\nПодстановки: <code>{hint}</code> — вставьте в текст для значений."
+             if hint else "")
     await call.message.edit_text(
-        "📝 Пришлите новый <b>текст экрана</b> (можно премиум-эмодзи и форматирование).\n"
-        "<code>0</code> — вернуть текст по умолчанию.",
-        reply_markup=_cancel(f"ap_menu:{menu}"),
+        f"📝 <b>{title}</b>\n\nПришлите новый текст экрана (можно премиум-эмодзи и "
+        f"форматирование).\n<code>0</code> — вернуть текст по умолчанию.{extra}",
+        reply_markup=_cancel("ap_texts"),
     )
     await call.answer()
 
@@ -310,7 +327,7 @@ async def msg_caption(message: Message, db: Database, state: FSMContext) -> None
     value = None if raw == "0" else (message.html_text or message.text).strip()
     await menu_service.set_caption(db, menu, value)
     await state.clear()
-    kb = InlineKeyboardBuilder().row(_btn("⬅️ Назад", f"ap_menu:{menu}")).as_markup()
+    kb = InlineKeyboardBuilder().row(_btn("⬅️ Назад", "ap_texts")).as_markup()
     await message.answer("✅ Текст экрана обновлён", reply_markup=kb)
 
 

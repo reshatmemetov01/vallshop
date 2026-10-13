@@ -43,6 +43,25 @@ MENU_TITLES = {
 # У каких меню есть редактируемый текст экрана и ключ настройки.
 MENU_CAPTION = {"main": "cap_main", "faq": "cap_faq"}
 
+# Экраны с редактируемым текстом (ключ, заголовок для админки, подсказка-плейсхолдеры).
+# Правка хранится в merchant_settings под ключом cap_<screen> (в разрезе магазина).
+SCREEN_TEXTS = [
+    ("main",    "Главный экран",  ""),
+    ("catalog", "Каталог",        ""),
+    ("profile", "Профиль",        "{balance}, {orders}, {user_id}"),
+    ("faq",     "FAQ / Правила",  ""),
+    ("reviews", "Отзывы",         ""),
+    ("earn",    "Заработок",      ""),
+]
+SCREEN_TITLES = {k: t for k, t, _ in SCREEN_TEXTS}
+SCREEN_HINTS = {k: h for k, t, h in SCREEN_TEXTS}
+
+
+class _SafeDict(dict):
+    """format_map, который оставляет неизвестные плейсхолдеры как есть."""
+    def __missing__(self, key):  # noqa: D401
+        return "{" + key + "}"
+
 REGISTRY: List[Entry] = [
     # Главное меню: [Каталог, Профиль] / [Активировать Код] / [FAQ, Отзывы]
     Entry("main.catalog",  "main", "Каталог",            "5805550320985578625", "primary", "cb", "catalog", 10, plain="🛍"),
@@ -160,17 +179,22 @@ def _franchise_default_caption(menu: str, merchant_id: int) -> Optional[str]:
     return None
 
 
-def caption(menu: str, default: str, merchant_id: int = HEAD_MERCHANT_ID) -> str:
+def caption(screen: str, default: str, merchant_id: int = HEAD_MERCHANT_ID, **fmt) -> str:
     """Текст экрана: своё переопределение магазина → нейтральный дефолт для
-    франшизы → переданный default (бренд платформы, для головного)."""
-    skey = MENU_CAPTION.get(menu)
-    if skey and _captions.get(merchant_id, {}).get(skey):
-        return _captions[merchant_id][skey]
-    if merchant_id != HEAD_MERCHANT_ID:
-        fb = _franchise_default_caption(menu, merchant_id)
-        if fb is not None:
-            return fb
-    return default
+    франшизы → переданный default. ``fmt`` — значения плейсхолдеров (например,
+    баланс/заказы для профиля); неизвестные плейсхолдеры остаются как есть."""
+    skey = f"cap_{screen}"
+    tmpl = _captions.get(merchant_id, {}).get(skey)
+    if not tmpl and merchant_id != HEAD_MERCHANT_ID:
+        tmpl = _franchise_default_caption(screen, merchant_id)
+    if not tmpl:
+        tmpl = default
+    if fmt:
+        try:
+            return tmpl.format_map(_SafeDict(fmt))
+        except Exception:  # noqa: BLE001 — кривой шаблон не должен ронять экран
+            return tmpl
+    return tmpl
 
 
 # ── Загрузка/обновление кэша ────────────────────────────────────────────────
@@ -192,9 +216,8 @@ async def load(db: Database) -> None:
                 }
             _overrides = ov
             grouped = await msettings_service.all_grouped(session)
-            cap_keys = set(MENU_CAPTION.values())
             _captions = {
-                mid: {k: v for k, v in vals.items() if k in cap_keys}
+                mid: {k: v for k, v in vals.items() if k.startswith("cap_")}
                 for mid, vals in grouped.items()
             }
     except Exception:  # noqa: BLE001 — кэш не должен ронять бота
@@ -265,12 +288,13 @@ async def reset_all(db: Database, merchant_id: int = HEAD_MERCHANT_ID) -> None:
     """Сбросить оформление магазина к значениям по умолчанию (реестр)."""
     from sqlalchemy import delete as sa_delete
     from ..db.models import MerchantSetting
+    cap_keys = [f"cap_{s}" for s, _, _ in SCREEN_TEXTS]
     async with db.session() as session:
         await session.execute(sa_delete(MenuButton).where(MenuButton.merchant_id == merchant_id))
         await session.execute(
             sa_delete(MerchantSetting).where(
                 MerchantSetting.merchant_id == merchant_id,
-                MerchantSetting.key.in_(set(MENU_CAPTION.values())),
+                MerchantSetting.key.in_(cap_keys),
             )
         )
         await session.commit()
@@ -278,12 +302,10 @@ async def reset_all(db: Database, merchant_id: int = HEAD_MERCHANT_ID) -> None:
 
 
 async def set_caption(
-    db: Database, menu: str, text: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
+    db: Database, screen: str, text: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
 ) -> None:
-    skey = MENU_CAPTION.get(menu)
-    if not skey:
-        return
+    """Задать/сбросить текст экрана (ключ cap_<screen>) для магазина."""
     async with db.session() as session:
-        await msettings_service.set(session, merchant_id, skey, text)
+        await msettings_service.set(session, merchant_id, f"cap_{screen}", text)
         await session.commit()
     await load(db)

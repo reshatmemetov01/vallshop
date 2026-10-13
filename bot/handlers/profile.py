@@ -69,10 +69,10 @@ async def _profile_caption(
             Order.user_id == user_id, Order.merchant_id == merchant_id
         )
     )
-    return texts.PROFILE.format(
-        user_id=user_id,
-        balance=texts.rub(balance),
-        orders=int(orders or 0),
+    from ..services import menu as menu_service
+    return menu_service.caption(
+        "profile", texts.PROFILE, merchant_id,
+        user_id=user_id, balance=texts.rub(balance), orders=int(orders or 0),
     )
 
 
