@@ -449,6 +449,9 @@ class MenuButton(Base):
     emoji_id: Mapped[Optional[str]] = mapped_column(String(32))     # None = дефолт, "" = без эмодзи
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[Optional[int]] = mapped_column(Integer)      # None = дефолт
+    # Цвет кнопки: None = дефолт (реестр у головного / без цвета у франшизы),
+    # "" = без цвета, "primary"/"success"/"danger" = синий/зелёный/красный.
+    style: Mapped[Optional[str]] = mapped_column(String(16))
 
 
 class MerchantSetting(Base):

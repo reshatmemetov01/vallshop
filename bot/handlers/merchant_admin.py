@@ -461,15 +461,36 @@ async def _show_button(call: CallbackQuery, key: str, merchant_id: int) -> None:
         f"Меню: {menu_service.MENU_TITLES.get(e.menu, e.menu)}\n"
         f"Текст: <b>{r.text}</b>\n"
         f"Эмодзи: {emoji_state}\n"
+        f"Цвет: {_COLOR_NAME.get(r.style)}\n"
         f"Видимость: {vis}"
     )
     kb = InlineKeyboardBuilder()
     kb.row(_b("✏️ Текст", f"mo_lbl:{key}"), _b("🙂 Эмодзи", f"mo_emo:{key}"))
+    kb.row(_b(f"🎨 Цвет: {_COLOR_NAME.get(r.style)}", f"mo_color:{key}"))
     kb.row(_b("🔼 Вверх", f"mo_up:{key}"), _b("🔽 Вниз", f"mo_dn:{key}"))
     tog = "🔴 Скрыть" if r.enabled else "🟢 Показать"
     kb.row(_b(tog, f"mo_tog:{key}"))
     kb.row(_b("⬅️ Назад", f"mo_menu:{e.menu}"))
     await _edit(call, caption, kb)
+
+
+# Цикл цветов кнопки: без цвета → синий → зелёный → красный → ...
+_COLOR_CYCLE = ["", "primary", "success", "danger"]
+_COLOR_NAME = {None: "без цвета", "": "без цвета",
+               "primary": "🔵 синий", "success": "🟢 зелёный", "danger": "🔴 красный"}
+
+
+@router.callback_query(F.data.startswith("mo_color:"))
+async def cb_oform_color(call: CallbackQuery, db: Database,
+                         merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    key = call.data.split(":", 1)[1]
+    r = menu_service.resolved(key, merchant_id)
+    cur = r.style or "" if r else ""
+    nxt = _COLOR_CYCLE[(_COLOR_CYCLE.index(cur) + 1) % len(_COLOR_CYCLE)] \
+        if cur in _COLOR_CYCLE else "primary"
+    await menu_service.set_style(db, key, nxt, merchant_id)
+    await _show_button(call, key, merchant_id)
+    await call.answer(f"Цвет: {_COLOR_NAME.get(nxt)}")
 
 
 @router.callback_query(F.data.startswith("mo_btn:"))

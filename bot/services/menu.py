@@ -128,11 +128,18 @@ def _resolve_one(e: Entry, merchant_id: int = HEAD_MERCHANT_ID) -> Resolved:
         text = f"{e.plain} {e.label}"
     else:
         text = e.label
+    # Цвет: своя правка → её значение ("" = без цвета); иначе у франшизы по
+    # умолчанию БЕЗ цвета, у головного — цвет из реестра.
+    style_ov = ov.get("style", "__default__")
+    if style_ov != "__default__":
+        style = style_ov or None
+    else:
+        style = None if is_franchise else e.style
     return Resolved(
         key=e.key,
         text=text,
         emoji_id=emoji_id,
-        style=e.style,
+        style=style,
         kind=e.kind,
         target=e.target,
         enabled=ov.get("enabled", True),
@@ -213,6 +220,7 @@ async def load(db: Database) -> None:
                     "emoji_id": r.emoji_id if r.emoji_id is not None else "__default__",
                     "enabled": bool(r.enabled),
                     "sort_order": r.sort_order,
+                    "style": r.style if r.style is not None else "__default__",
                 }
             _overrides = ov
             grouped = await msettings_service.all_grouped(session)
@@ -251,6 +259,17 @@ async def set_emoji(
     async with db.session() as session:
         row = await _get_or_create(session, key, merchant_id)
         row.emoji_id = emoji_id
+        await session.commit()
+    await load(db)
+
+
+async def set_style(
+    db: Database, key: str, style: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
+    """Цвет кнопки: None = сброс к дефолту, "" = без цвета, иначе primary/success/danger."""
+    async with db.session() as session:
+        row = await _get_or_create(session, key, merchant_id)
+        row.style = style
         await session.commit()
     await load(db)
 

@@ -88,6 +88,21 @@ async def test_profile_placeholders_formatted(db):
 
 
 @pytest.mark.asyncio
+async def test_button_color_default_and_override(db):
+    # Головной: цвет из реестра. Франшиза: по умолчанию без цвета.
+    assert menu_service.resolved("main.catalog", 0).style == "primary"  # головной
+    assert menu_service.resolved("main.catalog", 7).style is None        # франшиза — без цвета
+    # Франшиза может задать цвет — он не влияет на головной и другую франшизу.
+    await menu_service.set_style(db, "main.catalog", "success", merchant_id=7)
+    assert menu_service.resolved("main.catalog", 7).style == "success"
+    assert menu_service.resolved("main.catalog", 0).style == "primary"   # головной не тронут
+    assert menu_service.resolved("main.catalog", 8).style is None        # другая франшиза
+    # "" = явно без цвета
+    await menu_service.set_style(db, "main.catalog", "", merchant_id=7)
+    assert menu_service.resolved("main.catalog", 7).style is None
+
+
+@pytest.mark.asyncio
 async def test_franchise_default_uses_shop_title(db):
     # Нейтральное приветствие подставляет название магазина франшизы.
     from bot.db import Merchant
