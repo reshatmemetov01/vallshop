@@ -51,7 +51,8 @@ async def test_reset_keeps_banners_clears_text(db):
         await s.commit()
     # сброс оформления
     await menu_service.reset_all(db, merchant_id=5)
-    assert menu_service.caption("main", "БАЗА", 5) == "БАЗА"   # текст сброшен
+    cap = menu_service.caption("main", "БАЗА", 5)
+    assert cap != "Привет" and "магазин цифровых товаров" in cap  # вернулся нейтральный дефолт
     async with db.session() as s:
         assert await ms.get(s, 5, ms.banner_key("main")) == "FILEID"  # баннер уцелел
 

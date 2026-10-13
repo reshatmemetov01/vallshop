@@ -30,6 +30,7 @@ class Entry:
     target: str               # callback_data, либо ключ URL (offer/agreement/privacy), либо прямой url
     order: int
     full_width: bool = False  # True — кнопка занимает всю строку (не встаёт в пару)
+    plain: str = ""           # обычный эмодзи для дефолта франшиз (без премиум-иконки)
 
 
 # Колонок в ряд для каждого меню.
@@ -43,24 +44,24 @@ MENU_CAPTION = {"main": "cap_main", "faq": "cap_faq"}
 
 REGISTRY: List[Entry] = [
     # Главное меню: [Каталог, Профиль] / [Активировать Код] / [FAQ, Отзывы]
-    Entry("main.catalog",  "main", "Каталог",            "5805550320985578625", "primary", "cb", "catalog", 10),
-    Entry("main.profile",  "main", "Мой профиль",        "6035084557378654059", "success", "cb", "profile", 20),
-    Entry("main.activate", "main", "Активировать Код",   "5422711448914647622", "primary", "cb", "activate", 30, full_width=True),
-    Entry("main.faq",      "main", "FAQ / Правила",      "6030848053177486888", "danger",  "cb", "faq", 40),
-    Entry("main.reviews",  "main", "Отзывы",             "5890925363067886150", "primary", "cb", "reviews", 50),
-    Entry("main.earn",     "main", "Заработать",         "5904462880941545555", "success", "cb", "earn", 60, full_width=True),
+    Entry("main.catalog",  "main", "Каталог",            "5805550320985578625", "primary", "cb", "catalog", 10, plain="🛍"),
+    Entry("main.profile",  "main", "Мой профиль",        "6035084557378654059", "success", "cb", "profile", 20, plain="👤"),
+    Entry("main.activate", "main", "Активировать Код",   "5422711448914647622", "primary", "cb", "activate", 30, full_width=True, plain="🎟"),
+    Entry("main.faq",      "main", "FAQ / Правила",      "6030848053177486888", "danger",  "cb", "faq", 40, plain="❓"),
+    Entry("main.reviews",  "main", "Отзывы",             "5890925363067886150", "primary", "cb", "reviews", 50, plain="⭐"),
+    Entry("main.earn",     "main", "Заработать",         "5904462880941545555", "success", "cb", "earn", 60, full_width=True, plain="💰"),
     # Профиль (каждая на своей строке)
-    Entry("profile.balance",  "profile", "Мой баланс",          "5778421276024509124", "danger",  "cb", "balance", 10),
-    Entry("profile.myorders", "profile", "Мои заказы",          "5904359114531675993", "primary", "cb", "myorders", 20),
-    Entry("profile.mytopups", "profile", "История пополнений",  "6039859895291877126", None,      "cb", "mytopups", 30),
+    Entry("profile.balance",  "profile", "Мой баланс",          "5778421276024509124", "danger",  "cb", "balance", 10, plain="💳"),
+    Entry("profile.myorders", "profile", "Мои заказы",          "5904359114531675993", "primary", "cb", "myorders", 20, plain="🧾"),
+    Entry("profile.mytopups", "profile", "История пополнений",  "6039859895291877126", None,      "cb", "mytopups", 30, plain="💸"),
     # FAQ / Правила: [Техподдержка] / [Конфиденциальность, Соглашение] / [Оферта]
-    Entry("faq.support",   "faq", "Техподдержка",                  "6021618194228187816", "primary", "url", "support", 10, full_width=True),
-    Entry("faq.privacy",   "faq", "Политика конфиденциальности",   "5935757052042285202", None,      "url", "privacy", 20),
-    Entry("faq.agreement", "faq", "Политика соглашения",           "6030445631921721471", None,      "url", "agreement", 30),
-    Entry("faq.offer",     "faq", "Публичная оферта",              "6030445631921721471", "success", "url", "offer", 40, full_width=True),
+    Entry("faq.support",   "faq", "Техподдержка",                  "6021618194228187816", "primary", "url", "support", 10, full_width=True, plain="🆘"),
+    Entry("faq.privacy",   "faq", "Политика конфиденциальности",   "5935757052042285202", None,      "url", "privacy", 20, plain="🔒"),
+    Entry("faq.agreement", "faq", "Политика соглашения",           "6030445631921721471", None,      "url", "agreement", 30, plain="📄"),
+    Entry("faq.offer",     "faq", "Публичная оферта",              "6030445631921721471", "success", "url", "offer", 40, full_width=True, plain="📑"),
     # Заработок: Реферальная система + Франшиза (франшиза видна только в головном
     # боте; её можно скрыть здесь, пока она в разработке).
-    Entry("earn.ref",       "earn", "Реферальная система", "5879905000972358125", "primary", "cb", "ref", 10, full_width=True),
+    Entry("earn.ref",       "earn", "Реферальная система", "5879905000972358125", "primary", "cb", "ref", 10, full_width=True, plain="👥"),
     Entry("earn.franchise", "earn", "🏪 Франшиза",         None,                  "success", "cb", "fr_home", 20, full_width=True),
 ]
 
@@ -71,6 +72,8 @@ _BY_KEY: Dict[str, Entry] = {e.key: e for e in REGISTRY}
 #   _captions[merchant_id][skey] -> текст экрана
 _overrides: Dict[int, Dict[str, dict]] = {}
 _captions: Dict[int, Dict[str, str]] = {}
+# Названия магазинов франшиз (для нейтральных дефолт-текстов): merchant_id -> title.
+_titles: Dict[int, str] = {}
 
 
 @dataclass
@@ -90,10 +93,25 @@ def _resolve_one(e: Entry, merchant_id: int = HEAD_MERCHANT_ID) -> Resolved:
     ov = _overrides.get(merchant_id, {}).get(e.key, {})
     label = ov.get("label")
     emoji = ov.get("emoji_id", "__default__")
+    is_franchise = merchant_id != HEAD_MERCHANT_ID
+    # Эмодзи: у головного — премиум-иконка из реестра; у франшизы по умолчанию
+    # премиум-иконки НЕТ (минимальный вид), только если владелец сам задал.
+    if emoji == "__default__":
+        emoji_id = None if is_franchise else e.emoji_id
+    else:
+        emoji_id = emoji or None
+    # Текст: своя подпись важнее всего; у франшизы без своей иконки и без
+    # переопределения — обычный эмодзи в тексте (🛍 Каталог).
+    if label:
+        text = label
+    elif is_franchise and not emoji_id and e.plain:
+        text = f"{e.plain} {e.label}"
+    else:
+        text = e.label
     return Resolved(
         key=e.key,
-        text=label if label else e.label,
-        emoji_id=e.emoji_id if emoji == "__default__" else (emoji or None),
+        text=text,
+        emoji_id=emoji_id,
         style=e.style,
         kind=e.kind,
         target=e.target,
@@ -122,19 +140,42 @@ def resolved(key: str, merchant_id: int = HEAD_MERCHANT_ID) -> Optional[Resolved
     return _resolve_one(e, merchant_id) if e else None
 
 
+def _franchise_default_caption(menu: str, merchant_id: int) -> Optional[str]:
+    """Нейтральный дефолт-текст для франшизы (без бренда платформы).
+
+    Подставляет название магазина франшизы. Возвращает None, если для меню нет
+    нейтрального шаблона (тогда используется переданный default).
+    """
+    from .. import texts
+    shop = _titles.get(merchant_id) or "магазин"
+    if menu == "main":
+        return texts.START_FRANCHISE.format(shop=shop)
+    if menu == "faq":
+        return texts.FAQ_FRANCHISE
+    return None
+
+
 def caption(menu: str, default: str, merchant_id: int = HEAD_MERCHANT_ID) -> str:
-    """Текст экрана с учётом переопределения магазина (ключ cap_<menu>)."""
+    """Текст экрана: своё переопределение магазина → нейтральный дефолт для
+    франшизы → переданный default (бренд платформы, для головного)."""
     skey = MENU_CAPTION.get(menu)
     if skey and _captions.get(merchant_id, {}).get(skey):
         return _captions[merchant_id][skey]
+    if merchant_id != HEAD_MERCHANT_ID:
+        fb = _franchise_default_caption(menu, merchant_id)
+        if fb is not None:
+            return fb
     return default
 
 
 # ── Загрузка/обновление кэша ────────────────────────────────────────────────
 async def load(db: Database) -> None:
-    global _overrides, _captions
+    global _overrides, _captions, _titles
+    from ..db.models import Merchant
     try:
         async with db.session() as session:
+            mrows = list(await session.scalars(select(Merchant)))
+            _titles = {m.id: m.title for m in mrows if m.title}
             rows = list(await session.scalars(select(MenuButton)))
             ov: Dict[int, Dict[str, dict]] = {}
             for r in rows:

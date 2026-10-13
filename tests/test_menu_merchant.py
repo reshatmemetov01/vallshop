@@ -24,8 +24,11 @@ async def test_button_override_is_per_merchant(db):
     # Правка у франшизы 1 не влияет на головной (0) и другую франшизу (2).
     await menu_service.set_label(db, "main.catalog", "Товары", merchant_id=1)
     assert menu_service.resolved("main.catalog", 1).text == "Товары"
-    assert menu_service.resolved("main.catalog", 0).text == "Каталог"   # головной
-    assert menu_service.resolved("main.catalog", 2).text == "Каталог"   # другая франшиза
+    assert menu_service.resolved("main.catalog", 0).text == "Каталог"       # головной — премиум-иконка
+    assert menu_service.resolved("main.catalog", 0).emoji_id == "5805550320985578625"
+    # другая франшиза — минимальный дефолт: обычный эмодзи в тексте, без премиум-иконки
+    assert menu_service.resolved("main.catalog", 2).text == "🛍 Каталог"
+    assert menu_service.resolved("main.catalog", 2).emoji_id is None
 
 
 @pytest.mark.asyncio
@@ -48,13 +51,28 @@ async def test_caption_per_merchant(db):
 
 
 @pytest.mark.asyncio
-async def test_new_franchise_uses_base_template(db):
-    # У головного правки есть, у новой франшизы — чистый реестр-дефолт.
+async def test_new_franchise_uses_minimal_template(db):
+    # У головного свои правки; у новой франшизы — минимальный нейтральный дефолт,
+    # НЕ копия головного и без бренда платформы.
     await menu_service.set_label(db, "main.catalog", "МойМагазин", merchant_id=0)
-    await menu_service.set_caption(db, "main", "Моё приветствие", merchant_id=0)
-    # франшиза 7 без правок
-    assert menu_service.resolved("main.catalog", 7).text == "Каталог"
-    assert menu_service.caption("main", "БАЗА", 7) == "БАЗА"
+    await menu_service.set_caption(db, "main", "Моё приветствие VallShop", merchant_id=0)
+    # франшиза 7 без правок: обычный эмодзи, нейтральный текст без «VallShop»
+    assert menu_service.resolved("main.catalog", 7).text == "🛍 Каталог"
+    cap = menu_service.caption("main", "БРЕНД-ДЕФОЛТ", 7)
+    assert "VallShop" not in cap and "БРЕНД-ДЕФОЛТ" not in cap
+    assert "магазин цифровых товаров" in cap     # нейтральный шаблон франшизы
+
+
+@pytest.mark.asyncio
+async def test_franchise_default_uses_shop_title(db):
+    # Нейтральное приветствие подставляет название магазина франшизы.
+    from bot.db import Merchant
+    async with db.session() as s:
+        s.add(Merchant(id=9, title="СуперКоды", bot_token="t:9", bot_username="s", admin_user_id=1))
+        await s.commit()
+    await menu_service.load(db)
+    cap = menu_service.caption("main", "DEF", 9)
+    assert "СуперКоды" in cap and "VallShop" not in cap
 
 
 @pytest.mark.asyncio
