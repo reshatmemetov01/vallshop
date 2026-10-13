@@ -104,8 +104,13 @@ async def list_products(
     *,
     only_active: bool = True,
     parent_id: Optional[int] = None,
+    exclude_head_only: bool = False,
 ) -> List[Product]:
-    """Товары уровня ``parent_id`` (по умолчанию — верхний уровень, parent IS NULL)."""
+    """Товары уровня ``parent_id`` (по умолчанию — верхний уровень, parent IS NULL).
+
+    ``exclude_head_only=True`` (каталог франшизы) скрывает товары, помеченные
+    «только для головного» (Product.head_only).
+    """
     stmt = select(Product).order_by(Product.sort_order, Product.id)
     if parent_id is None:
         stmt = stmt.where(Product.parent_id.is_(None))
@@ -113,13 +118,19 @@ async def list_products(
         stmt = stmt.where(Product.parent_id == parent_id)
     if only_active:
         stmt = stmt.where(Product.is_active.is_(True))
+    if exclude_head_only:
+        stmt = stmt.where(Product.head_only.is_(False))
     return list(await session.scalars(stmt))
 
 
 async def list_children(
-    session: AsyncSession, parent_id: int, *, only_active: bool = True
+    session: AsyncSession, parent_id: int, *, only_active: bool = True,
+    exclude_head_only: bool = False,
 ) -> List[Product]:
-    return await list_products(session, only_active=only_active, parent_id=parent_id)
+    return await list_products(
+        session, only_active=only_active, parent_id=parent_id,
+        exclude_head_only=exclude_head_only,
+    )
 
 
 async def children_count(session: AsyncSession, parent_id: int) -> int:

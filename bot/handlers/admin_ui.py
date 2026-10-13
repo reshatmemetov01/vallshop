@@ -714,11 +714,13 @@ async def _product_card(session, config: BotConfig, product_id: int):
     desc = product.description or "— (нет описания)"
     kind = "📁 категория" if children else "📦 товар"
     banner = "🖼 есть" if product.banner_file_id else "— нет"
+    fr = "🔴 скрыт" if getattr(product, "head_only", False) else "🟢 показан"
     caption = (
         f"{kind}: <b>{product.title}</b>\n"
         f"Игра: {product.game} · {flag}\n"
         f"Описание: {desc}\n"
         f"Баннер: {banner}\n"
+        f"У франшиз: {fr}\n"
         f"Подкатегорий: {len(children)} · Номиналов: {len(variants)}"
     )
     kb = InlineKeyboardBuilder()
@@ -749,6 +751,8 @@ async def _product_card(session, config: BotConfig, product_id: int):
         _btn("🖼 Баннер", f"a_pbanner:{product_id}"),
     )
     kb.row(_btn("🔁 Вкл/выкл товар", f"a_tprod:{product_id}"))
+    _hd = "🏪 Скрыть у франшиз" if not getattr(product, "head_only", False) else "🏪 Показать у франшиз"
+    kb.row(_btn(_hd, f"a_phead:{product_id}"))
     _fw = "↔️ Во всю строку: ✅" if getattr(product, "full_width", False) else "↔️ Во всю строку: ❌"
     _cur_style = getattr(product, "button_style", None) or "primary"
     kb.row(
@@ -813,6 +817,20 @@ async def cb_prod_style(call: CallbackQuery, db: Database, config: BotConfig) ->
         caption, markup = await _product_card(session, config, pid)
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer("Цвет: синий/зелёный/красный")
+
+
+@router.callback_query(F.data.startswith("a_phead:"))
+async def cb_prod_head_only(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    """Переключить видимость товара у франшиз (head_only)."""
+    pid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        product = await session.get(Product, pid)
+        if product:
+            product.head_only = not bool(getattr(product, "head_only", False))
+            await session.commit()
+        caption, markup = await _product_card(session, config, pid)
+    await call.message.edit_text(caption, reply_markup=markup)
+    await call.answer("Скрыт у франшиз" if product and product.head_only else "Показан у франшиз")
 
 
 @router.callback_query(F.data.startswith("a_pfw:"))

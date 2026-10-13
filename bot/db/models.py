@@ -165,6 +165,8 @@ class Product(Base):
     # об успешной выдаче на аккаунт (без кода).
     pending_text: Mapped[Optional[str]] = mapped_column(Text)
     delivered_text: Mapped[Optional[str]] = mapped_column(Text)
+    # Только для головного магазина: товар не показывается клиентам франшиз.
+    head_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     variants: Mapped[List["Variant"]] = relationship(

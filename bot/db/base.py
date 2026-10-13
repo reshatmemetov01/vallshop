@@ -89,6 +89,8 @@ class Database:
             ("orders", "merchant_margin", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
             # Франшиза (Оформление O1): пер-мерчантные правки кнопок меню.
             ("menu_buttons", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            # Франшиза: товар только для головного (скрыт у франшиз).
+            ("products", "head_only", "BOOLEAN NOT NULL DEFAULT 0"),
         ]
         added_source = False
         for table, column, ddl in wanted:

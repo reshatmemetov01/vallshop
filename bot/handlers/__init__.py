@@ -53,11 +53,11 @@ def build_root_router() -> Router:
         admin.router, admin_ui.router, admin_codes.router, admin_orders.router,
         admin_reviews.router, admin_appearance.router, admin_referral.router,
         admin_merchants.router, admin_stats.router, franchise.router,
+        activation.router,  # «Активировать Код» — только у головного
     ):
         head_group.include_router(_r)
     root.include_router(head_group)
 
-    root.include_router(activation.router)
     root.include_router(referral.router)
     root.include_router(merchant_admin.router)
     root.include_router(reviews.router)

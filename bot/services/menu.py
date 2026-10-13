@@ -31,6 +31,7 @@ class Entry:
     order: int
     full_width: bool = False  # True — кнопка занимает всю строку (не встаёт в пару)
     plain: str = ""           # обычный эмодзи для дефолта франшиз (без премиум-иконки)
+    head_only: bool = False   # True — кнопка только в головном боте (не у франшиз)
 
 
 # Колонок в ряд для каждого меню.
@@ -46,7 +47,7 @@ REGISTRY: List[Entry] = [
     # Главное меню: [Каталог, Профиль] / [Активировать Код] / [FAQ, Отзывы]
     Entry("main.catalog",  "main", "Каталог",            "5805550320985578625", "primary", "cb", "catalog", 10, plain="🛍"),
     Entry("main.profile",  "main", "Мой профиль",        "6035084557378654059", "success", "cb", "profile", 20, plain="👤"),
-    Entry("main.activate", "main", "Активировать Код",   "5422711448914647622", "primary", "cb", "activate", 30, full_width=True, plain="🎟"),
+    Entry("main.activate", "main", "Активировать Код",   "5422711448914647622", "primary", "cb", "activate", 30, full_width=True, plain="🎟", head_only=True),
     Entry("main.faq",      "main", "FAQ / Правила",      "6030848053177486888", "danger",  "cb", "faq", 40, plain="❓"),
     Entry("main.reviews",  "main", "Отзывы",             "5890925363067886150", "primary", "cb", "reviews", 50, plain="⭐"),
     Entry("main.earn",     "main", "Заработать",         "5904462880941545555", "success", "cb", "earn", 60, full_width=True, plain="💰"),
@@ -124,7 +125,11 @@ def _resolve_one(e: Entry, merchant_id: int = HEAD_MERCHANT_ID) -> Resolved:
 def menu_entries(
     menu: str, merchant_id: int = HEAD_MERCHANT_ID, *, only_enabled: bool = True
 ) -> List[Resolved]:
-    items = [_resolve_one(e, merchant_id) for e in REGISTRY if e.menu == menu]
+    is_franchise = merchant_id != HEAD_MERCHANT_ID
+    # Кнопки head_only (напр. «Активировать Код») — только в головном боте; у
+    # франшиз их нет вовсе (ни на экране, ни в редакторе оформления).
+    entries = [e for e in REGISTRY if e.menu == menu and not (is_franchise and e.head_only)]
+    items = [_resolve_one(e, merchant_id) for e in entries]
     if only_enabled:
         items = [r for r in items if r.enabled]
     items.sort(key=lambda r: (r.order, r.key))

@@ -130,9 +130,13 @@ async def cmd_menu(
 
 
 @router.message(F.text == "🛍 Каталог")
-async def msg_catalog(message: Message, db: Database) -> None:
+async def msg_catalog(
+    message: Message, db: Database, merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
     async with db.session() as session:
-        products = await catalog_service.list_products(session)
+        products = await catalog_service.list_products(
+            session, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
+        )
     caption = texts.CHOOSE_PRODUCT if products else texts.CATALOG_EMPTY
     await render(message, banner="catalog", caption=caption, reply_markup=kb.products_kb(products))
 
@@ -180,10 +184,15 @@ async def cb_faq(
 
 
 @router.callback_query(F.data == "catalog")
-async def cb_catalog(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_catalog(
+    call: CallbackQuery, db: Database, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     await state.clear()
     async with db.session() as session:
-        products = await catalog_service.list_products(session)
+        products = await catalog_service.list_products(
+            session, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
+        )
     caption = texts.CHOOSE_PRODUCT if products else texts.CATALOG_EMPTY
     # Верхний уровень — сеткой по 2 в ряд (категории-плитки).
     await render(
@@ -199,10 +208,11 @@ async def cb_product(
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     product_id = int(call.data.split(":", 1)[1])
+    is_franchise = merchant_id != HEAD_MERCHANT_ID
     async with db.session() as session:
         product = await catalog_service.get_product(session, product_id)
-        if not product:
-            await call.answer("Товар не найден", show_alert=True)
+        if not product or (is_franchise and product.head_only):
+            await call.answer("Товар недоступен", show_alert=True)
             return
         # Спец-кнопка «Пополнить Steam» — свой флоу (логин → валюта → сумма).
         if product.game == "STEAM_TOPUP":
@@ -213,7 +223,9 @@ async def cb_product(
             await _start_stars(call, db, state)
             return
         parent_id = product.parent_id
-        children = await catalog_service.list_children(session, product_id)
+        children = await catalog_service.list_children(
+            session, product_id, exclude_head_only=is_franchise
+        )
         prod_emoji = texts.ce(product.icon_emoji_id or "5298953332079999355", "🎮")
 
         # Куда вести кнопку «Назад»: к родительской категории или в каталог.
