@@ -166,13 +166,15 @@ async def cb_faq(
     offer, agreement, privacy = config.offer_url, config.agreement_url, config.privacy_url
     support = config.support_contact
     if merchant_id != HEAD_MERCHANT_ID:
-        # Франшиза: свои контакты/ссылки (если заданы), иначе кнопка скрыта.
+        # Франшиза: свои контакты/ссылки/документы (если заданы), иначе кнопка скрыта.
+        # Значение документа может быть ссылкой (https://…) или текстом — тогда
+        # показываем кнопку-документ в самом боте (cb:faqdoc:<which>).
         from ..services import msettings as msettings_service
         async with db.session() as session:
             vals = await msettings_service.all_for(session, merchant_id)
-        offer = vals.get(msettings_service.URL_OFFER)
-        agreement = vals.get(msettings_service.URL_AGREEMENT)
-        privacy = vals.get(msettings_service.URL_PRIVACY)
+        offer = _doc_value(vals.get(msettings_service.URL_OFFER), "offer")
+        agreement = _doc_value(vals.get(msettings_service.URL_AGREEMENT), "agreement")
+        privacy = _doc_value(vals.get(msettings_service.URL_PRIVACY), "privacy")
         support = vals.get(msettings_service.SUPPORT)
     if not offer and support:
         caption += texts.FAQ_NO_OFFER.format(support=support)
@@ -180,6 +182,53 @@ async def cb_faq(
         call, banner="faq", caption=caption,
         reply_markup=kb.faq_kb(offer, agreement, privacy, merchant_id, support_url=support),
     )
+    await call.answer()
+
+
+def _is_url(v: str) -> bool:
+    return bool(v) and v.strip().startswith(("http://", "https://", "tg://"))
+
+
+def _doc_value(raw: Optional[str], which: str) -> Optional[str]:
+    """Значение для кнопки документа: ссылка как есть, текст → cb:faqdoc:<which>."""
+    if not raw:
+        return None
+    return raw if _is_url(raw) else f"cb:faqdoc:{which}"
+
+
+_DOC_KEY = {"offer": "URL_OFFER", "agreement": "URL_AGREEMENT", "privacy": "URL_PRIVACY"}
+_DOC_TITLE = {"offer": "Публичная оферта", "agreement": "Пользовательское соглашение",
+              "privacy": "Политика конфиденциальности"}
+
+
+@router.callback_query(F.data.startswith("faqdoc:"))
+async def cb_faq_doc(
+    call: CallbackQuery, db: Database, merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
+    which = call.data.split(":", 1)[1]
+    from ..services import msettings as msettings_service
+    key = getattr(msettings_service, _DOC_KEY.get(which, ""), None)
+    text = None
+    if key:
+        async with db.session() as session:
+            text = await msettings_service.get(session, merchant_id, key)
+    if not text:
+        await call.answer("Документ недоступен", show_alert=True)
+        return
+    title = _DOC_TITLE.get(which, "Документ")
+    body = f"<b>{title}</b>\n\n{text}"[:4096]  # лимит текста Telegram
+    kb_b = InlineKeyboardBuilder()
+    kb_b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="faq"))
+    # Показываем документ как текст (без баннера) — чтобы вместить длинный текст.
+    msg = call.message
+    try:
+        await msg.edit_text(body, reply_markup=kb_b.as_markup())
+    except Exception:  # noqa: BLE001 — было фото: пересоздаём сообщением
+        try:
+            await msg.delete()
+        except Exception:  # noqa: BLE001
+            pass
+        await msg.answer(body, reply_markup=kb_b.as_markup())
     await call.answer()
 
 

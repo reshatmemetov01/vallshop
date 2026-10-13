@@ -760,7 +760,7 @@ async def cb_contact_ask(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(ckey=key)
     kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "mo_contacts"))
     hint = ("@username или ссылка t.me" if key == msettings_service.SUPPORT
-            else "полная ссылка (https://…)")
+            else "ссылка https://… ИЛИ текст документа (покажется прямо в боте)")
     await _edit(
         call,
         f"✏️ <b>{title}</b>\n\nПришлите значение ({hint}).\n"

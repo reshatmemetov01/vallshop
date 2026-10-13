@@ -92,6 +92,10 @@ def _render_menu(menu: str, url_map: Optional[dict] = None, merchant_id: int = 0
                 url = url_map.get(r.target)
             if not url:
                 return None  # нет ссылки — пропускаем
+            # Значение вида "cb:<data>" — документ в самом боте (кнопка-колбэк),
+            # иначе обычная ссылка (url-кнопка).
+            if isinstance(url, str) and url.startswith("cb:"):
+                return _b(r.text, callback_data=url[3:], style=r.style, icon=r.emoji_id or None)
             return _b(r.text, url=url, style=r.style, icon=r.emoji_id or None)
         return _b(r.text, callback_data=r.target, style=r.style, icon=r.emoji_id or None)
 
