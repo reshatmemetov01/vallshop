@@ -73,3 +73,26 @@ async def test_merchant_id_reaches_filter_via_outer_middleware(db):
     await mw(handler, _call(555), data)
     assert data["merchant_id"] == mid          # middleware проставил merchant_id
     assert captured["ok"] is True              # фильтр увидел его и дал доступ
+
+
+@pytest.mark.asyncio
+async def test_head_only_filter():
+    # Админка платформы доступна только в головном боте (merchant_id == 0).
+    from bot.handlers import _HeadOnly
+    flt = _HeadOnly()
+    assert await flt(object(), merchant_id=0) is True
+    assert await flt(object(), merchant_id=1) is False
+
+
+def test_admin_button_hidden_in_franchise():
+    from bot import keyboards as kb
+    # Головной бот: кнопка «Админ-панель» есть у админа.
+    head = kb.main_menu_kb(is_admin=True, merchant_id=0)
+    assert any(
+        b.callback_data == "admin" for row in head.inline_keyboard for b in row
+    )
+    # Бот франшизы: той же кнопки нет, даже если пользователь — админ платформы.
+    fr = kb.main_menu_kb(is_admin=True, merchant_id=5)
+    assert not any(
+        b.callback_data == "admin" for row in fr.inline_keyboard for b in row
+    )

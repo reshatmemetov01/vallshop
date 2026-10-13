@@ -123,7 +123,8 @@ def main_menu_kb(
     is_admin: bool = False, is_merchant_admin: bool = False, merchant_id: int = 0
 ) -> InlineKeyboardMarkup:
     kb = _render_menu("main", merchant_id=merchant_id)
-    if is_admin:
+    # Админ-панель платформы — только в головном боте (не в ботах франшиз).
+    if is_admin and merchant_id == 0:
         kb.row(_b("Админ-панель", callback_data="admin", style="danger", icon=EMOJI["admin"]))
     if is_merchant_admin:
         kb.row(_b("🏪 Кабинет франшизы", callback_data="ma_home", style="success"))
