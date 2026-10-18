@@ -7,9 +7,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Tuple
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,27 +22,56 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db.models import Order, OrderStatus, User, Variant
 from . import rates as rates_service
 
+# Часовой пояс магазина по умолчанию (дни/«сегодня» считаются по нему). В БД
+# время — UTC, поэтому границы периодов переводим из местного времени в UTC.
+DEFAULT_TZ = "Europe/Moscow"
 
-def day_bounds(d: datetime) -> Tuple[datetime, datetime]:
-    start = datetime(d.year, d.month, d.day)
-    return start, start + timedelta(days=1)
+
+def _tz(tz: Optional[str]):
+    if ZoneInfo is None:
+        return timezone.utc
+    try:
+        return ZoneInfo(tz or DEFAULT_TZ)
+    except Exception:  # noqa: BLE001 — неизвестная зона → UTC
+        return timezone.utc
 
 
-def preset_range(preset: str) -> Tuple[Optional[datetime], datetime, str]:
-    """Вернуть (start|None, end, подпись) для пресета."""
-    now = datetime.utcnow()
+def _to_utc_naive(dt_local: datetime) -> datetime:
+    """Локальное (aware) время → наивное UTC (как хранится created_at в БД)."""
+    return dt_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def day_bounds(d: datetime, tz: Optional[str] = None) -> Tuple[datetime, datetime]:
+    """Границы суток [00:00, 24:00) указанной даты в местном часовом поясе → UTC.
+
+    ``d`` трактуется как календарная дата в часовом поясе магазина.
+    """
+    z = _tz(tz)
+    start_local = datetime(d.year, d.month, d.day, tzinfo=z)
+    end_local = start_local + timedelta(days=1)
+    return _to_utc_naive(start_local), _to_utc_naive(end_local)
+
+
+def preset_range(
+    preset: str, tz: Optional[str] = None
+) -> Tuple[Optional[datetime], datetime, str]:
+    """Вернуть (start|None, end, подпись) для пресета. Границы — в UTC, но дни
+    отсчитываются по местному часовому поясу магазина (``tz``)."""
+    z = _tz(tz)
+    now_local = datetime.now(z)
+    now_utc = _to_utc_naive(now_local)
     if preset == "today":
-        start, _ = day_bounds(now)
-        return start, now, "Сегодня"
+        start, _ = day_bounds(now_local, tz)
+        return start, now_utc, "Сегодня"
     if preset == "7d":
-        return now - timedelta(days=7), now, "7 дней"
+        return now_utc - timedelta(days=7), now_utc, "7 дней"
     if preset == "30d":
-        return now - timedelta(days=30), now, "30 дней"
+        return now_utc - timedelta(days=30), now_utc, "30 дней"
     if preset == "month":
-        start = datetime(now.year, now.month, 1)
-        return start, now, "Этот месяц"
+        start_local = datetime(now_local.year, now_local.month, 1, tzinfo=z)
+        return _to_utc_naive(start_local), now_utc, "Этот месяц"
     # all
-    return None, now, "Всё время"
+    return None, now_utc, "Всё время"
 
 
 async def users_stats(

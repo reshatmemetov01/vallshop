@@ -110,7 +110,7 @@ async def _render(target, db: Database, config: BotConfig, start, end, label, ed
 @router.callback_query(F.data == "st_home")
 async def cb_stats_home(call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext) -> None:
     await state.clear()
-    start, end, label = stats_service.preset_range("today")
+    start, end, label = stats_service.preset_range("today", config.shop_tz)
     await _render(call.message, db, config, start, end, label)
     await call.answer()
 
@@ -118,7 +118,7 @@ async def cb_stats_home(call: CallbackQuery, db: Database, config: BotConfig, st
 @router.callback_query(F.data.startswith("st:"))
 async def cb_stats_preset(call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext) -> None:
     await state.clear()
-    start, end, label = stats_service.preset_range(call.data.split(":", 1)[1])
+    start, end, label = stats_service.preset_range(call.data.split(":", 1)[1], config.shop_tz)
     await _render(call.message, db, config, start, end, label)
     await call.answer()
 
@@ -144,13 +144,13 @@ async def msg_stats_custom(message: Message, db: Database, config: BotConfig, st
     try:
         if len(parts) == 1:
             d = datetime.strptime(parts[0], "%d.%m.%Y")
-            start, end = stats_service.day_bounds(d)
+            start, end = stats_service.day_bounds(d, config.shop_tz)
             label = parts[0]
         elif len(parts) == 2:
             d1 = datetime.strptime(parts[0], "%d.%m.%Y")
             d2 = datetime.strptime(parts[1], "%d.%m.%Y")
-            start = datetime(d1.year, d1.month, d1.day)
-            end = datetime(d2.year, d2.month, d2.day) + timedelta(days=1)
+            start, _ = stats_service.day_bounds(d1, config.shop_tz)
+            _, end = stats_service.day_bounds(d2, config.shop_tz)
             label = f"{parts[0]} — {parts[1]}"
         else:
             raise ValueError

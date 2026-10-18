@@ -47,6 +47,10 @@ class BotConfig:
     # Валюта отображения цен (внутренне всё в USD ≈ USDT).
     currency: str = "USDT"
 
+    # Часовой пояс магазина для статистики (дни/«сегодня»/«этот месяц» считаются
+    # по местному времени, в БД время хранится в UTC). Напр. Europe/Moscow.
+    shop_tz: str = "Europe/Moscow"
+
     # Наценка по умолчанию (в процентах) поверх закупочной цены LioGames,
     # если у конкретной вариации не задана своя цена/наценка.
     default_markup_percent: Decimal = Decimal("0")
@@ -150,6 +154,7 @@ class BotConfig:
             admin_ids=_int_list(_get("ADMIN_IDS")),
             database_url=_get("DATABASE_URL", "sqlite+aiosqlite:///vallshop.db"),
             currency=_get("SHOP_CURRENCY", "USDT"),
+            shop_tz=_get("SHOP_TZ", "Europe/Moscow"),
             default_markup_percent=Decimal(_get("DEFAULT_MARKUP_PERCENT", "0")),
             bolt_base_url=_get("BOLT_BASE_URL", "https://api.boltutil.com"),
             bolt_api_key=_get("BOLT_API_KEY"),

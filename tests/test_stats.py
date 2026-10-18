@@ -66,3 +66,42 @@ def test_preset_labels():
     assert lbl == "Сегодня"
     s, _, lbl2 = stats_service.preset_range("all")
     assert s is None and lbl2 == "Всё время"
+
+
+def test_day_bounds_local_timezone_offset():
+    # «Сегодня»/день считаются по местному поясу: граница суток смещена от UTC.
+    from datetime import datetime
+    d = datetime(2026, 10, 18)
+    start_msk, end_msk = stats_service.day_bounds(d, "Europe/Moscow")
+    # МСК = UTC+3, поэтому сутки начинаются в 21:00 UTC предыдущего дня
+    assert start_msk == datetime(2026, 10, 17, 21, 0, 0)
+    assert end_msk == datetime(2026, 10, 18, 21, 0, 0)
+    # UTC-пояс — ровно полночь
+    start_utc, _ = stats_service.day_bounds(d, "UTC")
+    assert start_utc == datetime(2026, 10, 18, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_order_near_midnight_counts_in_local_today(db):
+    # Регрессия: заказ в 01:00 по МСК (= 22:00 UTC вчера) попадает в «сегодня» по МСК.
+    from datetime import datetime, timezone, timedelta
+    from zoneinfo import ZoneInfo
+    from sqlalchemy import text
+    msk = ZoneInfo("Europe/Moscow")
+    now_msk = datetime.now(msk)
+    local_0100 = now_msk.replace(hour=1, minute=0, second=0, microsecond=0)
+    utc_naive = local_0100.astimezone(timezone.utc).replace(tzinfo=None)
+    async with db.session() as s:
+        p = Product(game="X", title="T"); s.add(p); await s.flush()
+        v = Variant(product_id=p.id, title="v", liog_product_id=1, liog_variation_id=1,
+                    cost_usd=Decimal("1")); s.add(v); await s.flush()
+        s.add(User(id=1))
+        o = Order(client_ref="a", user_id=1, variant_id=v.id, price_usd=Decimal("100"),
+                  quantity=1, status=OrderStatus.COMPLETED)
+        s.add(o); await s.flush()
+        await s.execute(text("UPDATE orders SET created_at=:c WHERE id=:i"),
+                        {"c": utc_naive.strftime("%Y-%m-%d %H:%M:%S"), "i": o.id})
+        await s.commit()
+    start, end, _ = stats_service.preset_range("today", "Europe/Moscow")
+    async with db.session() as s:
+        assert (await stats_service.sales_stats(s, start, end))["orders"] == 1
