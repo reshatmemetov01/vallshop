@@ -18,6 +18,7 @@ from .config import BotConfig
 from .db import Database
 from .handlers import build_root_router
 from .payments import build_paydex, build_payhot, build_provider
+from .services.bcscheduler import run_broadcast_scheduler
 from .services.poller import (
     run_fulfillment_poller,
     run_smartprice_poller,
@@ -303,12 +304,15 @@ async def main() -> None:
     dp["vpn"] = vpn
     dp["bots_by_merchant"] = bots_by_merchant
 
-    from .middlewares import BlockedMiddleware, MerchantMiddleware
+    from .middlewares import BlockedMiddleware, ClickTrackingMiddleware, MerchantMiddleware
     # MerchantMiddleware — ВНЕШНИЙ (outer): кладёт merchant_id ДО фильтров роутеров,
     # иначе фильтры (напр. доступ в кабинет мерчанта) видят только дефолт 0.
     # Внутренний middleware выполняется после фильтров — для merchant_id это поздно.
     dp.message.outer_middleware(MerchantMiddleware(bot_to_merchant))
     dp.callback_query.outer_middleware(MerchantMiddleware(bot_to_merchant))
+    # Учёт кликов по кнопкам поста рассылки — ВНЕШНИЙ: переписывает bck:… в раздел
+    # ДО фильтров, чтобы сработал обычный хендлер навигации.
+    dp.callback_query.outer_middleware(ClickTrackingMiddleware())
     # Blocked — внутренний: merchant_id уже проставлен внешним MerchantMiddleware.
     dp.message.middleware(BlockedMiddleware())
     dp.callback_query.middleware(BlockedMiddleware())
@@ -335,6 +339,7 @@ async def main() -> None:
             run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex, bots=bots_by_merchant)
         ),
         asyncio.create_task(run_smartprice_poller(bot, db, fzr, config)),
+        asyncio.create_task(run_broadcast_scheduler(db, bots_by_merchant)),
     ]
     if config.public_base_url:
         await _run_web(config, bot, db, provider, liog, payhot, paydex, bots=bots_by_merchant)

@@ -18,6 +18,7 @@ class _States(StatesGroup):
     url = State()
     label = State()
     emoji = State()
+    schedule = State()
 
 
 class _FakeState:
@@ -58,6 +59,7 @@ class _FakeMsg:
         self.photo = photo
         self.entities = entities or []
         self.bot = _FakeBot()
+        self.from_user = _FakeUser()
         self.answers = []
 
     @property
@@ -138,12 +140,13 @@ async def test_compose_then_add_section_builds_draft(handlers, db, monkeypatch):
     # фоновая задача _job создана; дождёмся её через цикл событий
     import asyncio
     await asyncio.sleep(0.05)
-    # пост ушёл обоим клиентам, с клавиатурой
+    # пост ушёл обоим клиентам, с клавиатурой и tracking-колбэком (bck:id:idx:target)
     bot = call.message.bot
-    # _job использует call.message.bot — тот же объект
     assert len(bot.sent) >= 2
     _, _, markup = bot.sent[0]
-    assert markup is not None and markup.inline_keyboard[0][0].callback_data == "catalog"
+    assert markup is not None
+    cb = markup.inline_keyboard[0][0].callback_data
+    assert cb.startswith("bck:") and cb.endswith(":0:catalog")
 
 
 @pytest.mark.asyncio
@@ -158,6 +161,46 @@ async def test_url_button_validation(handlers):
     await handlers["url"](ok, st)
     btns = (await st.get_data())["d_btns"]
     assert btns[0]["kind"] == "url" and btns[0]["target"] == "https://t.me/mychannel"
+
+
+class _Cfg:
+    shop_tz = "Europe/Moscow"
+
+
+def test_parse_when_roundtrip():
+    from datetime import timezone
+    utc = bf._parse_when("31.12.2030 09:30", "Europe/Moscow")
+    assert utc is not None
+    # 09:30 МСК = 06:30 UTC (МСК = UTC+3)
+    assert (utc.hour, utc.minute) == (6, 30)
+    # обратно в местное
+    assert bf._fmt_local(utc, "Europe/Moscow") == "31.12.2030 09:30"
+    assert bf._parse_when("ерунда", "Europe/Moscow") is None
+
+
+@pytest.mark.asyncio
+async def test_schedule_creates_scheduled_broadcast(handlers, db):
+    from bot.services import broadcasts as svc
+    st = _FakeState()
+    await st.update_data(d_text="план", d_photo=None, d_btns=[])
+    msg = _FakeMsg(text="31.12.2030 09:30")
+    await handlers["msg_schedule"](msg, db, st, _Cfg(), merchant_id=0)
+    async with db.session() as s:
+        items = await svc.list_scheduled(s, 0)
+    assert len(items) == 1 and items[0].status == "scheduled"
+    assert items[0].text == "план"
+
+
+@pytest.mark.asyncio
+async def test_schedule_rejects_past(handlers, db):
+    from bot.services import broadcasts as svc
+    st = _FakeState()
+    await st.update_data(d_text="план", d_photo=None, d_btns=[])
+    msg = _FakeMsg(text="01.01.2020 10:00")
+    await handlers["msg_schedule"](msg, db, st, _Cfg(), merchant_id=0)
+    async with db.session() as s:
+        assert await svc.list_scheduled(s, 0) == []
+    assert any("прошл" in (a[1].lower()) for a in msg.answers)
 
 
 @pytest.mark.asyncio

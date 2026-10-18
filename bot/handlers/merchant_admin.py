@@ -1383,6 +1383,7 @@ class FranchiseBroadcast(StatesGroup):
     url = State()
     label = State()
     emoji = State()
+    schedule = State()
 
 
 broadcast_flow.register(

@@ -58,6 +58,7 @@ class HeadBroadcast(StatesGroup):
     url = State()
     label = State()
     emoji = State()
+    schedule = State()
 
 
 def _btn(text: str, data: str) -> InlineKeyboardButton:

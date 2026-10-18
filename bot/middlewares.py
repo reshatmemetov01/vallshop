@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict
 
+import logging
+
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 
 from .db.models import HEAD_MERCHANT_ID
 from .services.users import get_user
+
+log = logging.getLogger("vallshop.mw")
 
 
 class MerchantMiddleware(BaseMiddleware):
@@ -29,6 +33,33 @@ class MerchantMiddleware(BaseMiddleware):
         if bot is not None:
             mid = self._map.get(bot.id, HEAD_MERCHANT_ID)
         data["merchant_id"] = mid
+        return await handler(event, data)
+
+
+class ClickTrackingMiddleware(BaseMiddleware):
+    """Учёт кликов по кнопкам поста рассылки.
+
+    Кнопка-раздел в посте имеет callback ``bck:<broadcast_id>:<idx>:<target>``.
+    Middleware (внешний, для callback_query) записывает клик и переписывает
+    data в ``target``, чтобы дальше сработал обычный хендлер раздела — навигация
+    не ломается.
+    """
+
+    async def __call__(self, handler, event, data):
+        d = getattr(event, "data", None)
+        if isinstance(d, str) and d.startswith("bck:"):
+            target = "menu"  # безопасный фолбэк, если разбор не удался
+            try:
+                _, bid, idx, target = d.split(":", 3)
+                db = data.get("db")
+                user = data.get("event_from_user")
+                if db is not None and user is not None:
+                    from .services import broadcasts as broadcasts_service
+                    await broadcasts_service.record_click(db, int(bid), int(idx), user.id)
+            except Exception:  # noqa: BLE001 — учёт клика не должен ломать навигацию
+                log.exception("Не удалось учесть клик рассылки (data=%s)", d)
+            # Переписываем событие на реальный раздел (модели aiogram неизменяемы).
+            event = event.model_copy(update={"data": target})
         return await handler(event, data)
 
 

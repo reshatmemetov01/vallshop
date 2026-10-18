@@ -578,3 +578,51 @@ class TopUp(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Рассылки: запланированная/выполненная рассылка и клики по кнопкам поста
+# ──────────────────────────────────────────────────────────────────────────
+class Broadcast(Base):
+    """Одна рассылка магазина: черновик + расписание + результат.
+
+    Нужна как сущность с id, чтобы (а) отложенная отправка переживала перезапуск,
+    (б) к кнопкам поста можно было привязать подсчёт кликов (callback bck:id:idx).
+    Кнопки хранятся JSON-списком (см. broadcast_post_kb).
+    """
+
+    __tablename__ = "broadcasts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
+    created_by: Mapped[int] = mapped_column(Integer)  # tg-id автора
+    text: Mapped[Optional[str]] = mapped_column(Text)
+    photo: Mapped[Optional[str]] = mapped_column(String(255))  # file_id
+    buttons_json: Mapped[Optional[str]] = mapped_column(Text)
+    # scheduled|sending|done|canceled|failed
+    status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, index=True)  # UTC
+    recipients: Mapped[int] = mapped_column(Integer, default=0)
+    sent: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class BroadcastClick(Base):
+    """Счётчик кликов по кнопке поста: (рассылка, индекс кнопки, пользователь).
+
+    Строк столько же, сколько уникальных кликнувших × кнопок. ``count`` — сколько
+    раз этот пользователь тапал. Уникальные = число строк, всего тапов = сумма.
+    """
+
+    __tablename__ = "broadcast_clicks"
+
+    broadcast_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    btn_idx: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

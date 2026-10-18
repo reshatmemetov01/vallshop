@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from aiogram import F, Router
@@ -31,9 +32,11 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from ..config import BotConfig
 from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID
 from ..services import broadcast as broadcast_service
+from ..services import broadcasts as broadcasts_service
 from ..services import stats as stats_service
 from .. import keyboards as kb
 
@@ -70,6 +73,32 @@ def _bt(text: str, data: str) -> InlineKeyboardButton:
 
 # Telegram-юзернейм: 5–32 символа [A-Za-z0-9_] (допускаем от 3 для каналов).
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,32}$")
+
+
+_WHEN_FORMATS = ("%d.%m.%Y %H:%M", "%d.%m.%Y %H.%M", "%d.%m.%y %H:%M")
+
+
+def _parse_when(raw: str, tz: Optional[str]) -> Optional[datetime]:
+    """Разобрать «ДД.ММ.ГГГГ ЧЧ:ММ» (местное время магазина) → наивный UTC."""
+    raw = (raw or "").strip()
+    for fmt in _WHEN_FORMATS:
+        try:
+            dt_local = datetime.strptime(raw, fmt)
+            break
+        except ValueError:
+            continue
+    else:
+        return None
+    aware = dt_local.replace(tzinfo=stats_service._tz(tz))
+    return stats_service._to_utc_naive(aware)
+
+
+def _fmt_local(dt_utc: Optional[datetime], tz: Optional[str]) -> str:
+    """Наивный UTC → строка местного времени магазина."""
+    if dt_utc is None:
+        return "—"
+    aware = dt_utc.replace(tzinfo=timezone.utc).astimezone(stats_service._tz(tz))
+    return aware.strftime("%d.%m.%Y %H:%M")
 
 
 def _valid_post_url(raw: str) -> Optional[str]:
@@ -183,8 +212,12 @@ def register(
         count = len(await broadcast_service.recipients(db, merchant_id))
         async with db.session() as s:
             act = await stats_service.activity_stats(s, merchant_id)
+        async with db.session() as s:
+            n_sched = len(await broadcasts_service.list_scheduled(s, merchant_id))
         b = InlineKeyboardBuilder()
         b.row(_bt("✍️ Создать рассылку", f"{P}:new"))
+        b.row(_bt(f"🕒 Запланированные ({n_sched})", f"{P}:sl"),
+              _bt("📊 Статистика", f"{P}:stat"))
         b.row(_bt("⬅️ Назад", home_cb))
         await _show(
             call,
@@ -426,7 +459,7 @@ def register(
         await call.message.answer("👆 Так увидят клиенты.", reply_markup=b.as_markup())
         await call.answer()
 
-    # ── Подтверждение и отправка ─────────────────────────────────────────────
+    # ── Подтверждение: сейчас или по расписанию ──────────────────────────────
     @router.callback_query(F.data == f"{P}:send")
     async def cb_send_confirm(call: CallbackQuery, db: Database, state: FSMContext,
                               merchant_id: int = HEAD_MERCHANT_ID) -> None:
@@ -436,34 +469,44 @@ def register(
             return
         count = len(await broadcast_service.recipients(db, merchant_id))
         b = InlineKeyboardBuilder()
-        b.row(_bt("✅ Да, отправить", f"{P}:go"))
+        b.row(_bt("📤 Отправить сейчас", f"{P}:go"))
+        b.row(_bt("🕒 Запланировать", f"{P}:sch"))
         b.row(_bt("⬅️ Назад", f"{P}:ed"))
         await _show(
             call,
-            f"📤 Отправить рассылку <b>{count}</b> клиентам?\n"
-            f"Кнопок под постом: <b>{len(btns)}</b>.",
+            f"📤 Рассылка для <b>{count}</b> клиентов.\n"
+            f"Кнопок под постом: <b>{len(btns)}</b>.\n\n"
+            "Отправить сейчас или запланировать на время?",
             b.as_markup(),
         )
         await call.answer()
 
+    async def _create_bc(db, state, merchant_id, owner_id, status, scheduled_at=None):
+        text, photo, btns = _draft(await state.get_data())
+        async with db.session() as s:
+            bc = await broadcasts_service.create(
+                s, merchant_id=merchant_id, created_by=owner_id,
+                text=text, photo=photo, buttons=btns,
+                status=status, scheduled_at=scheduled_at,
+            )
+        return bc, (text, photo, btns)
+
     @router.callback_query(F.data == f"{P}:go")
     async def cb_go(call: CallbackQuery, db: Database, state: FSMContext,
                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
-        text, photo, btns = _draft(await state.get_data())
-        await state.clear()
+        text, photo, _ = _draft(await state.get_data())
         if not text and not photo:
             await call.answer("Нечего отправлять", show_alert=True)
             return
-        user_ids = await broadcast_service.recipients(db, merchant_id)
-        markup = kb.broadcast_post_kb(btns)
-        bot = call.message.bot
         owner_id = call.from_user.id
+        bc, _ = await _create_bc(db, state, merchant_id, owner_id, "sending")
+        await state.clear()
+        bc_id = bc.id
+        count = len(await broadcast_service.recipients(db, merchant_id))
+        bot = call.message.bot
 
         async def _job():
-            sent, failed, ok_ids, blocked_ids = await broadcast_service.run(
-                bot, user_ids, text=text, photo=photo, reply_markup=markup
-            )
-            await broadcast_service.apply_delivery(db, merchant_id, ok_ids, blocked_ids)
+            sent, failed = await broadcasts_service.deliver(bot, db, bc_id)
             async with db.session() as s:
                 act = await stats_service.activity_stats(s, merchant_id)
             try:
@@ -478,14 +521,145 @@ def register(
                 pass
 
         asyncio.create_task(_job())
-        b = InlineKeyboardBuilder().row(_bt("⬅️ Назад", home_cb))
+        b = InlineKeyboardBuilder().row(_bt("⬅️ Назад", f"{P}:home"))
         await _show(
             call,
-            f"📣 Рассылка запущена для <b>{len(user_ids)}</b> клиентов.\n"
+            f"📣 Рассылка запущена для <b>{count}</b> клиентов.\n"
             "По завершении пришлю отчёт и обновлю активных/неактивных.",
             b.as_markup(),
         )
         await call.answer("Запущено ✅")
+
+    @router.callback_query(F.data == f"{P}:sch")
+    async def cb_schedule(call: CallbackQuery, state: FSMContext,
+                          config: BotConfig) -> None:
+        text, photo, _ = _draft(await state.get_data())
+        if not text and not photo:
+            await call.answer("Нечего планировать", show_alert=True)
+            return
+        await state.set_state(S.schedule)
+        now_local = _fmt_local(datetime.utcnow(), config.shop_tz)
+        b = InlineKeyboardBuilder().row(_bt("⬅️ Назад", f"{P}:send"))
+        await _show(
+            call,
+            "🕒 Пришлите дату и время отправки в формате "
+            "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n"
+            f"Время магазина ({config.shop_tz}). Сейчас: <b>{now_local}</b>.",
+            b.as_markup(),
+        )
+        await call.answer()
+
+    @router.message(S.schedule)
+    async def msg_schedule(message: Message, db: Database, state: FSMContext,
+                           config: BotConfig, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        when_utc = _parse_when(message.text or "", config.shop_tz)
+        b = InlineKeyboardBuilder().row(_bt("⬅️ Назад", f"{P}:send"))
+        if when_utc is None:
+            await message.answer("Формат: <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>, например "
+                                 "<code>31.12.2026 09:30</code>.", reply_markup=b.as_markup())
+            return
+        if when_utc <= datetime.utcnow():
+            await message.answer("Это время уже прошло. Пришлите будущую дату и время.",
+                                 reply_markup=b.as_markup())
+            return
+        owner_id = message.from_user.id
+        bc, _ = await _create_bc(db, state, merchant_id, owner_id, "scheduled",
+                                 scheduled_at=when_utc)
+        await state.clear()
+        done = InlineKeyboardBuilder().row(_bt("⬅️ В рассылку", f"{P}:home"))
+        await message.answer(
+            f"✅ Рассылка №{bc.id} запланирована на "
+            f"<b>{_fmt_local(when_utc, config.shop_tz)}</b>.\n"
+            "Отменить можно в «🕒 Запланированные».",
+            reply_markup=done.as_markup(),
+        )
+
+    # ── Запланированные: список и отмена ─────────────────────────────────────
+    @router.callback_query(F.data == f"{P}:sl")
+    async def cb_sched_list(call: CallbackQuery, db: Database, config: BotConfig,
+                            merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        async with db.session() as s:
+            items = await broadcasts_service.list_scheduled(s, merchant_id)
+        b = InlineKeyboardBuilder()
+        if not items:
+            body = "🕒 <b>Запланированные</b>\n\nПусто."
+        else:
+            body = ("🕒 <b>Запланированные</b>\n\n"
+                    "Нажмите, чтобы отменить рассылку:")
+            for bc in items:
+                when = _fmt_local(bc.scheduled_at, config.shop_tz)
+                b.row(_bt(f"❌ №{bc.id} · {when}", f"{P}:cx:{bc.id}"))
+        b.row(_bt("⬅️ Назад", f"{P}:home"))
+        await _show(call, body, b.as_markup())
+        await call.answer()
+
+    @router.callback_query(F.data.startswith(f"{P}:cx:"))
+    async def cb_cancel(call: CallbackQuery, db: Database, config: BotConfig,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        ok = await broadcasts_service.cancel(db, int(call.data.split(":")[-1]), merchant_id)
+        await call.answer("Отменена" if ok else "Уже нельзя отменить", show_alert=not ok)
+        await cb_sched_list(call, db, config, merchant_id)
+
+    # ── Статистика рассылок и клики по кнопкам ───────────────────────────────
+    @router.callback_query(F.data == f"{P}:stat")
+    async def cb_stat_list(call: CallbackQuery, db: Database, config: BotConfig,
+                           merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        async with db.session() as s:
+            items = await broadcasts_service.recent(s, merchant_id, limit=10)
+        b = InlineKeyboardBuilder()
+        if not items:
+            body = "📊 <b>Статистика рассылок</b>\n\nПока не было отправленных рассылок."
+        else:
+            body = "📊 <b>Статистика рассылок</b>\n\nВыберите рассылку:"
+            st_ru = {"sending": "⏳", "done": "✅", "failed": "⚠️"}
+            for bc in items:
+                when = _fmt_local(bc.sent_at or bc.created_at, config.shop_tz)
+                mark = st_ru.get(bc.status, "")
+                b.row(_bt(f"{mark} №{bc.id} · {when} · ✉{bc.sent}", f"{P}:sd:{bc.id}"))
+        b.row(_bt("⬅️ Назад", f"{P}:home"))
+        await _show(call, body, b.as_markup())
+        await call.answer()
+
+    @router.callback_query(F.data.startswith(f"{P}:sd:"))
+    async def cb_stat_detail(call: CallbackQuery, db: Database, config: BotConfig,
+                             merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        bc_id = int(call.data.split(":")[-1])
+        async with db.session() as s:
+            bc = await broadcasts_service.get(s, bc_id, merchant_id)
+            if bc is None:
+                await call.answer("Не найдено", show_alert=True)
+                return
+            stats = await broadcasts_service.button_stats(s, bc_id)
+            btns = broadcasts_service.buttons_of(bc)
+        when = _fmt_local(bc.sent_at or bc.created_at, config.shop_tz)
+        lines = [
+            f"📊 <b>Рассылка №{bc.id}</b>",
+            f"Дата: {when}",
+            f"Получателей: <b>{bc.recipients}</b> · "
+            f"доставлено: <b>{bc.sent}</b> · не доставлено: <b>{bc.failed}</b>",
+            "",
+            "<b>Клики по кнопкам</b>",
+        ]
+        if not btns:
+            lines.append("Кнопок в посте не было.")
+        else:
+            any_url = False
+            for i, btn in enumerate(btns):
+                if btn.get("kind") == "url":
+                    any_url = True
+                    lines.append(f"🌐 {btn.get('label')}: ссылка (клики Telegram не сообщает)")
+                else:
+                    st = stats.get(i, {"uniq": 0, "total": 0})
+                    lines.append(
+                        f"🔘 {btn.get('label')}: уник. <b>{st['uniq']}</b> · "
+                        f"всего <b>{st['total']}</b>"
+                    )
+            if any_url:
+                lines.append("\n<i>По ссылкам счётчик недоступен в Telegram.</i>")
+        b = InlineKeyboardBuilder()
+        b.row(_bt("⬅️ К списку", f"{P}:stat"))
+        await _show(call, "\n".join(lines), b.as_markup())
+        await call.answer()
 
     # Возвращаем хендлеры (для тестов); при обычной регистрации не используется.
     return {
@@ -495,5 +669,7 @@ def register(
         "btn_label": cb_btn_label, "label": msg_btn_label, "btn_color": cb_btn_color,
         "setcolor": cb_btn_setcolor, "btn_emoji": cb_btn_emoji, "emoji": msg_btn_emoji,
         "btn_delete": cb_btn_delete, "preview": cb_preview,
-        "send_confirm": cb_send_confirm, "go": cb_go,
+        "send_confirm": cb_send_confirm, "go": cb_go, "schedule": cb_schedule,
+        "msg_schedule": msg_schedule, "sched_list": cb_sched_list, "cancel": cb_cancel,
+        "stat_list": cb_stat_list, "stat_detail": cb_stat_detail,
     }

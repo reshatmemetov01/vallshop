@@ -283,16 +283,21 @@ def not_enough_balance_kb() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def broadcast_post_kb(buttons) -> Optional[InlineKeyboardMarkup]:
+def broadcast_post_kb(buttons, broadcast_id: Optional[int] = None) -> Optional[InlineKeyboardMarkup]:
     """Клавиатура под постом рассылки из списка кнопок админа.
 
     Кнопка: ``{"label", "kind": "cb"|"url", "target", "style", "icon"}``.
     По одной в ряд. Пустой список → None (сообщение без клавиатуры).
+
+    Если задан ``broadcast_id`` — кнопки-разделы (cb) получают tracking-колбэк
+    ``bck:<id>:<idx>:<target>`` для подсчёта кликов (middleware запишет клик и
+    перепишет data в ``target``). Без id (напр. предпросмотр) — обычный target.
+    Клики по url-кнопкам Telegram не сообщает — они остаются обычными ссылками.
     """
     if not buttons:
         return None
     kb = InlineKeyboardBuilder()
-    for b in buttons:
+    for idx, b in enumerate(buttons):
         label = b.get("label") or "Кнопка"
         style = b.get("style") or None
         icon = b.get("icon") or None
@@ -305,7 +310,8 @@ def broadcast_post_kb(buttons) -> Optional[InlineKeyboardMarkup]:
             target = b.get("target")
             if not target:
                 continue
-            kb.row(_b(label, callback_data=target, style=style, icon=icon))
+            data = f"bck:{broadcast_id}:{idx}:{target}" if broadcast_id is not None else target
+            kb.row(_b(label, callback_data=data, style=style, icon=icon))
     markup = kb.as_markup()
     return markup if markup.inline_keyboard else None
 
