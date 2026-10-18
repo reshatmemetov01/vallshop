@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import Order, OrderStatus, User, Variant
+from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, User, Variant
 from . import rates as rates_service
 
 # Часовой пояс магазина по умолчанию (дни/«сегодня» считаются по нему). В БД
@@ -75,30 +75,41 @@ def preset_range(
 
 
 async def users_stats(
-    session: AsyncSession, start: Optional[datetime], end: datetime
+    session: AsyncSession, start: Optional[datetime], end: datetime,
+    merchant_id: Optional[int] = None,
 ) -> dict:
-    total = await session.scalar(select(func.count()).select_from(User)) or 0
+    total_stmt = select(func.count()).select_from(User)
     stmt = select(func.count()).select_from(User).where(User.created_at < end)
+    if merchant_id is not None:
+        total_stmt = total_stmt.where(User.merchant_id == merchant_id)
+        stmt = stmt.where(User.merchant_id == merchant_id)
     if start is not None:
         stmt = stmt.where(User.created_at >= start)
+    total = await session.scalar(total_stmt) or 0
     new = await session.scalar(stmt) or 0
     return {"total": int(total), "new": int(new)}
 
 
-async def total_balance(session: AsyncSession) -> Decimal:
-    """Суммарный баланс всех клиентов (₽, текущий снимок — не зависит от периода)."""
-    total = await session.scalar(
-        select(func.coalesce(func.sum(User.balance), 0))
-    )
+async def total_balance(
+    session: AsyncSession, merchant_id: Optional[int] = None
+) -> Decimal:
+    """Суммарный баланс клиентов (₽, текущий снимок — не зависит от периода)."""
+    stmt = select(func.coalesce(func.sum(User.balance), 0))
+    if merchant_id is not None:
+        stmt = stmt.where(User.merchant_id == merchant_id)
+    total = await session.scalar(stmt)
     return Decimal(total or 0)
 
 
 async def sales_stats(
-    session: AsyncSession, start: Optional[datetime], end: datetime
+    session: AsyncSession, start: Optional[datetime], end: datetime,
+    merchant_id: Optional[int] = None,
 ) -> dict:
     conds = [Order.status == OrderStatus.COMPLETED, Order.created_at < end]
     if start is not None:
         conds.append(Order.created_at >= start)
+    if merchant_id is not None:
+        conds.append(Order.merchant_id == merchant_id)
     row = (
         await session.execute(
             select(
@@ -111,24 +122,34 @@ async def sales_stats(
                     ),
                     0,
                 ),
+                func.coalesce(func.sum(Order.merchant_margin), 0),
             )
             .select_from(Order)
             .join(Variant, Variant.id == Order.variant_id)
             .where(*conds)
         )
     ).one()
-    orders, items, revenue, cost_usd = row
-    # Выручка (списанное с клиентов) уже в рублях. Себестоимость — в USDT,
-    # переводим в рубли по текущему курсу для расчёта прибыли.
+    orders, items, revenue, cost_usd, margin = row
+    # Выручка (списанное с клиентов) уже в рублях.
     revenue = Decimal(revenue or 0)
     cost_usd = Decimal(cost_usd or 0)
+    margin = Decimal(margin or 0)
     rate = rates_service.get_rate()
-    cost_rub = (cost_usd * rate)
+    if merchant_id is not None and merchant_id != HEAD_MERCHANT_ID:
+        # Франшиза: себестоимость = цена владельца (выручка − её маржа),
+        # прибыль = накопленная маржа франшизы.
+        cost_rub = revenue - margin
+        profit = margin
+        cost_usd = Decimal(0)  # у франшизы закуп поставщика не показываем
+    else:
+        # Головной/платформа: себестоимость = закуп поставщика (USDT) по курсу.
+        cost_rub = cost_usd * rate
+        profit = revenue - cost_rub
     return {
         "orders": int(orders or 0),
         "items": int(items or 0),
         "revenue": revenue,          # ₽
-        "cost": cost_rub,            # ₽ (себестоимость по курсу)
-        "cost_usd": cost_usd,        # USDT (справочно)
-        "profit": revenue - cost_rub,  # ₽
+        "cost": cost_rub,            # ₽
+        "cost_usd": cost_usd,        # USDT (справочно; 0 для франшизы)
+        "profit": profit,            # ₽
     }

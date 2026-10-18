@@ -68,6 +68,38 @@ async def test_new_user_has_created_at_and_counts(db):
 
 
 @pytest.mark.asyncio
+async def test_merchant_scoped_stats(db):
+    # Статистика франшизы — только её данные; прибыль = маржа, себестоимость = цена владельца.
+    async with db.session() as s:
+        p = Product(game="X", title="T"); s.add(p); await s.flush()
+        v = Variant(product_id=p.id, title="v", liog_product_id=1, liog_variation_id=1,
+                    cost_usd=Decimal("1")); s.add(v); await s.flush()
+        # клиенты: головной и франшиза
+        s.add(User(id=1, merchant_id=0, balance=Decimal("500")))
+        s.add(User(id=2, merchant_id=1, balance=Decimal("300")))
+        s.add(User(id=3, merchant_id=1, balance=Decimal("200")))
+        # заказ франшизы: клиент заплатил 120, маржа 20 (цена владельца 100)
+        s.add(Order(client_ref="f1", user_id=2, merchant_id=1, variant_id=v.id,
+                    price_usd=Decimal("120"), quantity=1, status=OrderStatus.COMPLETED,
+                    merchant_margin=Decimal("20")))
+        # заказ головного — во франшизную статистику не попадает
+        s.add(Order(client_ref="h1", user_id=1, merchant_id=0, variant_id=v.id,
+                    price_usd=Decimal("50"), quantity=1, status=OrderStatus.COMPLETED))
+        await s.commit()
+    from datetime import datetime
+    end = datetime(2100, 1, 1)
+    async with db.session() as s:
+        u = await stats_service.users_stats(s, None, end, merchant_id=1)
+        assert u["total"] == 2                                   # только клиенты франшизы
+        bal = await stats_service.total_balance(s, merchant_id=1)
+        assert bal == Decimal("500")                             # 300 + 200
+        st = await stats_service.sales_stats(s, None, end, merchant_id=1)
+        assert st["orders"] == 1 and st["revenue"] == Decimal("120")
+        assert st["profit"] == Decimal("20")                     # маржа франшизы
+        assert st["cost"] == Decimal("100")                      # цена владельца = 120 − 20
+
+
+@pytest.mark.asyncio
 async def test_total_balance(db):
     async with db.session() as s:
         s.add(User(id=1, balance=Decimal("290.00")))

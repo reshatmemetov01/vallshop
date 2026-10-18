@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from aiogram import F, Router
@@ -33,6 +34,7 @@ from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
 from ..services import msettings as msettings_service
+from ..services import stats as stats_service
 from ..services.pricing import price_rub_value
 from .. import texts
 from .. import ui as ui_service
@@ -106,6 +108,7 @@ class MerchAdmin(StatesGroup):
     oc_title = State()     # каталог: подпись (data: item_type, item_id)
     oc_emoji = State()     # каталог: эмодзи
     oc_desc = State()      # каталог: описание товара
+    st_custom = State()    # статистика: свой период
 
 
 def _b(text: str, data: str) -> InlineKeyboardButton:
@@ -143,6 +146,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
         f"🧾 Заказов: <b>{st['orders']}</b>"
     )
     kb = InlineKeyboardBuilder()
+    kb.row(_b("📊 Статистика", "fm_home"))
     kb.row(_b("📈 Наценка по умолчанию", "ma_setdef"))
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
     kb.row(_b("🎨 Оформление", "mo_home"))
@@ -1137,3 +1141,107 @@ async def cb_oc_clear(call: CallbackQuery, db: Database, state: FSMContext,
     else:
         await _show_oc_product(call, db, merchant_id, iid)
     await call.answer("Сброшено ✅")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Статистика франшизы — в разрезе её магазина (merchant_id)
+# ══════════════════════════════════════════════════════════════════════════════
+def _stats_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("Сегодня", "fm:today"), _b("7 дней", "fm:7d"))
+    kb.row(_b("30 дней", "fm:30d"), _b("Этот месяц", "fm:month"))
+    kb.row(_b("Всё время", "fm:all"))
+    kb.row(_b("📅 Свой период", "fm_custom"))
+    kb.row(_b("⬅️ В кабинет", "ma_home"))
+    return kb
+
+
+def _fmt_mstats(label: str, u: dict, s: dict, balances: Decimal) -> str:
+    return (
+        f"📊 <b>Статистика</b>\n"
+        f"Период: <b>{label}</b>\n\n"
+        f"👥 <b>Пользователи</b>\n"
+        f"Всего: <b>{u['total']}</b>\n"
+        f"Новых за период: <b>{u['new']}</b>\n"
+        f"Сумма балансов клиентов: <b>{texts.rub(balances)}</b>\n\n"
+        f"🛒 <b>Продажи</b>\n"
+        f"Заказов: <b>{s['orders']}</b>\n"
+        f"Товаров продано: <b>{s['items']}</b>\n"
+        f"Выручка: <b>{texts.rub(s['revenue'])}</b>\n"
+        f"Себестоимость (цена владельца): <b>{texts.rub(s['cost'])}</b>\n"
+        f"Прибыль (ваша маржа): <b>{texts.rub(s['profit'])}</b>"
+    )
+
+
+async def _render_mstats(call_or_msg, db: Database, merchant_id: int,
+                         start, end, label, edit=True) -> None:
+    async with db.session() as session:
+        u = await stats_service.users_stats(session, start, end, merchant_id)
+        s = await stats_service.sales_stats(session, start, end, merchant_id)
+        bal = await stats_service.total_balance(session, merchant_id)
+    text = _fmt_mstats(label, u, s, bal)
+    kb = _stats_kb().as_markup()
+    if edit:
+        try:
+            await call_or_msg.edit_text(text, reply_markup=kb)
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    await call_or_msg.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "fm_home")
+async def cb_mstats_home(call: CallbackQuery, db: Database, config: BotConfig,
+                         state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    start, end, label = stats_service.preset_range("today", config.shop_tz)
+    await _render_mstats(call.message, db, merchant_id, start, end, label)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("fm:"))
+async def cb_mstats_preset(call: CallbackQuery, db: Database, config: BotConfig,
+                           state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    start, end, label = stats_service.preset_range(call.data.split(":", 1)[1], config.shop_tz)
+    await _render_mstats(call.message, db, merchant_id, start, end, label)
+    await call.answer()
+
+
+@router.callback_query(F.data == "fm_custom")
+async def cb_mstats_custom(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(MerchAdmin.st_custom)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "fm_home"))
+    await _edit(
+        call,
+        "📅 Пришлите период:\n"
+        "• один день — <code>05.10.2026</code>\n"
+        "• диапазон — <code>01.10.2026 - 05.10.2026</code>",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.st_custom)
+async def msg_mstats_custom(message: Message, db: Database, config: BotConfig,
+                            state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    raw = (message.text or "").strip()
+    parts = [p.strip() for p in raw.replace("—", "-").split("-")]
+    try:
+        if len(parts) == 1:
+            d = datetime.strptime(parts[0], "%d.%m.%Y")
+            start, end = stats_service.day_bounds(d, config.shop_tz)
+            label = parts[0]
+        elif len(parts) == 2:
+            d1 = datetime.strptime(parts[0], "%d.%m.%Y")
+            d2 = datetime.strptime(parts[1], "%d.%m.%Y")
+            start, _ = stats_service.day_bounds(d1, config.shop_tz)
+            _, end = stats_service.day_bounds(d2, config.shop_tz)
+            label = f"{parts[0]} — {parts[1]}"
+        else:
+            raise ValueError
+    except ValueError:
+        await message.answer("Формат: 05.10.2026 или 01.10.2026 - 05.10.2026")
+        return
+    await state.clear()
+    await _render_mstats(message, db, merchant_id, start, end, label, edit=False)
