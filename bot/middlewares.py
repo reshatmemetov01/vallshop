@@ -48,6 +48,11 @@ class BlockedMiddleware(BaseMiddleware):
         if user and config and db and not config.is_admin(user.id):
             async with db.session() as s:
                 u = await get_user(s, user.id, merchant_id)
-                if u is not None and u.is_blocked:
-                    return None  # игнорируем
+                if u is not None:
+                    if u.is_blocked:
+                        return None  # игнорируем (ручной бан админа)
+                    # Человек снова пишет боту → снова достижим для рассылки.
+                    if not u.is_active:
+                        u.is_active = True
+                        await s.commit()
         return await handler(event, data)

@@ -26,6 +26,7 @@ from ..db.models import User
 from ..services import balance as balance_service
 from ..services.users import get_user
 from ..services import stats as stats_service
+from . import broadcast_flow
 from .. import texts
 
 router = Router()
@@ -52,6 +53,13 @@ class StatsFlow(StatesGroup):
     debit = State()
 
 
+class HeadBroadcast(StatesGroup):
+    compose = State()
+    url = State()
+    label = State()
+    emoji = State()
+
+
 def _btn(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=text, callback_data=data)
 
@@ -63,6 +71,7 @@ def _kb() -> InlineKeyboardMarkup:
     kb.row(_btn("Всё время", "st:all"))
     kb.row(_btn("📅 Свой период", "st_custom"))
     kb.row(_btn("💰 Баланс клиента", "st_bal"))
+    kb.row(_btn("📣 Рассылка", "hb:home"))
     kb.row(_btn("⬅️ В админ-панель", "a_home"))
     return kb.as_markup()
 
@@ -317,3 +326,14 @@ async def msg_bal_debit(message: Message, db: Database, state: FSMContext) -> No
     await state.clear()
     await message.answer(f"✅ Списано {texts.rub(take)}")
     await message.answer(caption, reply_markup=markup)
+
+
+# ── Рассылка головного (раздел «Статистика», merchant_id = 0) ──────────────────
+broadcast_flow.register(
+    router,
+    prefix="hb",
+    home_cb="st_home",
+    title="Рассылка",
+    sections=broadcast_flow.HEAD_SECTIONS,
+    states=HeadBroadcast,
+)

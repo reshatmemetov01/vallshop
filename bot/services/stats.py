@@ -90,6 +90,26 @@ async def users_stats(
     return {"total": int(total), "new": int(new)}
 
 
+async def activity_stats(
+    session: AsyncSession, merchant_id: Optional[int] = None
+) -> dict:
+    """Активные/неактивные клиенты (в разрезе мерчанта).
+
+    База — клиенты, НЕ забаненные админом (именно им уходит рассылка).
+    Активные — достижимы (``is_active``); неактивные — заблокировали бота.
+    """
+    base = select(func.count()).select_from(User).where(User.is_blocked.is_(False))
+    if merchant_id is not None:
+        base = base.where(User.merchant_id == merchant_id)
+    total = await session.scalar(base) or 0
+    active = await session.scalar(base.where(User.is_active.is_(True))) or 0
+    return {
+        "total": int(total),
+        "active": int(active),
+        "inactive": int(total) - int(active),
+    }
+
+
 async def total_balance(
     session: AsyncSession, merchant_id: Optional[int] = None
 ) -> Decimal:

@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -27,7 +26,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import BotConfig
 from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID, Merchant
-from ..services import broadcast as broadcast_service
+from . import broadcast_flow
 from ..services import catalog as catalog_service
 from ..services import mcatalog as mcatalog_service
 from ..services import menu as menu_service
@@ -105,7 +104,6 @@ class MerchAdmin(StatesGroup):
     set_emoji = State()    # data: key
     set_banner = State()   # data: banner
     set_contact = State()  # data: ckey
-    bc_compose = State()   # рассылка: ввод сообщения
     oc_title = State()     # каталог: подпись (data: item_type, item_id)
     oc_emoji = State()     # каталог: эмодзи
     oc_desc = State()      # каталог: описание товара
@@ -155,7 +153,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
     kb.row(_b("📈 Наценка по умолчанию", "ma_setdef"))
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
     kb.row(_b("🎨 Оформление", "mo_home"))
-    kb.row(_b("📣 Рассылка", "mb_home"))
+    kb.row(_b("📣 Рассылка", "mb:home"))
     kb.row(_b("⬅️ В меню", "menu"))
     await _edit(call, caption, kb)
 
@@ -829,92 +827,9 @@ async def msg_contact(message: Message, db: Database, state: FSMContext,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Рассылка франшизы — только своим клиентам (через свой бот)
+# Рассылка франшизы — свой движок (только своим клиентам, через свой бот).
+# Хендлеры регистрируются общим движком в конце модуля (prefix "mb").
 # ══════════════════════════════════════════════════════════════════════════════
-@router.callback_query(F.data == "mb_home")
-async def cb_bc_home(call: CallbackQuery, db: Database, state: FSMContext,
-                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
-    await state.clear()
-    count = len(await broadcast_service.recipients(db, merchant_id))
-    kb = InlineKeyboardBuilder()
-    kb.row(_b("✍️ Создать рассылку", "mb_new"))
-    kb.row(_b("⬅️ В кабинет", "ma_home"))
-    await _edit(
-        call,
-        "📣 <b>Рассылка</b>\n\n"
-        f"Получатели: <b>{count}</b> клиентов вашего бота.\n"
-        "Сообщение придёт только вашим клиентам, от вашего бота.",
-        kb,
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data == "mb_new")
-async def cb_bc_new(call: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(MerchAdmin.bc_compose)
-    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "mb_home"))
-    await _edit(
-        call,
-        "✍️ Пришлите сообщение для рассылки.\n\n"
-        "Можно текст (с форматированием и премиум-эмодзи) или фото с подписью.",
-        kb,
-    )
-    await call.answer()
-
-
-@router.message(MerchAdmin.bc_compose)
-async def msg_bc_compose(message: Message, state: FSMContext) -> None:
-    photo = message.photo[-1].file_id if message.photo else None
-    # Текст/подпись с сохранением форматирования и премиум-эмодзи.
-    text = message.html_text if (message.text or message.caption) else None
-    if not photo and not text:
-        await message.answer("Пришлите текст или фото. Попробуйте ещё раз.")
-        return
-    await state.update_data(bc_text=text, bc_photo=photo)
-    await state.set_state(MerchAdmin.bc_compose)
-    kb = InlineKeyboardBuilder()
-    kb.row(_b("📤 Отправить всем", "mb_send"))
-    kb.row(_b("⬅️ Отмена", "mb_home"))
-    # Показать превью (как увидят клиенты).
-    if photo:
-        await message.answer_photo(photo, caption=text or None)
-    elif text:
-        await message.answer(text)
-    await message.answer("👆 Так увидят клиенты. Отправить?", reply_markup=kb.as_markup())
-
-
-@router.callback_query(F.data == "mb_send")
-async def cb_bc_send(call: CallbackQuery, db: Database, state: FSMContext,
-                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
-    data = await state.get_data()
-    text, photo = data.get("bc_text"), data.get("bc_photo")
-    await state.clear()
-    if not text and not photo:
-        await call.answer("Нечего отправлять", show_alert=True)
-        return
-    user_ids = await broadcast_service.recipients(db, merchant_id)
-    bot = call.message.bot
-    owner_id = call.from_user.id
-
-    async def _job():
-        sent, failed = await broadcast_service.run(bot, user_ids, text=text, photo=photo)
-        try:
-            await bot.send_message(
-                owner_id,
-                f"📣 Рассылка завершена.\nОтправлено: <b>{sent}</b> · "
-                f"не доставлено: <b>{failed}</b>.",
-            )
-        except Exception:  # noqa: BLE001
-            pass
-
-    asyncio.create_task(_job())
-    await _edit(
-        call,
-        f"📣 Рассылка запущена для <b>{len(user_ids)}</b> клиентов.\n"
-        "По завершении пришлю отчёт.",
-        InlineKeyboardBuilder().row(_b("⬅️ В кабинет", "ma_home")),
-    )
-    await call.answer("Запущено ✅")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1458,3 +1373,23 @@ async def cb_pf_list(call: CallbackQuery, db: Database, state: FSMContext,
     kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home"))
     await _edit(call, "\n".join(lines), kb)
     await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Регистрация движка рассылки франшизы (prefix "mb", merchant_id > 0).
+# ══════════════════════════════════════════════════════════════════════════════
+class FranchiseBroadcast(StatesGroup):
+    compose = State()
+    url = State()
+    label = State()
+    emoji = State()
+
+
+broadcast_flow.register(
+    router,
+    prefix="mb",
+    home_cb="ma_home",
+    title="Рассылка",
+    sections=broadcast_flow.FRANCHISE_SECTIONS,
+    states=FranchiseBroadcast,
+)

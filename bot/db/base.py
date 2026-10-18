@@ -93,6 +93,8 @@ class Database:
             ("menu_buttons", "style", "VARCHAR(16)"),
             # Франшиза: товар только для головного (скрыт у франшиз).
             ("products", "head_only", "BOOLEAN NOT NULL DEFAULT 0"),
+            # Рассылка: достижимость клиента (активен/неактивен). См. User.is_active.
+            ("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1"),
         ]
         added_source = False
         for table, column, ddl in wanted:
@@ -129,6 +131,7 @@ class Database:
                     ("full_name", "VARCHAR(255)"),
                     ("is_blocked", "BOOLEAN NOT NULL DEFAULT 0"),
                     ("block_reason", "VARCHAR(255)"),
+                    ("is_active", "BOOLEAN NOT NULL DEFAULT 1"),
                     ("balance", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
                     ("created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
                     ("referred_by", "INTEGER"),

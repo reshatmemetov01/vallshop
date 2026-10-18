@@ -283,6 +283,33 @@ def not_enough_balance_kb() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def broadcast_post_kb(buttons) -> Optional[InlineKeyboardMarkup]:
+    """Клавиатура под постом рассылки из списка кнопок админа.
+
+    Кнопка: ``{"label", "kind": "cb"|"url", "target", "style", "icon"}``.
+    По одной в ряд. Пустой список → None (сообщение без клавиатуры).
+    """
+    if not buttons:
+        return None
+    kb = InlineKeyboardBuilder()
+    for b in buttons:
+        label = b.get("label") or "Кнопка"
+        style = b.get("style") or None
+        icon = b.get("icon") or None
+        if b.get("kind") == "url":
+            url = _as_url(b.get("target"))
+            if not url:
+                continue
+            kb.row(_b(label, url=url, style=style, icon=icon))
+        else:
+            target = b.get("target")
+            if not target:
+                continue
+            kb.row(_b(label, callback_data=target, style=style, icon=icon))
+    markup = kb.as_markup()
+    return markup if markup.inline_keyboard else None
+
+
 def after_purchase_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_b("Каталог", callback_data="catalog", style="primary", icon=EMOJI["catalog"]))

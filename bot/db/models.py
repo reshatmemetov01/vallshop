@@ -146,6 +146,12 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     block_reason: Mapped[Optional[str]] = mapped_column(String(255))
+    # Достижимость для рассылки (НЕ бан админа): False — пользователь заблокировал
+    # бота / аккаунт удалён (определяем по ошибке доставки). Возвращается в True,
+    # как только человек снова пишет боту. Нужно для счётчика активных/неактивных.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1"
+    )
     # Баланс пользователя (USD ≈ USDT). Пополняется криптой, тратится на покупки.
     balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     # default (Python) И server_default: перестройка таблицы (составной ключ) не
