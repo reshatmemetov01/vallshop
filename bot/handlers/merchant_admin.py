@@ -1275,11 +1275,10 @@ async def cb_pf_withdraw(call: CallbackQuery, db: Database, state: FSMContext,
         kb = InlineKeyboardBuilder().row(_b("🔗 Привязать кошелёк", "pf_home"))
         await _edit(call, "Сначала привяжите кошелёк (СБП или USDT).", kb)
         await call.answer(); return
-    if avail < payouts_service.MIN_WITHDRAW:
-        kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home"))
-        await _edit(call, f"Доступно {texts.rub(avail)}. Минимум для вывода — "
-                          f"{int(payouts_service.MIN_WITHDRAW)} ₽.", kb)
-        await call.answer(); return
+    # Сумму спрашиваем всегда (даже если доступного мало) — проверка минимума и
+    # достаточности средств идёт в msg_pf_amount и возвращает ошибку с кнопкой
+    # «Назад». Иначе ранний блок обрывал флоу: введённые суммы оставались без
+    # ответа (состояние ввода не включалось).
     if len(methods) == 1:
         await _ask_amount(call, state, methods[0], avail)
     else:

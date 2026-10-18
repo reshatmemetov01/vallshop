@@ -78,6 +78,97 @@ async def test_request_reserves_and_approve(db):
         assert await pay.approve(s, pid) is None
 
 
+class _FakeState:
+    def __init__(self):
+        self._d = {}
+        self._s = None
+
+    async def get_data(self):
+        return dict(self._d)
+
+    async def update_data(self, **k):
+        self._d.update(k)
+        return dict(self._d)
+
+    async def set_state(self, s):
+        self._s = s
+
+    async def clear(self):
+        self._d = {}
+        self._s = None
+
+    @property
+    def state(self):
+        return self._s
+
+
+class _FakeMsgObj:
+    def __init__(self):
+        self.outs = []
+
+    async def edit_text(self, text, reply_markup=None):
+        self.outs.append((text, reply_markup))
+
+
+class _FakeUser:
+    id = 1
+
+
+class _FakeCall:
+    def __init__(self, data=""):
+        self.data = data
+        self.message = _FakeMsgObj()
+        self.from_user = _FakeUser()
+
+    async def answer(self, *a, **k):
+        pass
+
+
+class _FakeInMsg:
+    def __init__(self, text):
+        self.text = text
+        self.from_user = _FakeUser()
+        self.answers = []
+
+    async def answer(self, text, reply_markup=None):
+        self.answers.append((text, reply_markup))
+
+
+class _Cfg:
+    admin_ids = []
+
+
+@pytest.mark.asyncio
+async def test_withdraw_prompts_even_when_below_min(db):
+    """Доступно < минимума — всё равно спрашиваем сумму (не тупик)."""
+    from bot.handlers import merchant_admin as ma
+    mid = await _merchant(db, earnings="0")
+    async with db.session() as s:
+        await pay.set_sbp(s, mid, "+7900", "Сбер")
+        await s.commit()
+    state = _FakeState()
+    await ma.cb_pf_withdraw(_FakeCall("pf_wd"), db, state, merchant_id=mid)
+    assert state.state == ma.MerchAdmin.pf_amount  # состояние ввода суммы включено
+
+
+@pytest.mark.asyncio
+async def test_amount_error_has_back_button(db):
+    """Ошибка при вводе суммы приходит с кнопкой «Назад»."""
+    from bot.handlers import merchant_admin as ma
+    mid = await _merchant(db, earnings="0")
+    async with db.session() as s:
+        await pay.set_sbp(s, mid, "+7900", "Сбер")
+        await s.commit()
+    state = _FakeState()
+    await state.update_data(method="sbp")
+    msg = _FakeInMsg("500")  # 500 > доступно 0 → недостаточно средств
+    await ma.msg_pf_amount(msg, db, _Cfg(), state, bots_by_merchant={}, merchant_id=mid)
+    text, markup = msg.answers[-1]
+    assert "недостаточно" in text.lower()
+    cbs = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "pf_home" in cbs
+
+
 @pytest.mark.asyncio
 async def test_reject_refunds(db):
     mid = await _merchant(db, earnings="1000")
