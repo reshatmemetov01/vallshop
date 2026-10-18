@@ -294,7 +294,10 @@ async def cb_product(
         # Куда вести кнопку «Назад»: к родительской категории или в каталог.
         back = f"prod:{parent_id}" if parent_id else "catalog"
 
-        banner_photo = product.banner_file_id or None
+        # Баннер категории принадлежит владельцу (его file_id привязан к его боту).
+        # У франшиз баннеры владельца не показываем — экран без картинки (только текст),
+        # как и остальные баннеры франшизы.
+        banner_photo = None if is_franchise else (product.banner_file_id or None)
 
         if children:
             ch_ov = await mcatalog_service.overrides_map(

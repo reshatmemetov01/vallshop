@@ -50,6 +50,46 @@ async def test_head_only_product_hidden_for_franchise(db):
 
 
 @pytest.mark.asyncio
+async def test_franchise_does_not_show_head_category_banner(db):
+    # Баннер категории владельца не должен показываться в боте франшизы.
+    import bot.handlers.user as U
+    import bot.ui as ui
+    orig_render = U.render
+    captured = {}
+
+    async def fake_render(*a, **k):
+        captured.update(k)
+    U.render = fake_render
+    ui.configure({999: 0, 1001: 5})
+
+    class Call:
+        def __init__(self, bid, pid):
+            self.data = f"prod:{pid}"; self.from_user = type("U", (), {"id": 1})()
+            self.message = type("M", (), {"bot": type("B", (), {"id": bid})()})()
+        async def answer(self, *a, **k): pass
+
+    class St:
+        async def clear(self): pass
+
+    class Cfg:
+        default_markup_percent = 0; currency = "USDT"
+        def is_admin(self, u): return False
+
+    try:
+        async with db.session() as s:
+            cat = Product(game="X", title="Игры", banner_file_id="HEAD_BANNER"); s.add(cat); await s.flush()
+            s.add(Product(game="X", title="Roblox", parent_id=cat.id)); await s.commit()
+            cid = cat.id
+        await U.cb_product(Call(999, cid), db, Cfg(), None, St(), 0)
+        assert captured.get("photo") == "HEAD_BANNER"      # головной — свой баннер
+        captured.clear()
+        await U.cb_product(Call(1001, cid), db, Cfg(), None, St(), 5)
+        assert captured.get("photo") is None               # франшиза — без баннера владельца
+    finally:
+        U.render = orig_render
+
+
+@pytest.mark.asyncio
 async def test_head_only_top_level(db):
     async with db.session() as s:
         s.add(Product(game="X", title="Обычный"))
