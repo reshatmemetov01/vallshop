@@ -30,6 +30,20 @@ def _buttons(markup):
     return [b for row in markup.inline_keyboard for b in row]
 
 
+def test_support_contact_normalized_to_url():
+    # Регрессия: @username в кнопке поддержки превращается в валидный URL,
+    # иначе Telegram отклоняет всю клавиатуру и экран FAQ «не работает».
+    from bot.keyboards import _as_url
+    assert _as_url("@vallmanager") == "https://t.me/vallmanager"
+    assert _as_url("vallmanager") == "https://t.me/vallmanager"
+    assert _as_url("https://t.me/x") == "https://t.me/x"
+    assert _as_url(None) is None
+    # головной FAQ: @username-контакт даёт url-кнопку, а не callback/битое значение
+    m = kb.faq_kb(merchant_id=0, support_url="@vallmanager")
+    sup = [b for b in _buttons(m) if b.text and "поддержк" in b.text.lower()]
+    assert sup and sup[0].url == "https://t.me/vallmanager"
+
+
 @pytest.mark.asyncio
 async def test_faq_kb_franchise_doc_buttons(db):
     # оферта текстом → кнопка-колбэк; приватность ссылкой → url; соглашение не задано → нет

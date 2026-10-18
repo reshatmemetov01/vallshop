@@ -166,16 +166,16 @@ async def cb_faq(
     offer, agreement, privacy = config.offer_url, config.agreement_url, config.privacy_url
     support = config.support_contact
     if merchant_id != HEAD_MERCHANT_ID:
-        # Франшиза: свои контакты/ссылки/документы (если заданы), иначе кнопка скрыта.
-        # Значение документа может быть ссылкой (https://…) или текстом — тогда
-        # показываем кнопку-документ в самом боте (cb:faqdoc:<which>).
+        # Франшиза по умолчанию наследует ссылки платформы (оферта и т.д.); если
+        # франшиза задала своё — оно важнее. Своё значение документа может быть
+        # ссылкой (https://…) или текстом — тогда кнопка открывает текст в боте.
         from ..services import msettings as msettings_service
         async with db.session() as session:
             vals = await msettings_service.all_for(session, merchant_id)
-        offer = _doc_value(vals.get(msettings_service.URL_OFFER), "offer")
-        agreement = _doc_value(vals.get(msettings_service.URL_AGREEMENT), "agreement")
-        privacy = _doc_value(vals.get(msettings_service.URL_PRIVACY), "privacy")
-        support = vals.get(msettings_service.SUPPORT)
+        offer = _doc_value(vals.get(msettings_service.URL_OFFER), "offer") or config.offer_url
+        agreement = _doc_value(vals.get(msettings_service.URL_AGREEMENT), "agreement") or config.agreement_url
+        privacy = _doc_value(vals.get(msettings_service.URL_PRIVACY), "privacy") or config.privacy_url
+        support = vals.get(msettings_service.SUPPORT) or config.support_contact
     if not offer and support:
         caption += texts.FAQ_NO_OFFER.format(support=support)
     await render(

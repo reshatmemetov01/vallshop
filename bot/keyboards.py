@@ -63,6 +63,18 @@ EMOJI = {
 SUPPORT_URL = "https://t.me/vallmanager"
 
 
+def _as_url(v: Optional[str]) -> Optional[str]:
+    """Привести контакт к валидному URL: @user/t.me/username → https://t.me/…."""
+    if not v:
+        return None
+    v = v.strip()
+    if v.startswith(("http://", "https://", "tg://")):
+        return v
+    if v.startswith("@"):
+        return "https://t.me/" + v[1:]
+    return "https://t.me/" + v
+
+
 def _b(
     text: str, *, style: Optional[str] = None, icon: Optional[str] = None, **kw
 ) -> InlineKeyboardButton:
@@ -87,7 +99,9 @@ def _render_menu(menu: str, url_map: Optional[dict] = None, merchant_id: int = 0
         if r.kind == "url":
             if r.target == "support":
                 # Франшиза — свой контакт (из url_map); головной — дефолт платформы.
-                url = url_map.get("support") or (SUPPORT_URL if merchant_id == 0 else None)
+                # Нормализуем @username/t.me в валидный URL (иначе Telegram отклонит
+                # всю клавиатуру и экран «не откроется»).
+                url = _as_url(url_map.get("support")) or (SUPPORT_URL if merchant_id == 0 else None)
             else:
                 url = url_map.get(r.target)
             if not url:
