@@ -59,7 +59,11 @@ async def fazercard_stock(fzr, variants: List[Variant]) -> Dict[int, Optional[in
                 result[v.id] = None
             continue
         for v in vs:
-            result[v.id] = smap.get(str(v.fzr_b))
+            key = str(v.fzr_b)
+            # Оффер присутствует у поставщика → его сток (int, либо None если поле
+            # не пришло — товар под заказ). Оффер ОТСУТСТВУЕТ в выдаче поставщика →
+            # 0 (нет в наличии): иначе показывали бы «в наличии» и покупка падала.
+            result[v.id] = smap[key] if key in smap else 0
     return result
 
 

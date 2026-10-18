@@ -387,6 +387,7 @@ async def cb_variant(
             fz = await catalog_service.fazercard_stock(fzr, [variant])
             in_stock = fz.get(variant.id)  # int (реальный сток) или None (неизвестно)
 
+    out = False
     if is_vpn:
         note = "в наличии ✅ (выдача сразу после оплаты)"
     elif ondemand:
@@ -395,18 +396,22 @@ async def cb_variant(
         elif in_stock > 0:
             note = f"в наличии: {in_stock} шт ✅"
         else:
-            note = "❌ нет в наличии"
+            note = "❌ нет в наличии"      # нет у поставщика
+            out = True
     elif in_stock > 0:
         note = f"в наличии: {in_stock} шт ✅"
     else:
         note = texts.OUT_OF_STOCK_NOTE
+        out = True
     price_str = texts.rub(client_price) if client_price > 0 else "—"
     caption = (
         f"<b>{v_title}</b>\n"
         f"Цена: <b>{price_str}</b>\n"
         f"Статус: {note}"
     )
-    await render(call, banner="catalog", caption=caption, reply_markup=kb.buy_kb(variant_id, back=back))
+    # Нет в наличии — не даём купить (иначе покупка упала бы в ошибку и возврат).
+    markup = kb.out_of_stock_kb(back) if out else kb.buy_kb(variant_id, back=back)
+    await render(call, banner="catalog", caption=caption, reply_markup=markup)
     await call.answer()
 
 

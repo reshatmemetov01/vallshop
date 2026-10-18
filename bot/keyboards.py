@@ -231,19 +231,22 @@ def variants_kb(
     for v in variants:
         price = prices[v.id]  # уже отформатированная строка (₽ / $)
         src = getattr(v, "source", "stock")
+        out = False
         if src == "vpnresellers":
             # VPN: выдача мгновенная от провайдера, своего стока нет — «под заказ» не показываем.
             note = " · ✅ в наличии"
         elif src == "fazercard":
             st = stock.get(v.id)
             if st is None:
-                note = " · ✅ в наличии"
+                note = " · ✅ в наличии"       # оффер есть у поставщика, под заказ
             elif st > 0:
                 note = f" · ✅ {st} шт"
             else:
-                note = " · ❌ нет"
+                note = " · ❌ нет в наличии"    # st == 0 (нет у поставщика)
+                out = True
         else:
             in_stock = stock.get(v.id, 0) or 0
+            out = in_stock <= 0
             note = "" if in_stock > 0 else f" · {OUT_OF_STOCK_NOTE}"
         ov = overrides.get(v.id)
         title = (ov.get("title") if ov else None) or v.title
@@ -251,7 +254,9 @@ def variants_kb(
             icon = ov["emoji_id"] or None          # "" → без эмодзи
         else:
             icon = getattr(v, "icon_emoji_id", None) or product_icon or EMOJI["variant"]
-        kb.row(_b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon))
+        # Нет в наличии — красная кнопка; иначе обычная.
+        style = "danger" if out else None
+        kb.row(_b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon, style=style))
     kb.row(_b("Назад", callback_data=back, icon=EMOJI["back"]))
     return kb.as_markup()
 
@@ -259,6 +264,14 @@ def variants_kb(
 def buy_kb(variant_id: int, back: str = "catalog") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_b("💳 Купить", callback_data=f"buy:{variant_id}", style="success"))
+    kb.row(_b("Назад", callback_data=back, icon=EMOJI["back"]))
+    return kb.as_markup()
+
+
+def out_of_stock_kb(back: str = "catalog") -> InlineKeyboardMarkup:
+    """Экран номинала без «Купить» — товара нет в наличии."""
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("❌ Нет в наличии", callback_data="noop", style="danger"))
     kb.row(_b("Назад", callback_data=back, icon=EMOJI["back"]))
     return kb.as_markup()
 
