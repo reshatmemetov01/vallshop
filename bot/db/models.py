@@ -124,7 +124,12 @@ class User(Base):
     block_reason: Mapped[Optional[str]] = mapped_column(String(255))
     # Баланс пользователя (USD ≈ USDT). Пополняется криптой, тратится на покупки.
     balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # default (Python) И server_default: перестройка таблицы (составной ключ) не
+    # сохраняет DB-дефолт, поэтому Python-дефолт гарантирует, что дата регистрации
+    # проставляется на каждой вставке — иначе «новых за период» всегда 0.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=func.now()
+    )
 
     # Реферальная программа.
     referred_by: Mapped[Optional[int]] = mapped_column(Integer, index=True)  # кто пригласил

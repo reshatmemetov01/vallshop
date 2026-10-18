@@ -129,7 +129,7 @@ class Database:
                     ("is_blocked", "BOOLEAN NOT NULL DEFAULT 0"),
                     ("block_reason", "VARCHAR(255)"),
                     ("balance", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
-                    ("created_at", "DATETIME"),
+                    ("created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
                     ("referred_by", "INTEGER"),
                     ("ref_balance_usdt", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
                     ("ref_balance_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),

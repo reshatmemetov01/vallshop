@@ -51,6 +51,23 @@ async def test_sales_and_profit(db):
 
 
 @pytest.mark.asyncio
+async def test_new_user_has_created_at_and_counts(db):
+    # Регрессия: у нового пользователя проставляется created_at (Python-дефолт),
+    # иначе «Новых за период» всегда 0 (created_at = NULL после перестройки users).
+    from datetime import datetime, timedelta
+    from bot.services import orders as order_service
+    async with db.session() as s:
+        u = await order_service.ensure_user(s, 10, "u10", "Ten", 0)
+        await s.commit()
+        assert u.created_at is not None
+    end = datetime.utcnow() + timedelta(days=1)
+    start = datetime.utcnow() - timedelta(days=1)
+    async with db.session() as s:
+        us = await stats_service.users_stats(s, start, end)
+        assert us["total"] == 1 and us["new"] == 1   # новый юзер попал в период
+
+
+@pytest.mark.asyncio
 async def test_total_balance(db):
     async with db.session() as s:
         s.add(User(id=1, balance=Decimal("290.00")))
