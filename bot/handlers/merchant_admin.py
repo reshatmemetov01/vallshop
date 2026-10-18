@@ -1022,7 +1022,9 @@ async def cb_oc_desc_ask(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(MerchAdmin.oc_desc)
     await state.update_data(it="product", iid=pid)
     kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", f"oc_prod:{pid}"))
-    await _edit(call, "📝 Пришлите описание товара.\n<code>0</code> — вернуть из каталога, <code>-</code> — убрать.", kb)
+    await _edit(call, "📝 Пришлите описание товара.\n<code>0</code> — вернуть из каталога, "
+                      "<code>-</code> — убрать.\n\n💡 Курс с вашей наценкой: <code>{курс:1.38}</code> "
+                      "(покажется базовое число × ваша наценка).", kb)
     await call.answer()
 
 

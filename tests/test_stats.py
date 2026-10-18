@@ -138,8 +138,14 @@ async def test_order_near_midnight_counts_in_local_today(db):
     from sqlalchemy import text
     msk = ZoneInfo("Europe/Moscow")
     now_msk = datetime.now(msk)
-    local_0100 = now_msk.replace(hour=1, minute=0, second=0, microsecond=0)
-    utc_naive = local_0100.astimezone(timezone.utc).replace(tzinfo=None)
+    # «Ночное» время сегодняшнего дня, которое заведомо в прошлом (иначе между
+    # 00:00 и 01:00 МСК заказ на 01:00 оказался бы в будущем и не попал в период).
+    # В окне 00:00–02:59 МСК UTC-дата ещё вчерашняя — это и проверяем.
+    start_of_day = now_msk.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_night = min(start_of_day + timedelta(hours=1), now_msk - timedelta(minutes=1))
+    if local_night < start_of_day:
+        local_night = start_of_day
+    utc_naive = local_night.astimezone(timezone.utc).replace(tzinfo=None)
     async with db.session() as s:
         p = Product(game="X", title="T"); s.add(p); await s.flush()
         v = Variant(product_id=p.id, title="v", liog_product_id=1, liog_variation_id=1,

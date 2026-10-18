@@ -29,6 +29,7 @@ from ..services import mcatalog as mcatalog_service
 from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
+from ..services import ratetext as ratetext_service
 from ..services import notify as notify_service
 from ..services import referral as referral_service
 from ..services import orders as order_service
@@ -288,6 +289,10 @@ async def cb_product(
         )
         p_title = mcatalog_service.disp_title(product, p_ov)
         p_desc = mcatalog_service.disp_description(product, p_ov)
+        # Курс в описании ({курс:1.38}) показываем с наценкой этого магазина,
+        # чтобы у франшизы отображаемый курс совпадал с её реальной ценой.
+        _dm = await mprice_service.default_markup(session, merchant_id)
+        p_desc = ratetext_service.apply_markup(p_desc, _dm)
         p_emoji_id = mcatalog_service.disp_emoji(product, p_ov)
         prod_emoji = texts.ce(p_emoji_id or "5298953332079999355", "🎮")
 
