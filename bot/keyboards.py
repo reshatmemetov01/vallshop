@@ -184,10 +184,12 @@ def products_kb(
     back: str = "menu",
     back_text: str = "Меню",
     columns: int = 1,
+    overrides: Optional[Mapping[int, dict]] = None,
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     cols = max(1, columns)
     buf: list = []
+    overrides = overrides or {}
 
     def _flush():
         if buf:
@@ -195,9 +197,14 @@ def products_kb(
             buf.clear()
 
     for p in products:
-        icon = getattr(p, "icon_emoji_id", None) or EMOJI["product"]
+        ov = overrides.get(p.id)
+        title = (ov.get("title") if ov else None) or p.title
+        if ov and ov.get("emoji_id") is not None:
+            icon = ov["emoji_id"] or None          # "" → без эмодзи
+        else:
+            icon = getattr(p, "icon_emoji_id", None) or EMOJI["product"]
         style = getattr(p, "button_style", None) or "primary"
-        btn = _b(p.title, callback_data=f"prod:{p.id}", style=style, icon=icon)
+        btn = _b(title, callback_data=f"prod:{p.id}", style=style, icon=icon)
         if getattr(p, "full_width", False) or cols <= 1:
             _flush()
             kb.row(btn)
@@ -217,8 +224,10 @@ def variants_kb(
     currency: str = "USDT",
     product_icon: Optional[str] = None,
     back: str = "catalog",
+    overrides: Optional[Mapping[int, dict]] = None,
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    overrides = overrides or {}
     for v in variants:
         price = prices[v.id]  # уже отформатированная строка (₽ / $)
         src = getattr(v, "source", "stock")
@@ -236,8 +245,13 @@ def variants_kb(
         else:
             in_stock = stock.get(v.id, 0) or 0
             note = "" if in_stock > 0 else f" · {OUT_OF_STOCK_NOTE}"
-        icon = getattr(v, "icon_emoji_id", None) or product_icon or EMOJI["variant"]
-        kb.row(_b(f"{v.title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon))
+        ov = overrides.get(v.id)
+        title = (ov.get("title") if ov else None) or v.title
+        if ov and ov.get("emoji_id") is not None:
+            icon = ov["emoji_id"] or None          # "" → без эмодзи
+        else:
+            icon = getattr(v, "icon_emoji_id", None) or product_icon or EMOJI["variant"]
+        kb.row(_b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon))
     kb.row(_b("Назад", callback_data=back, icon=EMOJI["back"]))
     return kb.as_markup()
 

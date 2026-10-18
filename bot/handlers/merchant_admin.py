@@ -28,6 +28,7 @@ from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID, Merchant
 from ..services import broadcast as broadcast_service
 from ..services import catalog as catalog_service
+from ..services import mcatalog as mcatalog_service
 from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
@@ -102,6 +103,9 @@ class MerchAdmin(StatesGroup):
     set_banner = State()   # data: banner
     set_contact = State()  # data: ckey
     bc_compose = State()   # рассылка: ввод сообщения
+    oc_title = State()     # каталог: подпись (data: item_type, item_id)
+    oc_emoji = State()     # каталог: эмодзи
+    oc_desc = State()      # каталог: описание товара
 
 
 def _b(text: str, data: str) -> InlineKeyboardButton:
@@ -384,6 +388,7 @@ async def _show_oform_home(call: CallbackQuery) -> None:
     kb.row(_b("📝 Тексты экранов", "mo_texts"))
     for menu in APP_MENUS:
         kb.row(_b(f"🔘 Кнопки: {menu_service.MENU_TITLES.get(menu, menu)}", f"mo_menu:{menu}"))
+    kb.row(_b("🛍 Каталог (товары/номиналы)", "oc_home"))
     kb.row(_b("🖼 Баннеры", "mo_banners"))
     kb.row(_b("📞 Контакты и ссылки", "mo_contacts"))
     kb.row(_b("♻️ Сбросить оформление", "mo_reset"))
@@ -901,3 +906,234 @@ async def cb_bc_send(call: CallbackQuery, db: Database, state: FSMContext,
         InlineKeyboardBuilder().row(_b("⬅️ В кабинет", "ma_home")),
     )
     await call.answer("Запущено ✅")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Оформление каталога франшизы: подпись/эмодзи/описание товаров и номиналов
+# ══════════════════════════════════════════════════════════════════════════════
+def _emoji_from_message(message: Message):
+    """Вернуть custom_emoji_id из сообщения, либо спец-значения: '0'/'-'/None."""
+    raw = (message.text or "").strip()
+    if raw == "0":
+        return "__reset__"
+    if raw == "-":
+        return ""
+    for ent in (message.entities or []):
+        if ent.type == "custom_emoji" and getattr(ent, "custom_emoji_id", None):
+            return ent.custom_emoji_id
+    return None
+
+
+async def _show_oc_products(call: CallbackQuery, db: Database, merchant_id: int,
+                            parent_id=None) -> None:
+    async with db.session() as s:
+        products = await catalog_service.list_products(
+            s, parent_id=parent_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
+        )
+        ov = await mcatalog_service.overrides_map(
+            s, merchant_id, mcatalog_service.PRODUCT, [p.id for p in products]
+        )
+        rows = [(p.id, mcatalog_service.disp_title(p, ov.get(p.id))) for p in products]
+    kb = InlineKeyboardBuilder()
+    for pid, title in rows:
+        kb.row(_b(title, f"oc_prod:{pid}"))
+    kb.row(_b("⬅️ Назад", "mo_home"))
+    await _edit(
+        call,
+        "🛍 <b>Каталог</b>\n\nВыберите товар/категорию, чтобы изменить подпись, "
+        "эмодзи или описание в вашем боте. Цены общего каталога не меняются.",
+        kb,
+    )
+
+
+@router.callback_query(F.data == "oc_home")
+async def cb_oc_home(call: CallbackQuery, db: Database, state: FSMContext,
+                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_oc_products(call, db, merchant_id)
+    await call.answer()
+
+
+async def _show_oc_product(call: CallbackQuery, db: Database, merchant_id: int, pid: int) -> None:
+    async with db.session() as s:
+        product = await catalog_service.get_product(s, pid)
+        if product is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        ov = await mcatalog_service.get_override(s, merchant_id, mcatalog_service.PRODUCT, pid)
+        title = mcatalog_service.disp_title(product, ov)
+        emoji = "🙂 есть" if mcatalog_service.disp_emoji(product, ov) else "— нет"
+        desc = mcatalog_service.disp_description(product, ov)
+        children = await catalog_service.list_children(
+            s, pid, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
+        )
+        variants = await catalog_service.list_variants(s, pid)
+        ch = [(c.id, mcatalog_service.disp_title(c, None)) for c in children]
+        vs = []
+        if not children:
+            vov = await mcatalog_service.overrides_map(
+                s, merchant_id, mcatalog_service.VARIANT, [v.id for v in variants]
+            )
+            vs = [(v.id, mcatalog_service.disp_title(v, vov.get(v.id))) for v in variants]
+        has_override = ov is not None
+    caption = (
+        f"🛍 <b>{title}</b>\n"
+        f"Эмодзи: {emoji}\n"
+        f"Описание: {'задано' if desc else '— нет'}"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("✏️ Подпись", f"oc_t:product:{pid}"), _b("🙂 Эмодзи", f"oc_e:product:{pid}"))
+    kb.row(_b("📝 Описание", f"oc_d:{pid}"))
+    if has_override:
+        kb.row(_b("♻️ Сбросить", f"oc_clr:product:{pid}"))
+    for cid, ctitle in ch:
+        kb.row(_b(f"📁 {ctitle}", f"oc_prod:{cid}"))
+    for vid, vtitle in vs:
+        kb.row(_b(f"🧩 {vtitle}", f"oc_var:{vid}"))
+    back = f"oc_prod:{product.parent_id}" if product.parent_id else "oc_home"
+    kb.row(_b("⬅️ Назад", back))
+    await _edit(call, caption, kb)
+
+
+@router.callback_query(F.data.startswith("oc_prod:"))
+async def cb_oc_product(call: CallbackQuery, db: Database, state: FSMContext,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_oc_product(call, db, merchant_id, int(call.data.split(":", 1)[1]))
+    await call.answer()
+
+
+async def _show_oc_variant(call: CallbackQuery, db: Database, merchant_id: int, vid: int) -> None:
+    async with db.session() as s:
+        variant = await catalog_service.get_variant(s, vid)
+        if variant is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        ov = await mcatalog_service.get_override(s, merchant_id, mcatalog_service.VARIANT, vid)
+        title = mcatalog_service.disp_title(variant, ov)
+        emoji = "🙂 есть" if mcatalog_service.disp_emoji(variant, ov) else "— нет"
+        pid = variant.product_id
+        has_override = ov is not None
+    caption = f"🧩 <b>{title}</b>\nЭмодзи: {emoji}"
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("✏️ Подпись", f"oc_t:variant:{vid}"), _b("🙂 Эмодзи", f"oc_e:variant:{vid}"))
+    if has_override:
+        kb.row(_b("♻️ Сбросить", f"oc_clr:variant:{vid}"))
+    kb.row(_b("⬅️ Назад", f"oc_prod:{pid}"))
+    await _edit(call, caption, kb)
+
+
+@router.callback_query(F.data.startswith("oc_var:"))
+async def cb_oc_variant(call: CallbackQuery, db: Database, state: FSMContext,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_oc_variant(call, db, merchant_id, int(call.data.split(":", 1)[1]))
+    await call.answer()
+
+
+# ── Ввод: подпись / эмодзи / описание ────────────────────────────────────────
+def _oc_back(it: str, iid: int) -> str:
+    return f"oc_var:{iid}" if it == "variant" else f"oc_prod:{iid}"
+
+
+@router.callback_query(F.data.startswith("oc_t:"))
+async def cb_oc_title_ask(call: CallbackQuery, state: FSMContext) -> None:
+    _, it, iid = call.data.split(":", 2)
+    await state.set_state(MerchAdmin.oc_title)
+    await state.update_data(it=it, iid=int(iid))
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", _oc_back(it, int(iid))))
+    await _edit(call, "✏️ Пришлите новую подпись (кнопку).\n<code>0</code> — вернуть из каталога.", kb)
+    await call.answer()
+
+
+@router.message(MerchAdmin.oc_title)
+async def msg_oc_title(message: Message, db: Database, state: FSMContext,
+                       merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    d = await state.get_data(); it, iid = d.get("it"), int(d.get("iid"))
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите текст или 0."); return
+    async with db.session() as s:
+        await mcatalog_service.set_title(s, merchant_id, it, iid, None if raw == "0" else raw[:255])
+        await s.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", _oc_back(it, iid))).as_markup()
+    await message.answer("✅ Подпись обновлена", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("oc_e:"))
+async def cb_oc_emoji_ask(call: CallbackQuery, state: FSMContext) -> None:
+    _, it, iid = call.data.split(":", 2)
+    await state.set_state(MerchAdmin.oc_emoji)
+    await state.update_data(it=it, iid=int(iid))
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", _oc_back(it, int(iid))))
+    await _edit(
+        call,
+        "🙂 Пришлите <b>премиум-эмодзи</b> — станет иконкой.\n"
+        "<code>-</code> — убрать, <code>0</code> — вернуть из каталога.",
+        kb,
+    )
+    await call.answer()
+
+
+@router.message(MerchAdmin.oc_emoji)
+async def msg_oc_emoji(message: Message, db: Database, state: FSMContext,
+                       merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    d = await state.get_data(); it, iid = d.get("it"), int(d.get("iid"))
+    val = _emoji_from_message(message)
+    if val is None:
+        await message.answer("Пришлите премиум-эмодзи, либо - (убрать) / 0 (из каталога)."); return
+    emoji_id = None if val == "__reset__" else val
+    async with db.session() as s:
+        await mcatalog_service.set_emoji(s, merchant_id, it, iid, emoji_id)
+        await s.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", _oc_back(it, iid))).as_markup()
+    await message.answer("✅ Эмодзи обновлено", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("oc_d:"))
+async def cb_oc_desc_ask(call: CallbackQuery, state: FSMContext) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    await state.set_state(MerchAdmin.oc_desc)
+    await state.update_data(it="product", iid=pid)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", f"oc_prod:{pid}"))
+    await _edit(call, "📝 Пришлите описание товара.\n<code>0</code> — вернуть из каталога, <code>-</code> — убрать.", kb)
+    await call.answer()
+
+
+@router.message(MerchAdmin.oc_desc)
+async def msg_oc_desc(message: Message, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    d = await state.get_data(); pid = int(d.get("iid"))
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пусто. Пришлите текст, 0 или -."); return
+    if raw == "0":
+        value = None
+    elif raw == "-":
+        value = ""
+    else:
+        value = (message.html_text or message.text).strip()
+    async with db.session() as s:
+        await mcatalog_service.set_description(s, merchant_id, "product", pid, value)
+        await s.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", f"oc_prod:{pid}")).as_markup()
+    await message.answer("✅ Описание обновлено", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("oc_clr:"))
+async def cb_oc_clear(call: CallbackQuery, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    _, it, iid = call.data.split(":", 2)
+    iid = int(iid)
+    async with db.session() as s:
+        await mcatalog_service.clear(s, merchant_id, it, iid)
+        await s.commit()
+    if it == "variant":
+        await _show_oc_variant(call, db, merchant_id, iid)
+    else:
+        await _show_oc_product(call, db, merchant_id, iid)
+    await call.answer("Сброшено ✅")

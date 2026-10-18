@@ -25,6 +25,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import BotConfig
 from ..db import Database
 from ..services import catalog as catalog_service
+from ..services import mcatalog as mcatalog_service
 from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
@@ -137,8 +138,11 @@ async def msg_catalog(
         products = await catalog_service.list_products(
             session, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
         )
+        ov = await mcatalog_service.overrides_map(
+            session, merchant_id, mcatalog_service.PRODUCT, [p.id for p in products]
+        )
     caption = menu_service.caption("catalog", texts.CHOOSE_PRODUCT, merchant_id) if products else texts.CATALOG_EMPTY
-    await render(message, banner="catalog", caption=caption, reply_markup=kb.products_kb(products))
+    await render(message, banner="catalog", caption=caption, reply_markup=kb.products_kb(products, overrides=ov))
 
 
 @router.callback_query(F.data == "menu")
@@ -242,11 +246,14 @@ async def cb_catalog(
         products = await catalog_service.list_products(
             session, exclude_head_only=merchant_id != HEAD_MERCHANT_ID
         )
+        ov = await mcatalog_service.overrides_map(
+            session, merchant_id, mcatalog_service.PRODUCT, [p.id for p in products]
+        )
     caption = menu_service.caption("catalog", texts.CHOOSE_PRODUCT, merchant_id) if products else texts.CATALOG_EMPTY
     # Верхний уровень — сеткой по 2 в ряд (категории-плитки).
     await render(
         call, banner="catalog", caption=caption,
-        reply_markup=kb.products_kb(products, columns=2),
+        reply_markup=kb.products_kb(products, columns=2, overrides=ov),
     )
     await call.answer()
 
@@ -275,7 +282,14 @@ async def cb_product(
         children = await catalog_service.list_children(
             session, product_id, exclude_head_only=is_franchise
         )
-        prod_emoji = texts.ce(product.icon_emoji_id or "5298953332079999355", "🎮")
+        # Переопределения франшизы для этого товара и его дочерних элементов.
+        p_ov = await mcatalog_service.get_override(
+            session, merchant_id, mcatalog_service.PRODUCT, product_id
+        )
+        p_title = mcatalog_service.disp_title(product, p_ov)
+        p_desc = mcatalog_service.disp_description(product, p_ov)
+        p_emoji_id = mcatalog_service.disp_emoji(product, p_ov)
+        prod_emoji = texts.ce(p_emoji_id or "5298953332079999355", "🎮")
 
         # Куда вести кнопку «Назад»: к родительской категории или в каталог.
         back = f"prod:{parent_id}" if parent_id else "catalog"
@@ -283,11 +297,14 @@ async def cb_product(
         banner_photo = product.banner_file_id or None
 
         if children:
-            caption = f"{prod_emoji} <b>{product.title}</b>"
-            if product.description:
-                caption += f"\n\n{product.description}"
+            ch_ov = await mcatalog_service.overrides_map(
+                session, merchant_id, mcatalog_service.PRODUCT, [c.id for c in children]
+            )
+            caption = f"{prod_emoji} <b>{p_title}</b>"
+            if p_desc:
+                caption += f"\n\n{p_desc}"
             caption += "\n\nВыберите категорию:"
-            markup = kb.products_kb(children, back=back, back_text="Назад")
+            markup = kb.products_kb(children, back=back, back_text="Назад", overrides=ch_ov)
             await render(
                 call, banner="catalog", caption=caption,
                 reply_markup=markup, photo=banner_photo,
@@ -302,6 +319,9 @@ async def cb_product(
             vid: (texts.rub(p) if p > 0 else "—") for vid, p in client_prices.items()
         }
         stock = await stock_service.counts_by_variant(session, [v.id for v in variants])
+        v_ov = await mcatalog_service.overrides_map(
+            session, merchant_id, mcatalog_service.VARIANT, [v.id for v in variants]
+        )
 
     if not variants:
         await call.answer("Нет доступных номиналов", show_alert=True)
@@ -311,9 +331,9 @@ async def cb_product(
     stock = dict(stock)
     stock.update(await catalog_service.fazercard_stock(fzr, variants))
 
-    caption = f"{prod_emoji} <b>{product.title}</b>"
-    if product.description:
-        caption += f"\n\n{product.description}"
+    caption = f"{prod_emoji} <b>{p_title}</b>"
+    if p_desc:
+        caption += f"\n\n{p_desc}"
     caption += "\n\nВыберите номинал:"
     await render(
         call,
@@ -321,7 +341,7 @@ async def cb_product(
         caption=caption,
         reply_markup=kb.variants_kb(
             variants, prices, stock, config.currency,
-            product_icon=product.icon_emoji_id, back=back,
+            product_icon=p_emoji_id, back=back, overrides=v_ov,
         ),
         photo=banner_photo,
     )
@@ -352,6 +372,10 @@ async def cb_variant(
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, variant_id)
         client_price = await _client_price(session, merchant_id, variant, config)
+        v_ov = await mcatalog_service.get_override(
+            session, merchant_id, mcatalog_service.VARIANT, variant_id
+        )
+        v_title = mcatalog_service.disp_title(variant, v_ov)
         in_stock = await stock_service.available_count(session, variant_id)
         ondemand = variant.source == "fazercard"
         is_vpn = variant.source == "vpnresellers"
@@ -375,7 +399,7 @@ async def cb_variant(
         note = texts.OUT_OF_STOCK_NOTE
     price_str = texts.rub(client_price) if client_price > 0 else "—"
     caption = (
-        f"<b>{variant.title}</b>\n"
+        f"<b>{v_title}</b>\n"
         f"Цена: <b>{price_str}</b>\n"
         f"Статус: {note}"
     )

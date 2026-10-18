@@ -459,6 +459,24 @@ class MenuButton(Base):
     style: Mapped[Optional[str]] = mapped_column(String(16))
 
 
+class MerchantCatalogOverride(Base):
+    """Переопределение отображения товара/номинала для конкретной франшизы.
+
+    Каталог общий (товары/номиналы владельца). Франшиза может переопределить в
+    своём боте подпись (кнопку), эмодзи и описание — не меняя общий каталог.
+    ``item_type`` = "product" | "variant"; пустые поля = значение из каталога.
+    """
+
+    __tablename__ = "merchant_catalog"
+
+    merchant_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_type: Mapped[str] = mapped_column(String(12), primary_key=True)  # product|variant
+    item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[Optional[str]] = mapped_column(String(255))      # None = дефолт
+    emoji_id: Mapped[Optional[str]] = mapped_column(String(32))    # None = дефолт, "" = без эмодзи
+    description: Mapped[Optional[str]] = mapped_column(Text)       # None = дефолт (для product)
+
+
 class MerchantSetting(Base):
     """Пер-мерчантные настройки оформления (тексты экранов, баннеры, контакты).
 
