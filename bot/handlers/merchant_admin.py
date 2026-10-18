@@ -1403,14 +1403,15 @@ async def msg_pf_amount(message: Message, db: Database, config: BotConfig, state
                         bots_by_merchant: dict = None, merchant_id: int = HEAD_MERCHANT_ID) -> None:
     d = await state.get_data()
     method = d.get("method", "sbp")
+    _back = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home")).as_markup()
     val = _num(message.text or "")
     if val is None:
-        await message.answer("Введите число, например 500."); return
+        await message.answer("Введите число, например 500.", reply_markup=_back); return
     async with db.session() as s:
         payout, err = await payouts_service.create_request(s, merchant_id, val, method)
         if err:
             await s.rollback()
-            await message.answer("⚠️ " + err); return
+            await message.answer("⚠️ " + err, reply_markup=_back); return
         await s.commit()
         pid, amount, wallet = payout.id, payout.amount_rub, payout.wallet
         m = await s.get(Merchant, merchant_id)
