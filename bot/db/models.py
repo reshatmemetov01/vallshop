@@ -626,3 +626,92 @@ class BroadcastClick(Base):
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     count: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Бонусы: промокоды на пополнение баланса и бонус-рассылки (дропы)
+# ──────────────────────────────────────────────────────────────────────────
+class PromoCode(Base):
+    """Статический промокод: сумма бонуса на баланс, лимит активаций, 1 раз/юзер."""
+
+    __tablename__ = "promo_codes"
+    __table_args__ = (UniqueConstraint("merchant_id", "code", name="uq_promo_merchant_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
+    code: Mapped[str] = mapped_column(String(32), index=True)  # в верхнем регистре
+    amount_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    max_activations: Mapped[int] = mapped_column(Integer, default=0)  # 0 = без лимита
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PromoActivation(Base):
+    """Факт активации промокода пользователем (один раз на пользователя)."""
+
+    __tablename__ = "promo_activations"
+
+    promo_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class BonusDrop(Base):
+    """Бонус-рассылка: пост с кнопкой «забрать», лимит активаций, 24ч жизни.
+
+    Кто успел нажать в пределах ``max_claims`` — получает ``amount_rub`` на баланс
+    и редактируемое сообщение об успехе; остальные — сообщение об ошибке. Через
+    24ч пост и служебные сообщения удаляются (см. bonus_drop_messages).
+    """
+
+    __tablename__ = "bonus_drops"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(
+        Integer, default=HEAD_MERCHANT_ID, server_default="0", index=True
+    )
+    created_by: Mapped[int] = mapped_column(Integer)
+    text: Mapped[Optional[str]] = mapped_column(Text)
+    photo: Mapped[Optional[str]] = mapped_column(String(255))
+    btn_label: Mapped[str] = mapped_column(String(128), default="🎁 Забрать бонус")
+    amount_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    max_claims: Mapped[int] = mapped_column(Integer, default=0)
+    claimed_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_text: Mapped[Optional[str]] = mapped_column(Text)
+    success_btn_label: Mapped[Optional[str]] = mapped_column(String(128))
+    success_btn_kind: Mapped[Optional[str]] = mapped_column(String(8))     # cb|url
+    success_btn_target: Mapped[Optional[str]] = mapped_column(String(255))
+    error_text: Mapped[Optional[str]] = mapped_column(Text)
+    # sending → active (разослан, приём активаций) → expired (24ч прошли/удалён)
+    status: Mapped[str] = mapped_column(String(16), default="sending", index=True)
+    recipients: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, index=True)
+
+
+class BonusActivation(Base):
+    """Факт получения бонуса из дропа пользователем (один раз на пользователя)."""
+
+    __tablename__ = "bonus_activations"
+
+    drop_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class BonusDropMessage(Base):
+    """Отправленное сообщение дропа (пост/успех/ошибка) — для удаления через 24ч."""
+
+    __tablename__ = "bonus_drop_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    drop_id: Mapped[int] = mapped_column(Integer, index=True)
+    chat_id: Mapped[int] = mapped_column(Integer)
+    message_id: Mapped[int] = mapped_column(Integer)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

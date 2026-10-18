@@ -27,6 +27,7 @@ from ..services import balance as balance_service
 from ..services.users import get_user
 from ..services import stats as stats_service
 from . import broadcast_flow
+from . import bonus_flow
 from .. import texts
 
 router = Router()
@@ -61,6 +62,19 @@ class HeadBroadcast(StatesGroup):
     schedule = State()
 
 
+class HeadBonus(StatesGroup):
+    promo_amount = State()
+    promo_limit = State()
+    d_post = State()
+    d_amount = State()
+    d_limit = State()
+    d_btnlabel = State()
+    d_success = State()
+    d_surl = State()
+    d_slabel = State()
+    d_error = State()
+
+
 def _btn(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=text, callback_data=data)
 
@@ -72,7 +86,7 @@ def _kb() -> InlineKeyboardMarkup:
     kb.row(_btn("Всё время", "st:all"))
     kb.row(_btn("📅 Свой период", "st_custom"))
     kb.row(_btn("💰 Баланс клиента", "st_bal"))
-    kb.row(_btn("📣 Рассылка", "hb:home"))
+    kb.row(_btn("📣 Рассылка", "hb:home"), _btn("🎁 Бонусы", "hbn:home"))
     kb.row(_btn("⬅️ В админ-панель", "a_home"))
     return kb.as_markup()
 
@@ -337,4 +351,13 @@ broadcast_flow.register(
     title="Рассылка",
     sections=broadcast_flow.HEAD_SECTIONS,
     states=HeadBroadcast,
+)
+
+# ── Бонусы головного (промокоды + бонус-рассылки) ──────────────────────────────
+bonus_flow.register(
+    router,
+    prefix="hbn",
+    home_cb="st_home",
+    sections=broadcast_flow.HEAD_SECTIONS,
+    states=HeadBonus,
 )

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from ..db import Database
 from . import broadcasts as broadcasts_service
+from . import bonuses as bonuses_service
 
 log = logging.getLogger("vallshop.bcscheduler")
 
@@ -53,3 +54,37 @@ async def _tick(db: Database, bots: dict) -> None:
             )
         except Exception:  # noqa: BLE001
             pass
+
+
+async def run_bonus_cleaner(db: Database, bots: dict, interval: float = 60.0) -> None:
+    """Удаляет пост и служебные сообщения бонус-дропов спустя 24ч (TTL)."""
+    while True:
+        try:
+            await _tick_bonus(db, bots)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("Ошибка в цикле очистки бонус-дропов")
+        await asyncio.sleep(interval)
+
+
+async def _tick_bonus(db: Database, bots: dict) -> None:
+    async with db.session() as s:
+        due = await bonuses_service.due_drops(s, datetime.utcnow())
+    for drop_id in due:
+        async with db.session() as s:
+            drop = await bonuses_service.get_drop(s, drop_id)
+            msgs = await bonuses_service.messages_to_delete(s, drop_id)
+        bot = (bots or {}).get(drop.merchant_id) if drop else None
+        if bot is None:
+            await bonuses_service.mark_drop_expired(db, drop_id)
+            continue
+        for row_id, chat_id, message_id in msgs:
+            try:
+                await bot.delete_message(chat_id, message_id)
+            except Exception:  # noqa: BLE001 — сообщение уже удалено/недоступно
+                pass
+            await bonuses_service.mark_message_deleted(db, row_id)
+            await asyncio.sleep(0.03)
+        await bonuses_service.mark_drop_expired(db, drop_id)
+        log.info("Бонус-дроп #%s: сообщения удалены (24ч)", drop_id)

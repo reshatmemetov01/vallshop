@@ -74,6 +74,7 @@ REGISTRY: List[Entry] = [
     Entry("profile.balance",  "profile", "Мой баланс",          "5778421276024509124", "danger",  "cb", "balance", 10, plain="💳"),
     Entry("profile.myorders", "profile", "Мои заказы",          "5904359114531675993", "primary", "cb", "myorders", 20, plain="🧾"),
     Entry("profile.mytopups", "profile", "История пополнений",  "6039859895291877126", None,      "cb", "mytopups", 30, plain="💸"),
+    Entry("profile.promo",    "profile", "Промокод",            "5805298713211447980", "success", "cb", "promo", 40, full_width=True, plain="🎟"),
     # FAQ / Правила: [Техподдержка] / [Конфиденциальность, Соглашение] / [Оферта]
     Entry("faq.support",   "faq", "Техподдержка",                  "6021618194228187816", "primary", "url", "support", 10, full_width=True, plain="🆘"),
     Entry("faq.privacy",   "faq", "Политика конфиденциальности",   "5935757052042285202", None,      "url", "privacy", 20, plain="🔒"),

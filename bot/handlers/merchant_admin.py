@@ -153,7 +153,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
     kb.row(_b("📈 Наценка по умолчанию", "ma_setdef"))
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
     kb.row(_b("🎨 Оформление", "mo_home"))
-    kb.row(_b("📣 Рассылка", "mb:home"))
+    kb.row(_b("📣 Рассылка", "mb:home"), _b("🎁 Бонусы", "mbn:home"))
     kb.row(_b("⬅️ В меню", "menu"))
     await _edit(call, caption, kb)
 
@@ -1387,6 +1387,19 @@ class FranchiseBroadcast(StatesGroup):
     schedule = State()
 
 
+class FranchiseBonus(StatesGroup):
+    promo_amount = State()
+    promo_limit = State()
+    d_post = State()
+    d_amount = State()
+    d_limit = State()
+    d_btnlabel = State()
+    d_success = State()
+    d_surl = State()
+    d_slabel = State()
+    d_error = State()
+
+
 broadcast_flow.register(
     router,
     prefix="mb",
@@ -1394,4 +1407,14 @@ broadcast_flow.register(
     title="Рассылка",
     sections=broadcast_flow.FRANCHISE_SECTIONS,
     states=FranchiseBroadcast,
+)
+
+from . import bonus_flow  # noqa: E402
+
+bonus_flow.register(
+    router,
+    prefix="mbn",
+    home_cb="ma_home",
+    sections=broadcast_flow.FRANCHISE_SECTIONS,
+    states=FranchiseBonus,
 )
