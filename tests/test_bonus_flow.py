@@ -7,10 +7,19 @@ import pytest
 from aiogram import Router
 from aiogram.fsm.state import State, StatesGroup
 
-from bot.db import Database, User
+from bot.db import Database, Merchant, User
 from bot.services import bonuses as bn
 from bot.handlers import bonus_flow, broadcast_flow
 from bot import texts
+
+
+async def _merchant(db, earnings="0"):
+    async with db.session() as s:
+        m = Merchant(title="F", bot_token="t", bot_username="f", admin_user_id=1,
+                     earnings_rub=Decimal(earnings), earnings_total_rub=Decimal(earnings))
+        s.add(m)
+        await s.commit()
+        return m.id
 
 
 class _BStates(StatesGroup):
@@ -147,3 +156,79 @@ async def test_drop_wizard_creates_and_sends(db):
     assert d.status == "active"                 # разослан, приём активаций открыт
     # пост ушёл обоим клиентам
     assert 1 in bot.sent and 2 in bot.sent
+
+
+def _flow(states=_BStates, prefix="mbn"):
+    return bonus_flow.register(Router(), prefix=prefix, home_cb="ma_home",
+                               sections=broadcast_flow.FRANCHISE_SECTIONS, states=states)
+
+
+@pytest.mark.asyncio
+async def test_fr_promo_blocked_when_low_balance(db):
+    mid = await _merchant(db, earnings="50")
+    h = _flow()
+    st = _State()
+    await st.update_data(p_amount="100")
+    msg = _Msg("2")  # лимит 2 → нужно 200 > 50
+    await h["promo_limit"](msg, db, st, merchant_id=mid)
+    assert any("Недостаточно" in a for a in msg.answers)
+    async with db.session() as s:
+        assert await bn.list_promos(s, mid) == []   # код не создан
+
+
+@pytest.mark.asyncio
+async def test_fr_promo_requires_limit(db):
+    mid = await _merchant(db, earnings="1000")
+    h = _flow()
+    st = _State()
+    await st.update_data(p_amount="100")
+    msg = _Msg("0")  # без лимита — франшизе нельзя
+    await h["promo_limit"](msg, db, st, merchant_id=mid)
+    assert any("лимит" in a.lower() for a in msg.answers)
+    async with db.session() as s:
+        assert await bn.list_promos(s, mid) == []
+
+
+@pytest.mark.asyncio
+async def test_fr_promo_confirm_creates(db):
+    mid = await _merchant(db, earnings="500")
+    h = _flow()
+    st = _State()
+    await st.update_data(p_amount="100")
+    msg = _Msg("2")  # нужно 200 ≤ 500 → предупреждение
+    await h["promo_limit"](msg, db, st, merchant_id=mid)
+    assert any("Остаток" in a for a in msg.answers)       # предупреждение с остатком
+    call = _Call("mbn:pok", _Bot())
+    await h["promo_confirm"](call, db, st, merchant_id=mid)
+    async with db.session() as s:
+        promos = await bn.list_promos(s, mid)
+    assert len(promos) == 1 and promos[0].max_activations == 2
+
+
+@pytest.mark.asyncio
+async def test_fr_drop_send_blocked_when_low_balance(db):
+    mid = await _merchant(db, earnings="100")
+    h = _flow()
+    st = _State()
+    await st.update_data(d_amount="50", d_limit=5)  # нужно 250 > 100
+    call = _Call("mbn:dsend", _Bot())
+    await h["drop_send"](call, db, st, merchant_id=mid)
+    assert any("Недостаточно" in o for o in call.message.outs)
+    # кнопки «разослать» нет → go тоже защищён
+    call2 = _Call("mbn:dgo", _Bot())
+    await h["drop_go"](call2, db, st, merchant_id=mid)
+    assert any("Недостаточно" in o for o in call2.message.outs)
+    async with db.session() as s:
+        assert await bn.recent_drops(s, mid) == []
+
+
+@pytest.mark.asyncio
+async def test_fr_drop_send_shows_warning(db):
+    mid = await _merchant(db, earnings="500")
+    h = _flow()
+    st = _State()
+    await st.update_data(d_amount="50", d_limit=5)  # нужно 250 ≤ 500
+    call = _Call("mbn:dsend", _Bot())
+    await h["drop_send"](call, db, st, merchant_id=mid)
+    joined = " ".join(call.message.outs)
+    assert "Остаток" in joined and "максимум" in joined

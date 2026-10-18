@@ -23,9 +23,26 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID
 from ..services import bonuses as bonuses_service
+from ..services import payouts as payouts_service
 from . import broadcast_flow
 from .. import keyboards as kb
 from .. import texts
+
+
+async def _available(db: Database, merchant_id: int) -> Decimal:
+    """Доступный заработок франшизы (у головного — не ограничиваем)."""
+    async with db.session() as s:
+        return await payouts_service.available(s, merchant_id)
+
+
+def _fr_warning(avail: Decimal, required: Decimal) -> str:
+    """Предупреждение о списании для франшизы (списание по мере активаций)."""
+    return (
+        f"💰 Ваш баланс: <b>{texts.rub(avail)}</b>\n"
+        f"Спишется по мере активаций, максимум <b>{texts.rub(required)}</b> "
+        "(лимит × бонус).\n"
+        f"Остаток при полном использовании: <b>{texts.rub(avail - required)}</b>."
+    )
 
 
 def _bt(text: str, data: str) -> InlineKeyboardButton:
@@ -69,8 +86,16 @@ def register(
 
     # ── Главная «Бонусы» ─────────────────────────────────────────────────────
     @router.callback_query(F.data == f"{P}:home")
-    async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
+    async def cb_home(call: CallbackQuery, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
         await state.clear()
+        note = ""
+        if merchant_id != HEAD_MERCHANT_ID:
+            avail = await _available(db, merchant_id)
+            note = (
+                "\n\n💡 <b>Бонусы за ваш счёт</b>: суммы списываются с вашего "
+                f"заработка.\nДоступно: <b>{texts.rub(avail)}</b>"
+            )
         b = InlineKeyboardBuilder()
         b.row(_bt("🎟 Промокоды", f"{P}:pl"))
         b.row(_bt("🎁 Рассылка бонуса", f"{P}:dnew"), _bt("📊 Дропы", f"{P}:ds"))
@@ -79,7 +104,8 @@ def register(
             call,
             "🎁 <b>Бонусы</b>\n\n"
             "• Промокоды — коды на пополнение баланса.\n"
-            "• Рассылка бонуса — пост с кнопкой «забрать» и лимитом активаций.",
+            "• Рассылка бонуса — пост с кнопкой «забрать» и лимитом активаций."
+            + note,
             b.as_markup(),
         )
         await call.answer()
@@ -142,6 +168,24 @@ def register(
             reply_markup=b.as_markup(),
         )
 
+    async def _finalize_promo(message_or_call, db, created_by, merchant_id,
+                              amount: Decimal, limit: int):
+        async with db.session() as s:
+            promo = await bonuses_service.create_promo(
+                s, merchant_id=merchant_id, created_by=created_by,
+                amount_rub=amount, max_activations=limit,
+            )
+            await s.commit()
+        lim = "без лимита" if not limit else str(limit)
+        b = InlineKeyboardBuilder().row(_bt("⬅️ К промокодам", f"{P}:pl"))
+        txt = (f"✅ Промокод создан:\n\n<code>{promo.code}</code>\n"
+               f"Бонус: <b>{texts.rub(amount)}</b> · лимит: {lim}\n\n"
+               "Клиенты активируют его в Профиле → Промокод.")
+        if getattr(message_or_call, "message", None) is not None:  # CallbackQuery
+            await _show(message_or_call, txt, b.as_markup())
+        else:
+            await message_or_call.answer(txt, reply_markup=b.as_markup())
+
     @router.message(S.promo_limit)
     async def msg_promo_limit(message: Message, db: Database, state: FSMContext,
                               merchant_id: int = HEAD_MERCHANT_ID) -> None:
@@ -151,21 +195,58 @@ def register(
             return
         data = await state.get_data()
         amount = Decimal(data.get("p_amount", "0"))
-        await state.clear()
-        async with db.session() as s:
-            promo = await bonuses_service.create_promo(
-                s, merchant_id=merchant_id, created_by=message.from_user.id,
-                amount_rub=amount, max_activations=limit,
+        _back = InlineKeyboardBuilder().row(_bt("⬅️ К промокодам", f"{P}:pl")).as_markup()
+        # Франшиза: промокод за её счёт — нужен лимит и достаточный баланс.
+        if merchant_id != HEAD_MERCHANT_ID:
+            if limit <= 0:
+                await message.answer("Укажите лимит активаций больше 0 — промокод за "
+                                     "ваш счёт, нужно знать максимум списания.",
+                                     reply_markup=_back)
+                return
+            required = amount * limit
+            avail = await _available(db, merchant_id)
+            if avail < required:
+                await message.answer(
+                    "❌ Недостаточно баланса для промокода.\n"
+                    f"Нужно: <b>{texts.rub(required)}</b> (лимит × бонус)\n"
+                    f"Доступно: <b>{texts.rub(avail)}</b>",
+                    reply_markup=_back,
+                )
+                return
+            await state.update_data(p_limit=limit)
+            b = InlineKeyboardBuilder()
+            b.row(_bt("✅ Создать промокод", f"{P}:pok"))
+            b.row(_bt("⬅️ Отмена", f"{P}:pl"))
+            await message.answer(
+                f"🎟 Промокод: бонус <b>{texts.rub(amount)}</b> × лимит <b>{limit}</b>.\n\n"
+                + _fr_warning(avail, required) + "\n\nСоздать?",
+                reply_markup=b.as_markup(),
             )
-            await s.commit()
-        lim = "без лимита" if not limit else str(limit)
-        b = InlineKeyboardBuilder().row(_bt("⬅️ К промокодам", f"{P}:pl"))
-        await message.answer(
-            f"✅ Промокод создан:\n\n<code>{promo.code}</code>\n"
-            f"Бонус: <b>{texts.rub(amount)}</b> · лимит: {lim}\n\n"
-            "Клиенты активируют его в Профиле → Промокод.",
-            reply_markup=b.as_markup(),
-        )
+            return
+        await state.clear()
+        await _finalize_promo(message, db, message.from_user.id, merchant_id, amount, limit)
+
+    @router.callback_query(F.data == f"{P}:pok")
+    async def cb_promo_confirm(call: CallbackQuery, db: Database, state: FSMContext,
+                               merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        data = await state.get_data()
+        amount = Decimal(data.get("p_amount", "0"))
+        limit = int(data.get("p_limit", 0))
+        await state.clear()
+        if amount <= 0 or limit <= 0:
+            await call.answer("Черновик не готов", show_alert=True)
+            return
+        # повторная проверка баланса (мог измениться)
+        required = amount * limit
+        avail = await _available(db, merchant_id)
+        if avail < required:
+            b = InlineKeyboardBuilder().row(_bt("⬅️ К промокодам", f"{P}:pl"))
+            await _show(call, f"❌ Недостаточно баланса. Нужно {texts.rub(required)}, "
+                              f"доступно {texts.rub(avail)}.", b.as_markup())
+            await call.answer()
+            return
+        await _finalize_promo(call, db, call.from_user.id, merchant_id, amount, limit)
+        await call.answer("Создано ✅")
 
     # ── Бонус-рассылка: визард ───────────────────────────────────────────────
     @router.callback_query(F.data == f"{P}:dnew")
@@ -357,6 +438,25 @@ def register(
         if not d.get("d_amount") or not d.get("d_limit"):
             await call.answer("Черновик не готов", show_alert=True)
             return
+        amount = Decimal(d.get("d_amount") or "0")
+        limit = int(d.get("d_limit"))
+        required = amount * limit
+        # Франшиза: рассылка за её счёт — проверяем баланс и предупреждаем.
+        warn = ""
+        if merchant_id != HEAD_MERCHANT_ID:
+            avail = await _available(db, merchant_id)
+            if avail < required:
+                b = InlineKeyboardBuilder().row(_bt("⬅️ Назад", f"{P}:home"))
+                await _show(
+                    call,
+                    "❌ Недостаточно баланса для рассылки бонуса.\n"
+                    f"Нужно: <b>{texts.rub(required)}</b> (лимит × бонус)\n"
+                    f"Доступно: <b>{texts.rub(avail)}</b>",
+                    b.as_markup(),
+                )
+                await call.answer()
+                return
+            warn = "\n\n" + _fr_warning(avail, required)
         from ..services import broadcast as bs
         count = len(await bs.recipients(db, merchant_id))
         b = InlineKeyboardBuilder()
@@ -365,8 +465,8 @@ def register(
         await _show(
             call,
             f"📤 Разослать бонус <b>{count}</b> клиентам?\n"
-            f"Первые <b>{d.get('d_limit')}</b> успевших получат "
-            f"<b>{texts.rub(Decimal(d.get('d_amount') or '0'))}</b>.",
+            f"Первые <b>{limit}</b> успевших получат <b>{texts.rub(amount)}</b>."
+            + warn,
             b.as_markup(),
         )
         await call.answer()
@@ -379,6 +479,18 @@ def register(
         if not d.get("d_amount") or not d.get("d_limit"):
             await call.answer("Черновик не готов", show_alert=True)
             return
+        amount = Decimal(d.get("d_amount") or "0")
+        limit = int(d.get("d_limit"))
+        # Франшиза: повторная проверка баланса перед отправкой (мог измениться).
+        if merchant_id != HEAD_MERCHANT_ID:
+            avail = await _available(db, merchant_id)
+            if avail < amount * limit:
+                b = InlineKeyboardBuilder().row(_bt("⬅️ Назад", f"{P}:home"))
+                await _show(call, f"❌ Недостаточно баланса. Нужно {texts.rub(amount * limit)}, "
+                                  f"доступно {texts.rub(avail)}. Рассылка не отправлена.",
+                            b.as_markup())
+                await call.answer()
+                return
         owner_id = call.from_user.id
         async with db.session() as s:
             drop = await bonuses_service.create_drop(
@@ -436,6 +548,7 @@ def register(
     return {
         "home": cb_home, "promo_list": cb_promo_list, "promo_new": cb_promo_new,
         "promo_amount": msg_promo_amount, "promo_limit": msg_promo_limit,
+        "promo_confirm": cb_promo_confirm,
         "promo_toggle": cb_promo_toggle, "drop_new": cb_drop_new, "d_post": msg_d_post,
         "d_amount": msg_d_amount, "d_limit": msg_d_limit, "d_btnlabel": msg_d_btnlabel,
         "d_success": msg_d_success, "sb_section": cb_sb_section, "sb_none": cb_sb_none,
