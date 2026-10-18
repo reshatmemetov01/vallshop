@@ -34,6 +34,7 @@ from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
 from ..services import msettings as msettings_service
+from ..services import payouts as payouts_service
 from ..services import stats as stats_service
 from ..services.pricing import price_rub_value
 from .. import texts
@@ -109,6 +110,10 @@ class MerchAdmin(StatesGroup):
     oc_emoji = State()     # каталог: эмодзи
     oc_desc = State()      # каталог: описание товара
     st_custom = State()    # статистика: свой период
+    pf_sbp_phone = State()  # вывод: телефон СБП
+    pf_sbp_bank = State()   # вывод: банк СБП (data: phone)
+    pf_usdt = State()       # вывод: адрес USDT
+    pf_amount = State()     # вывод: сумма (data: method)
 
 
 def _b(text: str, data: str) -> InlineKeyboardButton:
@@ -1152,6 +1157,7 @@ def _stats_kb() -> InlineKeyboardBuilder:
     kb.row(_b("30 дней", "fm:30d"), _b("Этот месяц", "fm:month"))
     kb.row(_b("Всё время", "fm:all"))
     kb.row(_b("📅 Свой период", "fm_custom"))
+    kb.row(_b("💰 Прибыль и вывод", "pf_home"))
     kb.row(_b("⬅️ В кабинет", "ma_home"))
     return kb
 
@@ -1245,3 +1251,209 @@ async def msg_mstats_custom(message: Message, db: Database, config: BotConfig,
         return
     await state.clear()
     await _render_mstats(message, db, merchant_id, start, end, label, edit=False)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Прибыль и вывод средств (франшиза)
+# ══════════════════════════════════════════════════════════════════════════════
+async def _show_profit(call: CallbackQuery, db: Database, merchant_id: int) -> None:
+    async with db.session() as s:
+        m = await s.get(Merchant, merchant_id)
+        w = await payouts_service.wallets(s, merchant_id)
+        pending = await payouts_service.list_requests(s, merchant_id, status="pending")
+    total = Decimal(m.earnings_total_rub or 0) if m else Decimal(0)
+    avail = Decimal(m.earnings_rub or 0) if m else Decimal(0)
+    sbp = payouts_service.wallet_label("sbp", w) if w["sbp"] else "— не привязан"
+    usdt = payouts_service.wallet_label("usdt", w) if w["usdt"] else "— не привязан"
+    held = "" if not pending else f"\nВ заявках (ожидают): <b>{len(pending)}</b>"
+    caption = (
+        "💰 <b>Прибыль и вывод</b>\n\n"
+        f"Заработано всего: <b>{texts.rub(total)}</b>\n"
+        f"Доступно к выводу: <b>{texts.rub(avail)}</b>{held}\n\n"
+        f"💳 СБП: {sbp}\n"
+        f"🪙 USDT (BEP20): {usdt}\n\n"
+        f"Минимальная сумма вывода — {int(payouts_service.MIN_WITHDRAW)} ₽."
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("💸 Вывести средства", "pf_wd"))
+    kb.row(_b("🔗 Привязать СБП", "pf_bind:sbp"), _b("🔗 Привязать USDT", "pf_bind:usdt"))
+    kb.row(_b("📋 Мои заявки", "pf_list"))
+    kb.row(_b("⬅️ К статистике", "fm_home"))
+    await _edit(call, caption, kb)
+
+
+@router.callback_query(F.data == "pf_home")
+async def cb_pf_home(call: CallbackQuery, db: Database, state: FSMContext,
+                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    await _show_profit(call, db, merchant_id)
+    await call.answer()
+
+
+# ── Привязка кошельков ───────────────────────────────────────────────────────
+@router.callback_query(F.data == "pf_bind:sbp")
+async def cb_pf_bind_sbp(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(MerchAdmin.pf_sbp_phone)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "pf_home"))
+    await _edit(call, "💳 Привязка СБП.\n\nПришлите номер телефона (например <code>+79001234567</code>).", kb)
+    await call.answer()
+
+
+@router.message(MerchAdmin.pf_sbp_phone)
+async def msg_pf_sbp_phone(message: Message, state: FSMContext) -> None:
+    phone = (message.text or "").strip()
+    if len(phone) < 5:
+        await message.answer("Введите корректный номер телефона."); return
+    await state.update_data(phone=phone)
+    await state.set_state(MerchAdmin.pf_sbp_bank)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "pf_home")).as_markup()
+    await message.answer("Теперь пришлите название банка (например <code>Сбер</code>, <code>Т-Банк</code>).", reply_markup=kb)
+
+
+@router.message(MerchAdmin.pf_sbp_bank)
+async def msg_pf_sbp_bank(message: Message, db: Database, state: FSMContext,
+                          merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    d = await state.get_data()
+    bank = (message.text or "").strip()
+    if not bank:
+        await message.answer("Введите название банка."); return
+    async with db.session() as s:
+        await payouts_service.set_sbp(s, merchant_id, d.get("phone", ""), bank[:64])
+        await s.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home")).as_markup()
+    await message.answer("✅ Кошелёк СБП привязан", reply_markup=kb)
+
+
+@router.callback_query(F.data == "pf_bind:usdt")
+async def cb_pf_bind_usdt(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(MerchAdmin.pf_usdt)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "pf_home"))
+    await _edit(call, "🪙 Привязка USDT (сеть BEP20).\n\nПришлите адрес кошелька (0x…).", kb)
+    await call.answer()
+
+
+@router.message(MerchAdmin.pf_usdt)
+async def msg_pf_usdt(message: Message, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    addr = (message.text or "").strip()
+    if len(addr) < 10:
+        await message.answer("Введите корректный адрес кошелька."); return
+    async with db.session() as s:
+        await payouts_service.set_usdt(s, merchant_id, addr[:128])
+        await s.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home")).as_markup()
+    await message.answer("✅ Кошелёк USDT привязан", reply_markup=kb)
+
+
+# ── Заявка на вывод ──────────────────────────────────────────────────────────
+@router.callback_query(F.data == "pf_wd")
+async def cb_pf_withdraw(call: CallbackQuery, db: Database, state: FSMContext,
+                         merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    async with db.session() as s:
+        w = await payouts_service.wallets(s, merchant_id)
+        avail = await payouts_service.available(s, merchant_id)
+    methods = [m for m in ("sbp", "usdt") if w[m]]
+    if not methods:
+        kb = InlineKeyboardBuilder().row(_b("🔗 Привязать кошелёк", "pf_home"))
+        await _edit(call, "Сначала привяжите кошелёк (СБП или USDT).", kb)
+        await call.answer(); return
+    if avail < payouts_service.MIN_WITHDRAW:
+        kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home"))
+        await _edit(call, f"Доступно {texts.rub(avail)}. Минимум для вывода — "
+                          f"{int(payouts_service.MIN_WITHDRAW)} ₽.", kb)
+        await call.answer(); return
+    if len(methods) == 1:
+        await _ask_amount(call, state, methods[0], avail)
+    else:
+        kb = InlineKeyboardBuilder()
+        kb.row(_b("💳 На СБП", "pf_m:sbp"), _b("🪙 На USDT", "pf_m:usdt"))
+        kb.row(_b("⬅️ Отмена", "pf_home"))
+        await _edit(call, "Куда вывести средства?", kb)
+    await call.answer()
+
+
+async def _ask_amount(call: CallbackQuery, state: FSMContext, method: str, avail: Decimal) -> None:
+    await state.set_state(MerchAdmin.pf_amount)
+    await state.update_data(method=method)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Отмена", "pf_home"))
+    await _edit(
+        call,
+        f"💸 Вывод на {payouts_service.METHOD_NAMES[method]}.\n\n"
+        f"Доступно: <b>{texts.rub(avail)}</b>. Минимум — {int(payouts_service.MIN_WITHDRAW)} ₽.\n"
+        "Пришлите сумму в рублях (например <code>500</code>).",
+        kb,
+    )
+
+
+@router.callback_query(F.data.startswith("pf_m:"))
+async def cb_pf_method(call: CallbackQuery, db: Database, state: FSMContext,
+                       merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    method = call.data.split(":", 1)[1]
+    async with db.session() as s:
+        avail = await payouts_service.available(s, merchant_id)
+    await _ask_amount(call, state, method, avail)
+    await call.answer()
+
+
+@router.message(MerchAdmin.pf_amount)
+async def msg_pf_amount(message: Message, db: Database, config: BotConfig, state: FSMContext,
+                        bots_by_merchant: dict = None, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    d = await state.get_data()
+    method = d.get("method", "sbp")
+    val = _num(message.text or "")
+    if val is None:
+        await message.answer("Введите число, например 500."); return
+    async with db.session() as s:
+        payout, err = await payouts_service.create_request(s, merchant_id, val, method)
+        if err:
+            await s.rollback()
+            await message.answer("⚠️ " + err); return
+        await s.commit()
+        pid, amount, wallet = payout.id, payout.amount_rub, payout.wallet
+        m = await s.get(Merchant, merchant_id)
+        title = m.title if m else str(merchant_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_b("⬅️ В кабинет", "ma_home")).as_markup()
+    await message.answer(
+        f"✅ Заявка №{pid} на вывод <b>{texts.rub(amount)}</b> создана.\n"
+        f"Реквизиты: {wallet}\n\nОжидайте одобрения владельцем.",
+        reply_markup=kb,
+    )
+    # Уведомить владельца платформы через головной бот.
+    head_bot = (bots_by_merchant or {}).get(HEAD_MERCHANT_ID)
+    if head_bot is not None and config is not None:
+        for admin_id in config.admin_ids:
+            try:
+                await head_bot.send_message(
+                    admin_id,
+                    f"💸 Новая заявка на вывод №{pid} от франшизы «{title}»: "
+                    f"{texts.rub(amount)} ({wallet}).\n"
+                    "Админ-панель → Рефералы → Мерчанты → выберите франшизу → Выплаты.",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
+@router.callback_query(F.data == "pf_list")
+async def cb_pf_list(call: CallbackQuery, db: Database, state: FSMContext,
+                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    async with db.session() as s:
+        reqs = await payouts_service.list_requests(s, merchant_id, limit=15)
+    if not reqs:
+        lines = ["📋 <b>Мои заявки</b>\n\nЗаявок пока нет."]
+    else:
+        lines = ["📋 <b>Мои заявки</b>\n"]
+        st_ru = {"pending": "⏳ ожидает", "approved": "✅ выполнена", "rejected": "❌ отклонена"}
+        for p in reqs:
+            d = p.created_at.strftime("%d.%m.%Y") if p.created_at else "—"
+            line = f"№{p.id} · {texts.rub(p.amount_rub)} · {p.wallet} · {d} · {st_ru.get(p.status, p.status)}"
+            if p.status == "rejected" and p.reason:
+                line += f"\n   причина: {p.reason}"
+            lines.append(line)
+    kb = InlineKeyboardBuilder().row(_b("⬅️ Назад", "pf_home"))
+    await _edit(call, "\n".join(lines), kb)
+    await call.answer()

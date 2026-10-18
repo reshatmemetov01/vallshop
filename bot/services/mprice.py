@@ -119,17 +119,20 @@ async def accrue_earnings(session: AsyncSession, merchant_id: int, amount: Decim
     m = await session.get(Merchant, merchant_id)
     if m is not None:
         m.earnings_rub = Decimal(m.earnings_rub or 0) + Decimal(amount)
+        m.earnings_total_rub = Decimal(m.earnings_total_rub or 0) + Decimal(amount)
         await session.flush()
 
 
 async def reverse_earnings(session: AsyncSession, merchant_id: int, amount: Decimal) -> None:
-    """Сторнировать маржу (возврат заказа). Баланс не уходит ниже нуля."""
+    """Сторнировать маржу (возврат заказа). Балансы не уходят ниже нуля."""
     if merchant_id == HEAD_MERCHANT_ID or Decimal(amount) <= 0:
         return
     m = await session.get(Merchant, merchant_id)
     if m is not None:
         new = Decimal(m.earnings_rub or 0) - Decimal(amount)
         m.earnings_rub = new if new > 0 else Decimal(0)
+        tot = Decimal(m.earnings_total_rub or 0) - Decimal(amount)
+        m.earnings_total_rub = tot if tot > 0 else Decimal(0)
         await session.flush()
 
 

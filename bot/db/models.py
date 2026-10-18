@@ -87,9 +87,33 @@ class Merchant(Base):
     # Наценка мерчанта по умолчанию (%) поверх цены владельца; применяется к
     # товарам без индивидуальной цены (см. MerchantVariantPrice).
     default_markup: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=0, server_default="0")
-    # Баланс заработка мерчанта (₽) — накопленная маржа, доступная к выводу.
+    # Баланс заработка мерчанта (₽) — доступно к выводу (маржа минус выводы).
     earnings_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
+    # Заработано всего (₽) — накопленная маржа за всё время (выводы не уменьшают).
+    earnings_total_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class MerchantPayout(Base):
+    """Заявка франшизы на вывод заработка. Деньги владелец отправляет вручную.
+
+    Сумма — в рублях (даже для USDT-кошелька владелец конвертирует сам).
+    ``status``: pending (ждёт решения) | approved (выполнена) | rejected (отклонена).
+    При создании сумма резервируется (списывается с earnings_rub), при отклонении
+    возвращается.
+    """
+
+    __tablename__ = "merchant_payout"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    merchant_id: Mapped[int] = mapped_column(Integer, index=True)
+    amount_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    method: Mapped[str] = mapped_column(String(12))        # sbp | usdt
+    wallet: Mapped[str] = mapped_column(String(255))       # снимок реквизитов на момент заявки
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    reason: Mapped[Optional[str]] = mapped_column(String(255))  # причина отклонения
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
 class MerchantVariantPrice(Base):
