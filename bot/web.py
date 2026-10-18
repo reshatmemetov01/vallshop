@@ -21,6 +21,7 @@ from .db.models import Order, OrderStatus, Payment, PaymentStatus, TopUp, TopUpS
 from .payments import PaymentProvider
 from .services import balance as balance_service
 from .services import catalog as catalog_service
+from .services import notify as notify_service
 from .services import orders as order_service
 from . import texts
 
@@ -74,7 +75,7 @@ def build_app(
         update = provider.parse_webhook(raw)
         # Обработка идемпотентна. BoltUtil требует РОВНО {"status":"SUCCESS"},
         # иначе продолжит повторные попытки доставки.
-        await _apply_payment(bot, db, liog, update, bots)
+        await _apply_payment(bot, db, liog, update, bots, config)
         return web.json_response({"status": "SUCCESS"})
 
     async def payhot_webhook(request: web.Request) -> web.Response:
@@ -85,7 +86,7 @@ def build_app(
             log.warning("PayHot: вебхук с неверной подписью отклонён")
             return web.json_response({"ok": False}, status=403)
         update = payhot.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update, bots)
+        await _apply_payment(bot, db, liog, update, bots, config)
         return web.json_response({"ok": True})
 
     async def paydex_webhook(request: web.Request) -> web.Response:
@@ -97,7 +98,7 @@ def build_app(
             # Paydex: при неверной подписи ожидает 401.
             return web.json_response({"ok": False}, status=401)
         update = paydex.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update, bots)
+        await _apply_payment(bot, db, liog, update, bots, config)
         return web.json_response({"ok": True})
 
     app.router.add_get("/healthz", healthz)
@@ -123,20 +124,20 @@ def _pick_bot(bots, merchant_id, default):
     return default
 
 
-async def _apply_payment(bot, db: Database, liog, update, bots=None) -> None:
+async def _apply_payment(bot, db: Database, liog, update, bots=None, config=None) -> None:
     if update.status != "paid":
         return
 
     # Пополнение баланса? (client_ref вида tu-...)
     ref = update.client_ref or ""
     if ref.startswith("tu-"):
-        await _apply_topup(bot, db, update, bots)
+        await _apply_topup(bot, db, update, bots, config)
         return
 
     await _apply_order_payment(bot, db, liog, update, bots)
 
 
-async def _apply_topup(bot, db: Database, update, bots=None) -> None:
+async def _apply_topup(bot, db: Database, update, bots=None, config=None) -> None:
     async with db.session() as session:
         topup = await balance_service.get_topup_by_ref(session, update.client_ref)
         if topup is None or topup.status == TopUpStatus.PAID:
@@ -160,6 +161,10 @@ async def _apply_topup(bot, db: Database, update, bots=None) -> None:
         texts.TOPUP_SUCCESS.format(
             credit=texts.rub(credit), balance=texts.rub(balance)
         ),
+    )
+    # Уведомить админов (головного — всегда, владельца франшизы — если франшиза).
+    await notify_service.notify_topup(
+        db, config, bots, user_id=user_id, amount=credit, merchant_id=merchant_id
     )
 
 

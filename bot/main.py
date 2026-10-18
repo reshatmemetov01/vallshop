@@ -336,7 +336,8 @@ async def main() -> None:
             run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant)
         ),
         asyncio.create_task(
-            run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex, bots=bots_by_merchant)
+            run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex,
+                             bots=bots_by_merchant, config=config)
         ),
         asyncio.create_task(run_smartprice_poller(bot, db, fzr, config)),
         asyncio.create_task(run_broadcast_scheduler(db, bots_by_merchant)),

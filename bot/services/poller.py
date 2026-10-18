@@ -226,7 +226,7 @@ async def run_smartprice_poller(
 
 async def run_topup_poller(
     bot: Bot, db: Database, provider, payhot=None, paydex=None, interval: float = 30.0,
-    bots: dict | None = None,
+    bots: dict | None = None, config: BotConfig | None = None,
 ) -> None:
     """Фоновая авто-проверка пополнений (подстраховка вебхука).
 
@@ -235,7 +235,7 @@ async def run_topup_poller(
     идемпотентны (повтор с вебхуком безопасен)."""
     while True:
         try:
-            await _topup_tick(bot, db, provider, payhot, paydex, bots)
+            await _topup_tick(bot, db, provider, payhot, paydex, bots, config)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -252,7 +252,7 @@ def _provider_and_ref(topup, provider, payhot, paydex=None):
     return provider, topup.client_ref
 
 
-async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, bots: dict | None = None) -> None:
+async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, bots: dict | None = None, config: BotConfig | None = None) -> None:
     async with db.session() as session:
         pending = list(
             await session.scalars(
@@ -292,6 +292,10 @@ async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None
             texts.TOPUP_SUCCESS.format(
                 credit=texts.rub(credit), balance=texts.rub(balance)
             ),
+        )
+        # Уведомить админов (головного — всегда, владельца франшизы — если франшиза).
+        await notify_service.notify_topup(
+            db, config, bots, user_id=user_id, amount=credit, merchant_id=mid
         )
 
 

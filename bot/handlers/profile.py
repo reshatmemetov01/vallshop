@@ -20,6 +20,7 @@ from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..payments import PaymentProvider
 from ..services import balance as balance_service
+from ..services import notify as notify_service
 from ..services import orders as order_service
 from ..services import paymethods as paymethods_service
 from ..services import rates as rates_service
@@ -362,6 +363,7 @@ async def msg_topup_amount(
 async def cb_topup_check(
     call: CallbackQuery, db: Database, config: BotConfig, provider: PaymentProvider,
     payhot: PaymentProvider = None, paydex: PaymentProvider = None,
+    bots_by_merchant: dict = None,
 ) -> None:
     topup_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -417,18 +419,23 @@ async def cb_topup_check(
         topup.paid_at = datetime.utcnow()
         await balance_service.credit(session, call.from_user.id, topup.amount_usd, merchant_id=mid)
         await session.commit()
+        credited = topup.amount_usd
         balance = await balance_service.get_balance(session, call.from_user.id, mid)
 
     await render(
         call,
         banner="profile",
         caption=texts.TOPUP_SUCCESS.format(
-            credit=texts.rub(topup.amount_usd),
+            credit=texts.rub(credited),
             balance=texts.rub(balance),
         ),
         reply_markup=kb.back_profile_kb(),
     )
     await call.answer("Баланс пополнен ✅")
+    # Уведомить админов (головного — всегда, владельца франшизы — если франшиза).
+    await notify_service.notify_topup(
+        db, config, bots_by_merchant, user_id=call.from_user.id, amount=credited, merchant_id=mid
+    )
 
 
 # ── Списки ─────────────────────────────────────────────────────────────────
