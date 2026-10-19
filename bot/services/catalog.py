@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Dict, List, Optional
 
 from sqlalchemy import delete as sa_delete
@@ -167,6 +168,72 @@ async def list_variants(
     if only_active:
         stmt = stmt.where(Variant.is_active.is_(True))
     return list(await session.scalars(stmt))
+
+
+async def bulk_create_fzr_variants(
+    session: AsyncSession,
+    product_id: int,
+    kind: str,
+    cat: dict,
+    offers: list,
+    markup_pct: Decimal,
+) -> tuple[int, int]:
+    """Пакетно создать номиналы FazerCard из ``offers`` (в порядке списка).
+
+    Цена каждого = закуп × (1 + markup_pct/100), хранится в USD (плавает по
+    курсу). Номиналы, уже добавленные к товару (по ``fzr_b``), пропускаются.
+    ``sort_order`` назначается по порядку списка — после существующих номиналов.
+
+    Возвращает ``(добавлено, пропущено)``.
+    """
+    existing = set(
+        await session.scalars(
+            select(Variant.fzr_b).where(
+                Variant.product_id == product_id, Variant.fzr_b.is_not(None)
+            )
+        )
+    )
+    min_vid = await session.scalar(
+        select(func.min(Variant.liog_variation_id)).where(
+            Variant.product_id == product_id
+        )
+    )
+    next_vid = min(0, int(min_vid or 0))
+    max_sort = await session.scalar(
+        select(func.max(Variant.sort_order)).where(Variant.product_id == product_id)
+    )
+    base_sort = int(max_sort or 0)
+
+    factor = Decimal(1) + Decimal(markup_pct) / Decimal(100)
+    added = skipped = 0
+    for o in offers:
+        offer_id = str(o.get("id"))
+        if offer_id in existing:
+            skipped += 1
+            continue
+        try:
+            cost = Decimal(str(o.get("price_usd") or "0"))
+        except (InvalidOperation, TypeError):
+            cost = Decimal("0")
+        price = (cost * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        next_vid -= 1
+        base_sort += 1
+        title = f"{cat.get('name')} · {o.get('name')}".strip(" ·")
+        session.add(
+            Variant(
+                product_id=product_id, title=title[:255],
+                liog_product_id=0, liog_variation_id=next_vid,
+                cost_usd=cost, price_usd=price,
+                source="fazercard", fzr_kind=kind,
+                fzr_a=str(cat.get("id")), fzr_b=offer_id,
+                sort_order=base_sort,
+            )
+        )
+        existing.add(offer_id)
+        added += 1
+    if added:
+        await session.commit()
+    return added, skipped
 
 
 async def resolve_text(

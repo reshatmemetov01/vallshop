@@ -85,6 +85,7 @@ class AdminUI(StatesGroup):
     stars_max = State()
     fzr_search = State()
     fzr_price = State()
+    fzr_bulk_markup = State()
 
 
 def _first_custom_emoji(message: Message) -> Optional[str]:
@@ -1519,6 +1520,46 @@ _FZR_RESULTS = 20   # сколько категорий показывать п�
 _FZR_OFFERS = 40    # сколько номиналов показывать в категории
 
 
+def _fzr_offer_label(o: dict) -> str:
+    """Метка номинала FazerCard: название · $закуп (≈₽) · сток."""
+    label = o.get("name") or str(o.get("id"))
+    extra = []
+    if o.get("price_usd"):
+        try:
+            extra.append(f"${o['price_usd']} (≈{texts.rub(usd_to_rub(Decimal(str(o['price_usd']))))})")
+        except Exception:  # noqa: BLE001
+            extra.append(f"${o['price_usd']}")
+    if o.get("stock") is not None:
+        extra.append(f"сток {o['stock']}")
+    if extra:
+        label += " · " + " · ".join(extra)
+    return label
+
+
+def _fzr_offers_kb(
+    offers: list, pid, *, multi: bool, sel: list
+) -> InlineKeyboardMarkup:
+    """Клавиатура списка номиналов. В режиме multi — с отметками по порядку выбора."""
+    kb = InlineKeyboardBuilder()
+    for j, o in enumerate(offers):
+        label = _fzr_offer_label(o)
+        if multi:
+            if j in sel:
+                kb.row(_btn(f"✅ {sel.index(j) + 1}. {label}", f"a_fzrt:{j}"))
+            else:
+                kb.row(_btn(f"⬜ {label}", f"a_fzrt:{j}"))
+        else:
+            kb.row(_btn(label, f"a_fzro:{j}"))
+    if multi:
+        if sel:
+            kb.row(_btn(f"✅ Добавить выбранные ({len(sel)})", "a_fzradd"))
+        kb.row(_btn("✖️ Выйти из выбора", "a_fzrmx"))
+    else:
+        kb.row(_btn("☑️ Выбрать несколько", "a_fzrmulti"))
+    kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
+    return kb.as_markup()
+
+
 # ── Поставщик номинала (источник выдачи) ────────────────────────────────────
 _SOURCE_RU = {
     "stock": "📦 свой сток",
@@ -1767,25 +1808,77 @@ async def cb_fzr_cat(call: CallbackQuery, state: FSMContext, fzr: FazerCardClien
     if not offers:
         await call.answer("Нет доступных номиналов", show_alert=True)
         return
-    await state.update_data(cat=cat, offers=offers)
-    kb = InlineKeyboardBuilder()
-    for j, o in enumerate(offers):
-        label = o.get("name") or str(o.get("id"))
-        extra = []
-        if o.get("price_usd"):
-            try:
-                extra.append(f"${o['price_usd']} (≈{texts.rub(usd_to_rub(Decimal(str(o['price_usd']))))})")
-            except Exception:  # noqa: BLE001
-                extra.append(f"${o['price_usd']}")
-        if o.get("stock") is not None:
-            extra.append(f"сток {o['stock']}")
-        if extra:
-            label += " · " + " · ".join(extra)
-        kb.row(_btn(label, f"a_fzro:{j}"))
-    kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
+    await state.update_data(cat=cat, offers=offers, fzr_multi=False, fzr_sel=[])
     await call.message.edit_text(
         f"🎯 <b>{cat.get('name')}</b>\nВыберите номинал (цена — закуп у FazerCard):",
-        reply_markup=kb.as_markup(),
+        reply_markup=_fzr_offers_kb(offers, pid, multi=False, sel=[]),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.fzr_search, F.data == "a_fzrmulti")
+async def cb_fzr_multi(call: CallbackQuery, state: FSMContext) -> None:
+    """Включить режим множественного выбора номиналов."""
+    data = await state.get_data()
+    offers, cat, pid = data.get("offers") or [], data.get("cat") or {}, data.get("pid")
+    await state.update_data(fzr_multi=True, fzr_sel=[])
+    await call.message.edit_text(
+        f"🎯 <b>{cat.get('name')}</b>\n"
+        "Отметьте нужные номиналы <b>по порядку</b> — он задаёт порядок в каталоге.\n"
+        "Затем нажмите «Добавить выбранные» и задайте одну общую наценку.",
+        reply_markup=_fzr_offers_kb(offers, pid, multi=True, sel=[]),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.fzr_search, F.data == "a_fzrmx")
+async def cb_fzr_multi_exit(call: CallbackQuery, state: FSMContext) -> None:
+    """Выйти из режима множественного выбора."""
+    data = await state.get_data()
+    offers, cat, pid = data.get("offers") or [], data.get("cat") or {}, data.get("pid")
+    await state.update_data(fzr_multi=False, fzr_sel=[])
+    await call.message.edit_text(
+        f"🎯 <b>{cat.get('name')}</b>\nВыберите номинал (цена — закуп у FazerCard):",
+        reply_markup=_fzr_offers_kb(offers, pid, multi=False, sel=[]),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.fzr_search, F.data.startswith("a_fzrt:"))
+async def cb_fzr_toggle(call: CallbackQuery, state: FSMContext) -> None:
+    """Отметить/снять номинал в режиме множественного выбора (порядок сохраняется)."""
+    data = await state.get_data()
+    offers, cat, pid = data.get("offers") or [], data.get("cat") or {}, data.get("pid")
+    sel = list(data.get("fzr_sel") or [])
+    j = int(call.data.split(":", 1)[1])
+    if j >= len(offers):
+        await call.answer("Список устарел, начните заново", show_alert=True)
+        return
+    if j in sel:
+        sel.remove(j)
+    else:
+        sel.append(j)
+    await state.update_data(fzr_sel=sel)
+    await call.message.edit_reply_markup(
+        reply_markup=_fzr_offers_kb(offers, pid, multi=True, sel=sel)
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.fzr_search, F.data == "a_fzradd")
+async def cb_fzr_bulk_add(call: CallbackQuery, state: FSMContext) -> None:
+    """Запросить общую наценку для всех выбранных номиналов."""
+    data = await state.get_data()
+    sel, pid = list(data.get("fzr_sel") or []), data.get("pid")
+    if not sel:
+        await call.answer("Сначала отметьте номиналы", show_alert=True)
+        return
+    await state.set_state(AdminUI.fzr_bulk_markup)
+    await call.message.edit_text(
+        f"➕ Выбрано номиналов: <b>{len(sel)}</b>\n\n"
+        "Пришлите <b>общую наценку в %</b> к закупу (например <code>20</code> — "
+        "цена = закуп +20%).\nЦена плавает по курсу (пересчитается автоматически).",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
     )
     await call.answer()
 
@@ -1891,6 +1984,45 @@ async def msg_fzr_price(message: Message, db: Database, state: FSMContext) -> No
         f"✅ Номинал FazerCard {verb}: <b>{title}</b>" + note,
         reply_markup=kb.as_markup(),
     )
+
+
+@router.message(AdminUI.fzr_bulk_markup)
+async def msg_fzr_bulk_markup(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    pid, kind = data.get("pid"), data.get("kind")
+    cat, offers = data.get("cat"), data.get("offers") or []
+    sel = list(data.get("fzr_sel") or [])
+    if not (cat and offers and sel):
+        await state.clear()
+        await message.answer("Сессия устарела, начните заново.")
+        return
+    raw = (message.text or "").strip().replace(",", ".").rstrip("%").strip()
+    try:
+        markup = Decimal(raw)
+    except InvalidOperation:
+        await message.answer("Пришлите число — наценку в % (например <code>20</code>).")
+        return
+    if markup < 0:
+        await message.answer("Наценка не может быть отрицательной.")
+        return
+    chosen = [offers[j] for j in sel if j < len(offers)]
+    async with db.session() as session:
+        added, skipped = await catalog_service.bulk_create_fzr_variants(
+            session, pid, kind, cat, chosen, markup
+        )
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
+    parts = [f"✅ Добавлено номиналов: <b>{added}</b> (наценка +{markup}%)"]
+    if skipped:
+        parts.append(f"⏭ Пропущено (уже были): <b>{skipped}</b>")
+    note = ""
+    if kind == "topup":
+        note = (
+            "\n\nℹ️ Топап: при покупке бот сам спросит у клиента данные игрока "
+            "(напр. ID), затем оформит заказ и зачислит на аккаунт."
+        )
+    await message.answer("\n".join(parts) + note, reply_markup=kb.as_markup())
 
 
 @router.callback_query(F.data.startswith("a_vtitle:"))
