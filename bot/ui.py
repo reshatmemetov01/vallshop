@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Optional, Union
 
@@ -80,8 +81,49 @@ def _merchant_of(event: Union[CallbackQuery, Message]) -> int:
     return _bot_merchant.get(_bot_id(event), HEAD_MERCHANT_ID)
 
 
+_TAG_RE = re.compile(r"<(/?)([a-zA-Z0-9-]+)(?:\s[^>]*)?>")
+# Теги без закрывающего (не балансируем).
+_VOID_TAGS = {"br", "hr", "img"}
+
+
 def _clip(caption: str) -> str:
-    return caption if len(caption) <= CAPTION_LIMIT else caption[: CAPTION_LIMIT - 1] + "…"
+    """Обрезать подпись до лимита Telegram, не разрывая HTML-теги.
+
+    Простой срез по символам мог оборвать подпись посреди тега
+    (например ``<code>…``) — Telegram тогда отклоняет весь экран
+    («can't parse entities»). Здесь мы убираем «обрезанный» фрагмент тега в
+    конце и дозакрываем все незакрытые теги.
+    """
+    if len(caption) <= CAPTION_LIMIT:
+        return caption
+
+    def _assemble(base: int) -> str:
+        cut = caption[:base]
+        # Если срез попал внутрь тега ("…<cod"), отбрасываем незавершённый фрагмент.
+        lt, gt = cut.rfind("<"), cut.rfind(">")
+        if lt > gt:
+            cut = cut[:lt]
+        stack: list = []
+        for m in _TAG_RE.finditer(cut):
+            closing, name = m.group(1), m.group(2).lower()
+            if name in _VOID_TAGS:
+                continue
+            if closing:
+                if name in stack:
+                    while stack and stack.pop() != name:
+                        pass
+            else:
+                stack.append(name)
+        closers = "".join(f"</{t}>" for t in reversed(stack))
+        return cut + "…" + closers
+
+    base = CAPTION_LIMIT - 1
+    result = _assemble(base)
+    # Дозакрытые теги могли вывести за лимит — ужимаем, пока не влезет.
+    while len(result) > CAPTION_LIMIT and base > 0:
+        base -= (len(result) - CAPTION_LIMIT) + 1
+        result = _assemble(max(0, base))
+    return result
 
 
 def _bot_id(event: Union[CallbackQuery, Message]) -> int:
