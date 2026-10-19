@@ -98,6 +98,27 @@ async def test_recompute_ignores_small_change(db):
         assert (await s.get(Variant, vid)).smm_rate == Decimal("100.0000")
 
 
+def test_order_line_robust_to_bad_fields_json():
+    """Регрессия: «Мои заказы» не падают, если fields_json не словарь/пустой."""
+    import json
+    from bot.handlers.profile import _order_line
+    from bot.db.models import OrderStatus
+
+    class O:
+        def __init__(self, **k):
+            self.id = 1; self.price_usd = Decimal("1.01"); self.quantity = 1
+            self.supplier = "socproof"; self.status = OrderStatus.FULFILLING
+            self.fail_reason = None; self.delivery_code = None; self.fields_json = None
+            self.__dict__.update(k)
+
+    # список вместо словаря — раньше крашило AttributeError
+    assert "Быстрые" in _order_line(O(fields_json=json.dumps([{"a": 1}])), "Быстрые")
+    # None fields_json
+    assert "Быстрые" in _order_line(O(fields_json=None), "Быстрые")
+    # price None
+    assert "0 ₽" in _order_line(O(price_usd=None), "Быстрые")
+
+
 @pytest.mark.asyncio
 async def test_variant_description_persists(db):
     vid = await _variant(db)

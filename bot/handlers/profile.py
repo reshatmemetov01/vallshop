@@ -467,29 +467,38 @@ async def cb_my_orders(
     else:
         lines = [texts.MY_ORDERS_TITLE, ""]
         for order, vtitle in items:
-            lines.append(_order_line(order, vtitle))
+            try:
+                lines.append(_order_line(order, vtitle))
+            except Exception:  # noqa: BLE001 — один «кривой» заказ не ломает весь список
+                lines.append(f"#{order.id} · {vtitle}")
         caption = "\n".join(lines)
 
     markup = kb.back_profile_kb()
     if has_active_smm:
-        b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="🔄 Обновить статусы", callback_data="smmrefresh"))
-        for row in markup.inline_keyboard:
-            b.row(*row)
-        markup = b.as_markup()
+        try:
+            b = InlineKeyboardBuilder()
+            b.row(InlineKeyboardButton(text="🔄 Обновить статусы", callback_data="smmrefresh"))
+            for row in markup.inline_keyboard:
+                b.row(*row)
+            markup = b.as_markup()
+        except Exception:  # noqa: BLE001 — без кнопки обновления, но список покажем
+            markup = kb.back_profile_kb()
     await render(call, banner="profile", caption=caption, reply_markup=markup)
     await call.answer()
 
 
 def _order_line(order, vtitle: str) -> str:
     """Строка заказа для списка «Мои заказы» (SMM — с количеством и прогрессом)."""
-    total = Decimal(order.price_usd) * (order.quantity or 1)
+    total = Decimal(order.price_usd or 0) * (order.quantity or 1)
     if order.supplier == "socproof":
+        f = {}
         try:
-            f = json.loads(order.fields_json) if order.fields_json else {}
+            parsed = json.loads(order.fields_json) if order.fields_json else {}
+            if isinstance(parsed, dict):
+                f = parsed
         except (ValueError, TypeError):
-            f = {}
-        qty = f.get("quantity") or "?"
+            pass
+        qty = f.get("quantity") or order.quantity or "?"
         if order.status == OrderStatus.FULFILLING:
             st = smm_service.status_label(f.get("status"))
             prog = f.get("progress")
