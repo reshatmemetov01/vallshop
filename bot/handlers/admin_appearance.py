@@ -51,6 +51,12 @@ def _cancel(back: str) -> InlineKeyboardMarkup:
     return InlineKeyboardBuilder().row(_btn("⬅️ Отмена", back)).as_markup()
 
 
+# Цвета кнопок меню: без цвета → синий → зелёный → красный → ...
+_MENU_COLOR_CYCLE = ["", "primary", "success", "danger"]
+_MENU_COLOR_NAME = {None: "⚪ без цвета", "": "⚪ без цвета", "primary": "🔵 синий",
+                    "success": "🟢 зелёный", "danger": "🔴 красный"}
+
+
 # ── Главный экран «Оформление» ───────────────────────────────────────────────
 @router.callback_query(F.data == "ap_home")
 async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
@@ -161,11 +167,13 @@ async def _show_button(call: CallbackQuery, key: str) -> None:
         return
     emoji_state = "🙂 есть" if r.emoji_id else "— нет"
     vis = "🟢 видна" if r.enabled else "🔴 скрыта"
+    color_name = _MENU_COLOR_NAME.get(r.style, "без цвета")
     caption = (
         f"🔧 <b>Кнопка</b>\n"
         f"Меню: {menu_service.MENU_TITLES.get(e.menu, e.menu)}\n"
         f"Текст: <b>{r.text}</b>\n"
         f"Эмодзи: {emoji_state}\n"
+        f"Цвет: {color_name}\n"
         f"Видимость: {vis}"
     )
     kb = InlineKeyboardBuilder()
@@ -173,6 +181,7 @@ async def _show_button(call: CallbackQuery, key: str) -> None:
         _btn("✏️ Текст", f"ap_lbl:{key}"),
         _btn("🙂 Эмодзи", f"ap_emo:{key}"),
     )
+    kb.row(_btn(f"🎨 Цвет: {color_name}", f"ap_color:{key}"))
     kb.row(
         _btn("🔼 Вверх", f"ap_up:{key}"),
         _btn("🔽 Вниз", f"ap_dn:{key}"),
@@ -198,6 +207,18 @@ async def cb_toggle(call: CallbackQuery, db: Database) -> None:
     await call.answer("Готово")
 
 
+@router.callback_query(F.data.startswith("ap_color:"))
+async def cb_menu_color(call: CallbackQuery, db: Database) -> None:
+    key = call.data.split(":", 1)[1]
+    r = menu_service.resolved(key)
+    cur = (r.style or "") if r else ""
+    nxt = _MENU_COLOR_CYCLE[(_MENU_COLOR_CYCLE.index(cur) + 1) % len(_MENU_COLOR_CYCLE)] \
+        if cur in _MENU_COLOR_CYCLE else "primary"
+    await menu_service.set_style(db, key, nxt)
+    await _show_button(call, key)
+    await call.answer(f"Цвет: {_MENU_COLOR_NAME.get(nxt)}")
+
+
 @router.callback_query(F.data.startswith("ap_up:"))
 async def cb_up(call: CallbackQuery, db: Database) -> None:
     key = call.data.split(":", 1)[1]
@@ -215,13 +236,29 @@ async def cb_down(call: CallbackQuery, db: Database) -> None:
 
 
 # ── Кнопки каталога: цвет, ширина, порядок (Product.*) ────────────────────────
-_CAT_STYLE_CYCLE = ["primary", "success", "danger"]
-_CAT_COLOR = {"primary": "🔵 синий", "success": "🟢 зелёный", "danger": "🔴 красный"}
+# "" — без цвета (обычная кнопка); None — не задан (каталог рисует синим).
+_CAT_STYLE_CYCLE = ["", "primary", "success", "danger"]
+_CAT_COLOR = {"": "⚪ без цвета", "primary": "🔵 синий",
+              "success": "🟢 зелёный", "danger": "🔴 красный"}
 _CAT_DOT = {"primary": "🔵", "success": "🟢", "danger": "🔴"}
 
 
 def _cat_dot(style) -> str:
-    return _CAT_DOT.get(style or "primary", "🔵")
+    if style is None:
+        return "🔵"   # не задан = синий по умолчанию (как рисует каталог)
+    return _CAT_DOT.get(style, "⚪")   # "" → без цвета
+
+
+def _cat_color_name(style) -> str:
+    key = "primary" if style is None else style
+    return _CAT_COLOR.get(key, _CAT_COLOR["primary"])
+
+
+def _cat_next_style(cur) -> str:
+    base = "primary" if cur is None else cur
+    if base not in _CAT_STYLE_CYCLE:
+        base = "primary"
+    return _CAT_STYLE_CYCLE[(_CAT_STYLE_CYCLE.index(base) + 1) % len(_CAT_STYLE_CYCLE)]
 
 
 async def _show_catalog_list(call: CallbackQuery, db: Database, parent_id) -> None:
@@ -258,18 +295,19 @@ async def _show_catalog_btn(call: CallbackQuery, db: Database, pid: int) -> None
         )
         parent_id = p.parent_id
         title = p.title
-        style = p.button_style or "primary"
+        style = p.button_style
         full_width = bool(p.full_width)
         has_children = bool(children)
     fw_state = "↔️ во всю строку" if full_width else "▭ половина строки"
+    color_name = _cat_color_name(style)
     caption = (
         f"🛍 <b>Кнопка каталога</b>\n"
         f"Товар: <b>{title}</b>\n"
-        f"Цвет: {_CAT_COLOR.get(style, style)}\n"
+        f"Цвет: {color_name}\n"
         f"Ширина: {fw_state}"
     )
     kb = InlineKeyboardBuilder()
-    kb.row(_btn(f"🎨 Цвет: {_CAT_COLOR.get(style, style)}", f"apc_color:{pid}"))
+    kb.row(_btn(f"🎨 Цвет: {color_name}", f"apc_color:{pid}"))
     fw_lbl = "▭ Сделать половину" if full_width else "↔️ Во всю строку"
     kb.row(_btn(fw_lbl, f"apc_fw:{pid}"))
     kb.row(_btn("🔼 Вверх", f"apc_up:{pid}"), _btn("🔽 Вниз", f"apc_dn:{pid}"))
@@ -307,13 +345,13 @@ async def cb_cat_color(call: CallbackQuery, db: Database) -> None:
     async with db.session() as session:
         p = await session.get(Product, pid)
         if p:
-            cur = p.button_style if p.button_style in _CAT_STYLE_CYCLE else "primary"
-            p.button_style = _CAT_STYLE_CYCLE[
-                (_CAT_STYLE_CYCLE.index(cur) + 1) % len(_CAT_STYLE_CYCLE)
-            ]
+            p.button_style = _cat_next_style(p.button_style)
             await session.commit()
+            name = _cat_color_name(p.button_style)
+        else:
+            name = ""
     await _show_catalog_btn(call, db, pid)
-    await call.answer("Цвет изменён")
+    await call.answer(f"Цвет: {name}" if name else "Цвет изменён")
 
 
 @router.callback_query(F.data.startswith("apc_fw:"))

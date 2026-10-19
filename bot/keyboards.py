@@ -203,7 +203,9 @@ def products_kb(
             icon = ov["emoji_id"] or None          # "" → без эмодзи
         else:
             icon = getattr(p, "icon_emoji_id", None) or EMOJI["product"]
-        style = getattr(p, "button_style", None) or "primary"
+        # None (не задан) → синий по умолчанию; "" → без цвета (обычная кнопка).
+        raw_style = getattr(p, "button_style", None)
+        style = "primary" if raw_style is None else (raw_style or None)
         btn = _b(title, callback_data=f"prod:{p.id}", style=style, icon=icon)
         if getattr(p, "full_width", False) or cols <= 1:
             _flush()

@@ -761,9 +761,8 @@ async def _product_card(session, config: BotConfig, product_id: int):
     _hd = "🏪 Скрыть у франшиз" if not getattr(product, "head_only", False) else "🏪 Показать у франшиз"
     kb.row(_btn(_hd, f"a_phead:{product_id}"))
     _fw = "↔️ Во всю строку: ✅" if getattr(product, "full_width", False) else "↔️ Во всю строку: ❌"
-    _cur_style = getattr(product, "button_style", None) or "primary"
     kb.row(
-        _btn(f"🎨 Цвет: {_cur_style}", f"a_pstyle:{product_id}"),
+        _btn(f"🎨 Цвет: {_style_name(getattr(product, 'button_style', None))}", f"a_pstyle:{product_id}"),
         _btn(_fw, f"a_pfw:{product_id}"),
     )
     kb.row(
@@ -807,7 +806,14 @@ async def cb_toggle_product(call: CallbackQuery, db: Database, config: BotConfig
     await call.answer("Готово")
 
 
-_STYLE_CYCLE = ["primary", "success", "danger"]
+# "" — без цвета (обычная); None — не задан (каталог рисует синим).
+_STYLE_CYCLE = ["", "primary", "success", "danger"]
+_STYLE_NAMES = {"": "⚪ без цвета", "primary": "🔵 синий",
+                "success": "🟢 зелёный", "danger": "🔴 красный"}
+
+
+def _style_name(style) -> str:
+    return _STYLE_NAMES.get("primary" if style is None else style, _STYLE_NAMES["primary"])
 
 
 @router.callback_query(F.data.startswith("a_pstyle:"))
@@ -816,14 +822,17 @@ async def cb_prod_style(call: CallbackQuery, db: Database, config: BotConfig) ->
     async with db.session() as session:
         product = await session.get(Product, pid)
         if product:
-            cur = product.button_style or "primary"
-            nxt = _STYLE_CYCLE[(_STYLE_CYCLE.index(cur) + 1) % len(_STYLE_CYCLE)] \
-                if cur in _STYLE_CYCLE else "primary"
-            product.button_style = nxt
+            base = "primary" if product.button_style is None else product.button_style
+            if base not in _STYLE_CYCLE:
+                base = "primary"
+            product.button_style = _STYLE_CYCLE[(_STYLE_CYCLE.index(base) + 1) % len(_STYLE_CYCLE)]
             await session.commit()
+            name = _style_name(product.button_style)
+        else:
+            name = ""
         caption, markup = await _product_card(session, config, pid)
     await call.message.edit_text(caption, reply_markup=markup)
-    await call.answer("Цвет: синий/зелёный/красный")
+    await call.answer(f"Цвет: {name}" if name else "Цвет изменён")
 
 
 @router.callback_query(F.data.startswith("a_phead:"))
