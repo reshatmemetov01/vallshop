@@ -79,12 +79,17 @@ def register(router: Router, *, prefix: str, home_cb: str, states: type[StatesGr
         chat = cfg.get("chat") or "—"
         req = cfg.get("required")
         can_check = "да" if cfg.get("chat") else "нет (привяжите канал/@username)"
+        warn = ""
+        if cfg.get("chat") and not cfg.get("url"):
+            warn = ("\n⚠️ Нет ссылки-кнопки — в сообщении о подписке не будет кнопки "
+                    "на канал. Задайте её кнопкой «🔗 Ссылка».")
         text = (
             "📢 <b>Канал</b>\n\n"
             f"Ссылка-кнопка: {url}\n"
             f"Цель проверки: <code>{chat}</code>\n"
             f"Проверка подписки возможна: {can_check}\n"
-            f"Обязательная подписка: <b>{'ВКЛ 🟢' if req else 'ВЫКЛ ⚪'}</b>\n\n"
+            f"Обязательная подписка: <b>{'ВКЛ 🟢' if req else 'ВЫКЛ ⚪'}</b>"
+            f"{warn}\n\n"
             "Публичный канал — пришлите @username. Приватный — перешлите пост из "
             "канала и задайте ссылку-кнопку. Для обязательной подписки бот должен "
             "быть <b>администратором</b> канала."
@@ -159,15 +164,25 @@ def register(router: Router, *, prefix: str, home_cb: str, states: type[StatesGr
                                  "Перешлите пост именно из канала.")
             return
         await channel_service.set_chat(db, merchant_id, str(chat.id))
-        if getattr(chat, "username", None):
-            await channel_service.set_url(db, merchant_id, f"https://t.me/{chat.username}")
-        await state.clear()
         title = getattr(chat, "title", "") or str(chat.id)
-        b = InlineKeyboardBuilder().row(_bt("⬅️ К каналу", f"{P}:home"))
+        if getattr(chat, "username", None):
+            # Публичный канал — ссылка-кнопка строится из username автоматически.
+            await channel_service.set_url(db, merchant_id, f"https://t.me/{chat.username}")
+            await state.clear()
+            b = InlineKeyboardBuilder().row(_bt("⬅️ К каналу", f"{P}:home"))
+            await message.answer(
+                f"✅ Канал «{title}» привязан (id <code>{chat.id}</code>).\n"
+                "Убедитесь, что бот — администратор канала.",
+                reply_markup=b.as_markup(),
+            )
+            return
+        # Приватный канал — сразу просим invite-ссылку для кнопки «Перейти в канал».
+        await state.set_state(S.wait_link)
         await message.answer(
-            f"✅ Канал «{title}» привязан (id <code>{chat.id}</code>).\n"
-            "Убедитесь, что бот — администратор канала.",
-            reply_markup=b.as_markup(),
+            f"✅ Канал «{title}» привязан (id <code>{chat.id}</code>).\n\n"
+            "Канал приватный — пришлите <b>invite-ссылку</b> "
+            "(<code>https://t.me/+...</code>), чтобы у пользователей была кнопка "
+            "«Перейти в канал».",
         )
 
     @router.callback_query(F.data == f"{P}:toggle")
@@ -178,6 +193,10 @@ def register(router: Router, *, prefix: str, home_cb: str, states: type[StatesGr
         if new_req and not cfg.get("chat"):
             await call.answer("Сначала привяжите канал (@username или пересылкой поста).",
                               show_alert=True)
+            return
+        if new_req and not cfg.get("url"):
+            await call.answer("Сначала задайте ссылку-кнопку на канал (кнопка «🔗 Ссылка»), "
+                              "иначе пользователям негде подписаться.", show_alert=True)
             return
         await channel_service.set_required(db, merchant_id, new_req)
         text, markup = await _home_text(merchant_id)

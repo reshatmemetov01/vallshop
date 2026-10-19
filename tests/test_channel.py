@@ -169,6 +169,49 @@ async def test_gate_fail_open_when_cannot_check(db):
 
 
 @pytest.mark.asyncio
+async def test_toggle_requires_url(db):
+    from aiogram import Router
+    from aiogram.fsm.state import State, StatesGroup
+
+    class _S(StatesGroup):
+        wait_link = State()
+        wait_forward = State()
+
+    h = channel_flow.register(Router(), prefix="ch", home_cb="a_home", states=_S)
+    await ch.set_chat(db, 0, "-1001234567890")   # только id, без ссылки-кнопки
+
+    class _CM:
+        async def edit_text(self, t, reply_markup=None):
+            pass
+
+        async def answer(self, t, reply_markup=None):
+            pass
+
+    class _Call:
+        def __init__(self):
+            self.message = _CM()
+            self.answered = []
+
+        async def answer(self, text=None, show_alert=False):
+            self.answered.append(text)
+
+    class _St:
+        async def clear(self):
+            pass
+
+    call = _Call()
+    await h["toggle"](call, db, _St(), merchant_id=0)
+    assert ch.config(0)["required"] is False                 # без ссылки не включилось
+    assert any("ссылк" in (a or "").lower() for a in call.answered)
+
+    # с ссылкой — включается
+    await ch.set_url(db, 0, "https://t.me/+abc")
+    call2 = _Call()
+    await h["toggle"](call2, db, _St(), merchant_id=0)
+    assert ch.config(0)["required"] is True
+
+
+@pytest.mark.asyncio
 async def test_gate_lets_chksub_through(db):
     await ch.set_chat(db, 0, "@x")
     await ch.set_required(db, 0, True)
