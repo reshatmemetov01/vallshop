@@ -523,6 +523,8 @@ def register(
         await call.answer("Запущено ✅")
 
     # ── Статистика дропов ────────────────────────────────────────────────────
+    _ST_RU = {"sending": "⏳ отправляется", "active": "🟢 активна", "expired": "⚪ завершена"}
+
     @router.callback_query(F.data == f"{P}:ds")
     async def cb_drop_stats(call: CallbackQuery, db: Database, state: FSMContext,
                             merchant_id: int = HEAD_MERCHANT_ID) -> None:
@@ -533,17 +535,75 @@ def register(
         if not drops:
             body = "📊 <b>Бонус-рассылки</b>\n\nПока не было."
         else:
-            lines = ["📊 <b>Бонус-рассылки</b>\n"]
-            st_ru = {"sending": "⏳", "active": "🟢", "expired": "⚪"}
+            body = "📊 <b>Бонус-рассылки</b>\n\nВыберите рассылку:"
             for dr in drops:
-                lines.append(
-                    f"{st_ru.get(dr.status, '')} #{dr.id} · {texts.rub(dr.amount_rub)} · "
-                    f"забрали {dr.claimed_count}/{dr.max_claims}"
-                )
-            body = "\n".join(lines)
+                flag = {"sending": "⏳", "active": "🟢", "expired": "⚪"}.get(dr.status, "")
+                b.row(_bt(f"{flag} #{dr.id} · {texts.rub(dr.amount_rub)} · "
+                          f"{dr.claimed_count}/{dr.max_claims}", f"{P}:dd:{dr.id}"))
         b.row(_bt("⬅️ Назад", f"{P}:home"))
         await _show(call, body, b.as_markup())
         await call.answer()
+
+    @router.callback_query(F.data.startswith(f"{P}:dd:"))
+    async def cb_drop_detail(call: CallbackQuery, db: Database, state: FSMContext,
+                             merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        await state.clear()
+        did = int(call.data.split(":")[-1])
+        async with db.session() as s:
+            dr = await bonuses_service.get_drop(s, did, merchant_id)
+        if dr is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        d = dr.sent_at or dr.created_at
+        when = d.strftime("%d.%m.%Y %H:%M") if d else "—"
+        body = (
+            f"🎁 <b>Бонус-рассылка #{dr.id}</b>\n\n"
+            f"Статус: {_ST_RU.get(dr.status, dr.status)}\n"
+            f"Бонус: <b>{texts.rub(dr.amount_rub)}</b>\n"
+            f"Забрали: <b>{dr.claimed_count}/{dr.max_claims}</b>\n"
+            f"Получателей: <b>{dr.recipients}</b>\n"
+            f"Дата: {when}"
+        )
+        b = InlineKeyboardBuilder()
+        if dr.status != "expired":
+            b.row(_bt("🗑 Удалить рассылку", f"{P}:dx:{dr.id}"))
+        b.row(_bt("⬅️ К списку", f"{P}:ds"))
+        await _show(call, body, b.as_markup())
+        await call.answer()
+
+    @router.callback_query(F.data.startswith(f"{P}:dx:"))
+    async def cb_drop_del_confirm(call: CallbackQuery, db: Database, state: FSMContext,
+                                  merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        did = int(call.data.split(":")[-1])
+        b = InlineKeyboardBuilder()
+        b.row(_bt("✅ Да, удалить у всех", f"{P}:dxok:{did}"))
+        b.row(_bt("⬅️ Назад", f"{P}:dd:{did}"))
+        await _show(
+            call,
+            "🗑 Удалить эту бонус-рассылку?\n\n"
+            "Пост и служебные сообщения будут удалены у всех получателей, "
+            "активации остановлены. Отменить нельзя.",
+            b.as_markup(),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith(f"{P}:dxok:"))
+    async def cb_drop_del_ok(call: CallbackQuery, db: Database, state: FSMContext,
+                             merchant_id: int = HEAD_MERCHANT_ID) -> None:
+        did = int(call.data.split(":")[-1])
+        async with db.session() as s:
+            dr = await bonuses_service.get_drop(s, did, merchant_id)
+        if dr is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        # Остановить активации сразу, сообщения удалить в фоне (их может быть много).
+        await bonuses_service.mark_drop_expired(db, did)
+        bot = call.message.bot
+        asyncio.create_task(bonuses_service.delete_drop_messages(bot, db, did))
+        b = InlineKeyboardBuilder().row(_bt("⬅️ К списку", f"{P}:ds"))
+        await _show(call, "🗑 Рассылка удаляется у всех получателей, активации остановлены.",
+                    b.as_markup())
+        await call.answer("Удаляется ✅")
 
     return {
         "home": cb_home, "promo_list": cb_promo_list, "promo_new": cb_promo_new,
@@ -554,4 +614,6 @@ def register(
         "d_success": msg_d_success, "sb_section": cb_sb_section, "sb_none": cb_sb_none,
         "sb_label": msg_sb_label, "d_error": msg_d_error, "drop_send": cb_drop_send,
         "drop_go": cb_drop_go, "drop_stats": cb_drop_stats,
+        "drop_detail": cb_drop_detail, "drop_del_confirm": cb_drop_del_confirm,
+        "drop_del_ok": cb_drop_del_ok,
     }

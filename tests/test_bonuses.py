@@ -134,3 +134,27 @@ async def test_drop_claim_wrong_merchant(db):
     did = await _drop(db, merchant_id=0)
     # другой магазин не видит чужой дроп
     assert (await bn.claim(db, 7, did, 1))[0] == "not_found"
+
+
+class _DelBot:
+    def __init__(self):
+        self.deleted = []
+
+    async def delete_message(self, chat_id, message_id):
+        self.deleted.append((chat_id, message_id))
+
+
+@pytest.mark.asyncio
+async def test_purge_drop_deletes_messages_and_stops_claims(db):
+    await _users(db, [1])
+    did = await _drop(db, limit=2)                 # активная рассылка
+    await bn.store_message(db, did, 100, 11)       # сохранённые сообщения (пост/служебные)
+    await bn.store_message(db, did, 101, 12)
+    bot = _DelBot()
+    n = await bn.purge_drop(bot, db, did)
+    assert n == 2 and len(bot.deleted) == 2        # удалены у получателей
+    # активации остановлены
+    assert (await bn.claim(db, 0, did, 1))[0] == "ended"
+    # сообщения помечены удалёнными — повторно не трогаем
+    async with db.session() as s:
+        assert await bn.messages_to_delete(s, did) == []

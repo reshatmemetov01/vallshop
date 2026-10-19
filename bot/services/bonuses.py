@@ -348,3 +348,28 @@ async def mark_drop_expired(db: Database, drop_id: int) -> None:
     async with db.session() as s:
         await s.execute(update(BonusDrop).where(BonusDrop.id == drop_id).values(status="expired"))
         await s.commit()
+
+
+async def delete_drop_messages(bot, db: Database, drop_id: int) -> int:
+    """Удалить все сохранённые сообщения дропа (пост + служебные) через бот.
+
+    Возвращает число фактически удалённых. Используется и для авто-удаления через
+    24ч, и для ручного удаления из админки."""
+    async with db.session() as s:
+        msgs = await messages_to_delete(s, drop_id)
+    deleted = 0
+    for row_id, chat_id, message_id in msgs:
+        try:
+            await bot.delete_message(chat_id, message_id)
+            deleted += 1
+        except Exception:  # noqa: BLE001 — уже удалено/недоступно
+            pass
+        await mark_message_deleted(db, row_id)
+        await asyncio.sleep(0.03)
+    return deleted
+
+
+async def purge_drop(bot, db: Database, drop_id: int) -> int:
+    """Остановить активации (status=expired) и удалить все сообщения дропа."""
+    await mark_drop_expired(db, drop_id)
+    return await delete_drop_messages(bot, db, drop_id)

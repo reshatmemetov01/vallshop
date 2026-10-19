@@ -74,17 +74,9 @@ async def _tick_bonus(db: Database, bots: dict) -> None:
     for drop_id in due:
         async with db.session() as s:
             drop = await bonuses_service.get_drop(s, drop_id)
-            msgs = await bonuses_service.messages_to_delete(s, drop_id)
         bot = (bots or {}).get(drop.merchant_id) if drop else None
         if bot is None:
             await bonuses_service.mark_drop_expired(db, drop_id)
             continue
-        for row_id, chat_id, message_id in msgs:
-            try:
-                await bot.delete_message(chat_id, message_id)
-            except Exception:  # noqa: BLE001 — сообщение уже удалено/недоступно
-                pass
-            await bonuses_service.mark_message_deleted(db, row_id)
-            await asyncio.sleep(0.03)
-        await bonuses_service.mark_drop_expired(db, drop_id)
+        await bonuses_service.purge_drop(bot, db, drop_id)
         log.info("Бонус-дроп #%s: сообщения удалены (24ч)", drop_id)
