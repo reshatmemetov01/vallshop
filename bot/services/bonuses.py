@@ -175,7 +175,13 @@ async def create_drop(
         btn_label=btn_label, amount_rub=Decimal(amount_rub), max_claims=int(max_claims),
         success_text=success_text, error_text=error_text,
         success_btn_label=success_btn_label, success_btn_kind=success_btn_kind,
-        success_btn_target=success_btn_target, status="sending",
+        success_btn_target=success_btn_target,
+        # Активна и с TTL сразу при создании — приём активаций открыт с момента
+        # публикации, не дожидаясь конца фоновой рассылки (иначе ранние клики и
+        # прерванная доставка ломали выдачу: статус застревал в «sending»).
+        status="active",
+        sent_at=datetime.utcnow(),
+        expires_at=datetime.utcnow() + timedelta(hours=DROP_TTL_HOURS),
     )
     session.add(drop)
     await session.flush()
@@ -284,7 +290,10 @@ async def claim(
             "error_text": drop.error_text,
         }
         now = datetime.utcnow()
-        if drop.status != "active" or (drop.expires_at and now > drop.expires_at):
+        # Забирать можно, пока дроп не завершён (expired) и не вышел срок. Статус
+        # «sending» (легаси) тоже допускаем — активации не должны зависеть от конца
+        # фоновой рассылки.
+        if drop.status == "expired" or (drop.expires_at and now > drop.expires_at):
             return "ended", info
         if await s.get(BonusActivation, {"drop_id": drop_id, "user_id": user_id}):
             return "already", info
@@ -293,7 +302,7 @@ async def claim(
             update(BonusDrop)
             .where(
                 BonusDrop.id == drop_id,
-                BonusDrop.status == "active",
+                BonusDrop.status != "expired",
                 BonusDrop.claimed_count < BonusDrop.max_claims,
             )
             .values(claimed_count=BonusDrop.claimed_count + 1)
@@ -320,7 +329,7 @@ async def due_drops(session: AsyncSession, now: datetime) -> List[int]:
     """ID дропов, у которых вышли 24ч и которые ещё не помечены expired."""
     rows = await session.scalars(
         select(BonusDrop.id).where(
-            BonusDrop.status == "active",
+            BonusDrop.status != "expired",
             BonusDrop.expires_at.is_not(None),
             BonusDrop.expires_at <= now,
         )

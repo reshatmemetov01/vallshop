@@ -136,6 +136,22 @@ async def test_drop_claim_wrong_merchant(db):
     assert (await bn.claim(db, 7, did, 1))[0] == "not_found"
 
 
+@pytest.mark.asyncio
+async def test_drop_claimable_right_after_create(db):
+    """Регрессия: забрать можно сразу после создания, не дожидаясь конца рассылки."""
+    await _users(db, [1])
+    async with db.session() as s:
+        d = await bn.create_drop(
+            s, merchant_id=0, created_by=9, text="t", photo=None, btn_label="go",
+            amount_rub=Decimal("50"), max_claims=2, success_text="ok", error_text="no",
+            success_btn_label=None, success_btn_kind=None, success_btn_target=None,
+        )
+        assert d.status == "active" and d.expires_at is not None
+    # activate_drop НЕ вызываем — имитируем «рассылка ещё идёт / прервалась»
+    st, info = await bn.claim(db, 0, d.id, 1)
+    assert st == "ok" and info["amount"] == Decimal("50")
+
+
 class _DelBot:
     def __init__(self):
         self.deleted = []
