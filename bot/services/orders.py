@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import uuid
@@ -21,12 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from liogames import LioGamesClient
 from fazercard import FazerCardClient, FazerCardError
+from socproof import SocProofClient, SocProofError
 
 from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, User, Variant
 from . import balance as balance_service
 from . import mprice as mprice_service
 from . import referral as referral_service
 from . import settings as settings_service
+from . import smm as smm_service
 from . import stock as stock_service
 
 log = logging.getLogger("vallshop.orders")
@@ -116,6 +119,9 @@ async def purchase_from_balance(
     topup_fields: Optional[dict] = None,
     vpn=None,
     public_base_url: Optional[str] = None,
+    soc: Optional[SocProofClient] = None,
+    smm_link: Optional[str] = None,
+    smm_quantity: Optional[int] = None,
 ) -> tuple[Order, list[str]]:
     """Купить quantity единиц с баланса и выдать коды.
 
@@ -169,6 +175,9 @@ async def purchase_from_balance(
     # 2) Выдача по источнику.
     if variant.source == "fazercard":
         return await _fulfill_fazercard(session, order, variant, quantity, fzr, topup_fields)
+
+    if variant.source == "socproof":
+        return await _fulfill_socproof(session, order, variant, soc, smm_link, smm_quantity)
 
     if variant.source == "vpnresellers":
         from . import vpn as vpn_service  # ленивый импорт (избегаем цикла)
@@ -370,6 +379,146 @@ async def poll_fazercard(
     if order.status == OrderStatus.COMPLETED:
         await referral_service.accrue_for_order(session, order)
     return order.status
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# SMM-поставщик soc-proof (buy-on-demand: ссылка + количество, статус поллером)
+# ──────────────────────────────────────────────────────────────────────────
+async def _fulfill_socproof(
+    session: AsyncSession,
+    order: Order,
+    variant: Variant,
+    soc: Optional[SocProofClient],
+    link: Optional[str],
+    quantity: Optional[int],
+) -> tuple[Order, list[str]]:
+    """Оформить SMM-заказ у soc-proof. Статус дотянет поллер (всегда FULFILLING)."""
+    if soc is None or not getattr(soc, "configured", False):
+        raise SupplierError("SMM-поставщик не настроен")
+    qty = int(quantity or 0)
+    if not variant.smm_service or not link or qty <= 0:
+        raise SupplierError("Не указана услуга, ссылка или количество")
+
+    order.supplier = "socproof"
+    order.status = OrderStatus.FULFILLING
+    order.fields_json = json.dumps(
+        {"service": int(variant.smm_service), "link": link, "quantity": qty,
+         "status": "pending", "remains": qty, "progress": 0},
+        ensure_ascii=False,
+    )
+    await session.flush()
+
+    def _call():
+        return soc.add(service=int(variant.smm_service), link=link, quantity=qty)
+
+    try:
+        data = await asyncio.to_thread(_call)
+    except SocProofError as e:
+        auto_refund = await settings_service.get_bool(
+            session, settings_service.AUTO_REFUND, True
+        )
+        if auto_refund:
+            raise SupplierError(str(e))
+        order.status = OrderStatus.NEEDS_ACTION
+        order.fail_reason = str(e)[:255]
+        await session.flush()
+        return order, []
+
+    oid = None
+    if isinstance(data, dict):
+        oid = data.get("order") or data.get("order_id") or data.get("id")
+    if not oid:
+        # Без номера заказа нечего поллить и нечем возвращать — трактуем как отказ.
+        auto_refund = await settings_service.get_bool(
+            session, settings_service.AUTO_REFUND, True
+        )
+        if auto_refund:
+            raise SupplierError("SMM-поставщик не вернул номер заказа")
+        order.status = OrderStatus.NEEDS_ACTION
+        order.fail_reason = "нет номера заказа у поставщика"
+        await session.flush()
+        return order, []
+
+    order.supplier_order_id = str(oid)
+    await session.flush()
+    return order, []
+
+
+async def settle_socproof(
+    session: AsyncSession, order: Order, soc: SocProofClient
+) -> dict:
+    """Опросить SMM-заказ: обновить прогресс, при терминале — закрыть/вернуть.
+
+    Возвращает ``{outcome, refund, progress, status_raw}``:
+      outcome ∈ {"progress","completed","partial","canceled"}.
+    Деньги возвращаются здесь же (credit + сторно маржи), статус заказа обновляется.
+    """
+    out = {"outcome": "progress", "refund": Decimal(0), "progress": None, "status_raw": None}
+    if not order.supplier_order_id:
+        return out
+    try:
+        data = await asyncio.to_thread(soc.status, order.supplier_order_id)
+    except SocProofError:
+        return out  # поставщик недоступен — попробуем позже
+
+    raw = data.get("status") if isinstance(data, dict) else None
+    remains = data.get("remains") if isinstance(data, dict) else None
+    out["status_raw"] = raw
+
+    try:
+        fields = json.loads(order.fields_json) if order.fields_json else {}
+    except (ValueError, TypeError):
+        fields = {}
+    qty = int(fields.get("quantity") or 0) or (order.quantity or 1)
+    if remains is not None:
+        fields["remains"] = max(0, int(float(remains)))
+        fields["progress"] = smm_service.progress_percent(qty, remains)
+        out["progress"] = fields["progress"]
+    fields["status"] = SocProofClient.norm_status(raw)
+    order.fields_json = json.dumps(fields, ensure_ascii=False)
+
+    total_paid = Decimal(order.price_usd)
+    margin = Decimal(order.merchant_margin or 0)
+
+    if SocProofClient.is_completed(raw):
+        order.status = OrderStatus.COMPLETED
+        await session.flush()
+        await referral_service.accrue_for_order(session, order)
+        out["outcome"] = "completed"
+        return out
+
+    if SocProofClient.is_partial(raw):
+        rem = max(0, min(int(float(remains or 0)), qty))
+        refund = smm_service.refund_amount_rub(total_paid, qty, rem, full=False)
+        if refund > 0:
+            await balance_service.credit(
+                session, order.user_id, refund, merchant_id=order.merchant_id
+            )
+            margin_back = (margin * Decimal(rem) / Decimal(qty or 1)).quantize(Decimal("0.01"))
+            await mprice_service.reverse_earnings(session, order.merchant_id, margin_back)
+        order.status = OrderStatus.COMPLETED
+        order.fail_reason = f"частично выполнен, возврат {smm_service._dec(refund)}₽"[:255]
+        await session.flush()
+        out["outcome"] = "partial"
+        out["refund"] = refund
+        return out
+
+    if SocProofClient.is_failed(raw):
+        refund = smm_service.refund_amount_rub(total_paid, qty, qty, full=True)
+        await balance_service.credit(
+            session, order.user_id, refund, merchant_id=order.merchant_id
+        )
+        await referral_service.reverse_for_order(session, order)
+        await mprice_service.reverse_earnings(session, order.merchant_id, margin)
+        order.status = OrderStatus.REFUNDED
+        order.fail_reason = "отменён поставщиком"
+        await session.flush()
+        out["outcome"] = "canceled"
+        out["refund"] = refund
+        return out
+
+    await session.flush()
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────────

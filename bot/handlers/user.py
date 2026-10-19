@@ -34,6 +34,7 @@ from ..services import ratetext as ratetext_service
 from ..services import notify as notify_service
 from ..services import referral as referral_service
 from ..services import orders as order_service
+from ..services import smm as smm_service
 from ..services import stars as stars_service
 from ..services import steam as steam_service
 from ..services import stock as stock_service
@@ -42,6 +43,7 @@ from ..services.orders import InsufficientBalance, OutOfStock, SupplierError
 from ..services.pricing import price_rub_value
 from ..db.models import HEAD_MERCHANT_ID, OrderStatus
 from fazercard import FazerCardClient
+from socproof import SocProofClient
 from ..ui import render
 from .. import keyboards as kb
 from .. import texts
@@ -79,6 +81,13 @@ class StarsFlow(StatesGroup):
     """Telegram Звёзды: @username → количество → подтверждение."""
     username = State()
     quantity = State()
+    confirming = State()
+
+
+class SmmFlow(StatesGroup):
+    """SMM-услуга soc-proof: количество → ссылка → подтверждение."""
+    quantity = State()
+    link = State()
     confirming = State()
 
 
@@ -497,7 +506,7 @@ async def _render_quantity(
 @router.callback_query(F.data.startswith("buy:"))
 async def cb_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, soc: SocProofClient = None, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -505,11 +514,15 @@ async def cb_buy(
         needs_fields = bool(variant and variant.is_active and _needs_fields(variant))
         is_steam = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "steam")
         is_stars = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "stars")
+        is_smm = bool(variant and variant.is_active and variant.source == "socproof")
     if is_steam:
         await _start_steam(call, db, state)
         return
     if is_stars:
         await _start_stars(call, db, state)
+        return
+    if is_smm:
+        await _start_smm(call, db, config, state, variant_id, merchant_id)
         return
     if needs_fields:
         await _start_topup(call, db, config, fzr, state, variant, merchant_id)
@@ -1175,6 +1188,175 @@ async def cb_stars_buy(
             ),
             reply_markup=kb.after_purchase_kb(),
         )
+    await call.answer("Готово ✅")
+
+
+# ── Покупка SMM-услуги (soc-proof): количество → ссылка → подтверждение ───────
+def _smm_cancel_kb() -> InlineKeyboardBuilder:
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="⬅️ Отмена", callback_data="catalog"))
+    return b
+
+
+async def _smm_prices(session, merchant_id: int, variant, config: BotConfig):
+    """(цена_владельца_за_1000, цена_клиента_за_1000) в рублях."""
+    markup = variant.markup_percent
+    if markup is None:
+        markup = config.default_markup_percent
+    owner = smm_service.sell_per_1000_rub(variant.smm_rate, markup)
+    client = await mprice_service.client_price(session, merchant_id, variant.id, owner)
+    return owner, client
+
+
+async def _start_smm(
+    call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
+    variant_id: int, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    async with db.session() as session:
+        variant = await catalog_service.get_variant(session, variant_id)
+        if not variant or not variant.is_active or variant.source != "socproof":
+            await call.answer("Недоступно", show_alert=True)
+            return
+        _owner, client_1000 = await _smm_prices(session, merchant_id, variant, config)
+    lo, hi = int(variant.smm_min or 1), int(variant.smm_max or 0)
+    await state.set_state(SmmFlow.quantity)
+    await state.update_data(
+        vid=variant.id, title=variant.title, per1000=str(client_1000),
+        smin=lo, smax=hi,
+    )
+    hi_txt = f"{hi}" if hi else "—"
+    await call.message.answer(
+        f"🧩 <b>{variant.title}</b>\n"
+        f"Цена: <b>{texts.rub(client_1000)}</b> за 1000\n"
+        f"Лимиты: от <b>{lo}</b> до <b>{hi_txt}</b>\n\n"
+        "Сколько нужно? Пришлите <b>количество</b> числом.",
+        reply_markup=_smm_cancel_kb().as_markup(),
+    )
+    await call.answer()
+
+
+@router.message(SmmFlow.quantity)
+async def msg_smm_quantity(
+    message: Message, db: Database, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    data = await state.get_data()
+    raw = (message.text or "").strip().replace(" ", "")
+    err = smm_service.validate_quantity(raw, data.get("smin"), data.get("smax"))
+    if err:
+        await message.answer(err)
+        return
+    qty = int(raw)
+    total = smm_service.order_total_rub(data.get("per1000"), qty)
+    await state.update_data(qty=qty, total=str(total))
+    await state.set_state(SmmFlow.link)
+    await message.answer(
+        f"Количество: <b>{qty}</b> · к оплате: <b>{texts.rub(total)}</b>\n\n"
+        "Теперь пришлите <b>ссылку</b> для накрутки (на профиль / пост / видео).",
+        reply_markup=_smm_cancel_kb().as_markup(),
+    )
+
+
+@router.message(SmmFlow.link)
+async def msg_smm_link(
+    message: Message, db: Database, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    link = (message.text or "").strip()
+    if not link or " " in link or "." not in link:
+        await message.answer("Пришлите корректную ссылку (например https://t.me/...).")
+        return
+    data = await state.get_data()
+    async with db.session() as session:
+        balance = await get_balance(session, message.from_user.id, merchant_id)
+    total = Decimal(data.get("total", "0"))
+    await state.update_data(link=link)
+    await state.set_state(SmmFlow.confirming)
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text=f"✅ Оплатить {texts.rub(total)}", callback_data="smmbuy"))
+    b.row(InlineKeyboardButton(text="⬅️ Отмена", callback_data="catalog"))
+    await message.answer(
+        f"🧾 <b>{data.get('title')}</b>\n"
+        f"Количество: <b>{data.get('qty')}</b>\n"
+        f"Ссылка: {link}\n"
+        f"К оплате: <b>{texts.rub(total)}</b>\n"
+        f"Баланс: <b>{texts.rub(balance)}</b>",
+        reply_markup=b.as_markup(),
+    )
+
+
+@router.callback_query(SmmFlow.confirming, F.data == "smmbuy")
+async def cb_smm_buy(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    state: FSMContext, soc: SocProofClient = None, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    data = await state.get_data()
+    vid = data.get("vid")
+    qty = int(data.get("qty", 0))
+    link = data.get("link", "")
+    async with db.session() as session:
+        variant = await catalog_service.get_variant(session, vid)
+        if not variant or not variant.is_active or variant.source != "socproof":
+            await state.clear()
+            await call.answer("Недоступно", show_alert=True)
+            return
+        owner_1000, client_1000 = await _smm_prices(session, merchant_id, variant, config)
+        client_total = smm_service.order_total_rub(client_1000, qty)
+        owner_total = smm_service.order_total_rub(owner_1000, qty)
+        await order_service.ensure_user(
+            session, call.from_user.id, call.from_user.username,
+            call.from_user.full_name, merchant_id,
+        )
+        try:
+            order, _codes = await order_service.purchase_from_balance(
+                session, user_id=call.from_user.id, variant=variant,
+                unit_price=client_total, quantity=1, merchant_id=merchant_id,
+                owner_unit_price=owner_total, soc=soc,
+                smm_link=link, smm_quantity=qty,
+            )
+        except InsufficientBalance:
+            await session.rollback()
+            await state.clear()
+            await call.message.answer(
+                texts.NOT_ENOUGH_BALANCE_MSG, reply_markup=kb.not_enough_balance_kb()
+            )
+            await call.answer()
+            return
+        except SupplierError:
+            await session.rollback()
+            await notify_service.notify_admins(
+                call.message.bot, config.admin_ids,
+                f"⚠️ SMM-поставщик отклонил заказ (<b>{variant.title}</b>, {qty} шт). "
+                "Деньги покупателю не списаны.",
+            )
+            await call.answer(
+                "😔 Поставщик временно недоступен, деньги не списаны.", show_alert=True
+            )
+            return
+        status = order.status
+        order_id = order.id
+        pending_note = await catalog_service.resolve_text(
+            session, variant, "pending_text", texts.PENDING_NOTE_DEFAULT
+        )
+        await session.commit()
+        balance = await get_balance(session, call.from_user.id, merchant_id)
+        item_name = variant.title
+
+    await state.clear()
+    if status == OrderStatus.NEEDS_ACTION:
+        await notify_service.notify_admins(
+            call.message.bot, config.admin_ids,
+            f"❗️ SMM-заказ #{order_id} (<b>{item_name}</b>, {qty} шт) требует ручной обработки.\n"
+            "Откройте «Админ-панель → Текущие заказы → Не выполненные».",
+        )
+    note = f"\n\n{pending_note}" if pending_note else ""
+    await call.message.answer(
+        f"✅ Заказ #{order_id} принят!\n"
+        f"<b>{item_name}</b> · {qty} шт\n"
+        f"Списано: <b>{texts.rub(client_total)}</b> · баланс: <b>{texts.rub(balance)}</b>\n"
+        f"Статус и прогресс — в разделе «🧾 Мои заказы»." + note,
+        reply_markup=kb.after_purchase_kb(),
+    )
     await call.answer("Готово ✅")
 
 

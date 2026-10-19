@@ -263,6 +263,14 @@ class Variant(Base):
     fzr_a: Mapped[Optional[str]] = mapped_column(String(64))  # game_id / category_id
     fzr_b: Mapped[Optional[str]] = mapped_column(String(64))  # key_id / card_id / offer_id
 
+    # SMM (source="socproof"): услуга панели soc-proof.su. Цена — за 1000,
+    # считается в рублях (закуп smm_rate ₽/1000 × наценка). При покупке клиент
+    # присылает количество (в пределах smm_min..smm_max) и ссылку для накрутки.
+    smm_service: Mapped[Optional[int]] = mapped_column(Integer)   # id услуги у поставщика
+    smm_min: Mapped[Optional[int]] = mapped_column(Integer)
+    smm_max: Mapped[Optional[int]] = mapped_column(Integer)
+    smm_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # закуп ₽ за 1000
+
     product: Mapped["Product"] = relationship(back_populates="variants")
     stock_items: Mapped[List["StockItem"]] = relationship(
         back_populates="variant", cascade="all, delete-orphan"

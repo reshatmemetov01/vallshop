@@ -97,6 +97,11 @@ class Database:
             ("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1"),
             # Канал: показан ли разовый мягкий промо-линк. См. User.channel_notified.
             ("users", "channel_notified", "BOOLEAN NOT NULL DEFAULT 0"),
+            # SMM-поставщик soc-proof (source="socproof"): услуга, лимиты, закуп ₽/1000.
+            ("variants", "smm_service", "INTEGER"),
+            ("variants", "smm_min", "INTEGER"),
+            ("variants", "smm_max", "INTEGER"),
+            ("variants", "smm_rate", "NUMERIC(12,4)"),
         ]
         added_source = False
         for table, column, ddl in wanted:

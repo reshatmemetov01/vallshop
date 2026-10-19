@@ -36,6 +36,7 @@ from ..services.pricing import (
 )
 from ..services import rates as rates_service
 from fazercard import FazerCardClient, FazerCardError
+from socproof import SocProofClient, SocProofError
 from .. import texts
 
 log = logging.getLogger("vallshop.admin_ui")
@@ -86,6 +87,9 @@ class AdminUI(StatesGroup):
     fzr_search = State()
     fzr_price = State()
     fzr_bulk_markup = State()
+    smm_search = State()
+    smm_price = State()
+    smm_bulk_markup = State()
 
 
 def _first_custom_emoji(message: Message) -> Optional[str]:
@@ -748,6 +752,7 @@ async def _product_card(session, config: BotConfig, product_id: int):
         _btn("➕ Свой номинал", f"a_addvarm:{product_id}"),
     )
     kb.row(_btn("➕ Номинал FazerCard", f"a_addvarf:{product_id}"))
+    kb.row(_btn("➕ Услуга SMM", f"a_addvarsmm:{product_id}"))
     kb.row(
         _btn("🙂 Эмодзи", f"a_pemoji:{product_id}"),
         _btn("🖼 Баннер", f"a_pbanner:{product_id}"),
@@ -1224,6 +1229,7 @@ async def msg_add_product(message: Message, db: Database, state: FSMContext) -> 
         _btn("➕ Номинал (LioGames)", f"a_addvar:{pid}"),
         _btn("➕ Номинал FazerCard", f"a_addvarf:{pid}"),
     )
+    kb.row(_btn("➕ Услуга SMM", f"a_addvarsmm:{pid}"))
     kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
     await message.answer(f"✅ Создано: <b>{title}</b>", reply_markup=kb.as_markup())
 
@@ -1319,6 +1325,7 @@ async def msg_add_subcat(message: Message, db: Database, state: FSMContext) -> N
     kb = InlineKeyboardBuilder()
     kb.row(_btn("➕ Номинал (LioGames)", f"a_addvar:{cid}"))
     kb.row(_btn("➕ Номинал FazerCard", f"a_addvarf:{cid}"))
+    kb.row(_btn("➕ Услуга SMM", f"a_addvarsmm:{cid}"))
     kb.row(_btn("⬅️ К подкатегории", f"a_prod:{cid}"))
     kb.row(_btn("⬅️ К родителю", f"a_prod:{parent_id}"))
     await message.answer(
@@ -2023,6 +2030,229 @@ async def msg_fzr_bulk_markup(message: Message, db: Database, state: FSMContext)
             "(напр. ID), затем оформит заказ и зачислит на аккаунт."
         )
     await message.answer("\n".join(parts) + note, reply_markup=kb.as_markup())
+
+
+# ── Услуга SMM (soc-proof): поиск, выбор (одиночный/пакетный), общая наценка ───
+_SMM_RESULTS = 40   # сколько услуг показывать по поиску
+
+
+def _smm_service_label(s: dict) -> str:
+    """Метка услуги: название · закуп ₽/1000 · лимиты."""
+    label = s.get("name") or str(s.get("id"))
+    rate = s.get("rate")
+    extra = []
+    if rate:
+        extra.append(f"{rate}₽/1000")
+    lo, hi = s.get("min"), s.get("max")
+    if lo or hi:
+        extra.append(f"{lo or 0}-{hi or 0}")
+    if extra:
+        label += " · " + " · ".join(extra)
+    return label
+
+
+def _smm_services_kb(services: list, pid, *, multi: bool, sel: list) -> InlineKeyboardMarkup:
+    """Клавиатура списка услуг SMM (с режимом множественного выбора)."""
+    kb = InlineKeyboardBuilder()
+    for j, s in enumerate(services):
+        label = _smm_service_label(s)
+        if multi:
+            if j in sel:
+                kb.row(_btn(f"✅ {sel.index(j) + 1}. {label}", f"a_smmt:{j}"))
+            else:
+                kb.row(_btn(f"⬜ {label}", f"a_smmt:{j}"))
+        else:
+            kb.row(_btn(label, f"a_smms:{j}"))
+    if multi:
+        if sel:
+            kb.row(_btn(f"✅ Добавить выбранные ({len(sel)})", "a_smmadd"))
+        kb.row(_btn("✖️ Выйти из выбора", "a_smmmx"))
+    else:
+        kb.row(_btn("☑️ Выбрать несколько", "a_smmmulti"))
+    kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
+    return kb.as_markup()
+
+
+@router.callback_query(F.data.startswith("a_addvarsmm:"))
+async def cb_add_variant_smm(call: CallbackQuery, state: FSMContext, soc: SocProofClient = None) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    if soc is None or not getattr(soc, "configured", False):
+        await call.answer("SMM-поставщик не настроен (нет ключа)", show_alert=True)
+        return
+    await state.update_data(pid=pid)
+    await state.set_state(AdminUI.smm_search)
+    await call.message.edit_text(
+        "🔎 <b>Услуга SMM (soc-proof)</b>\n\n"
+        "Пришлите название или часть — например <code>telegram подписчики</code>, "
+        "<code>просмотры</code>, <code>tiktok</code>.\n"
+        "Показываются только обычные услуги (ссылка + количество).",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+    )
+    await call.answer()
+
+
+@router.message(AdminUI.smm_search)
+async def msg_smm_search(
+    message: Message, db: Database, state: FSMContext, soc: SocProofClient = None
+) -> None:
+    data = await state.get_data()
+    pid = data.get("pid")
+    query = (message.text or "").strip()
+    if not query:
+        await message.answer("Пришлите слово для поиска.")
+        return
+    if soc is None:
+        await message.answer("SMM-поставщик не настроен.")
+        return
+    try:
+        found = await asyncio.to_thread(
+            lambda: soc.search(query, only_default=True, limit=_SMM_RESULTS)
+        )
+    except SocProofError as e:
+        await message.answer(f"Ошибка каталога soc-proof: {e}")
+        return
+    if not found:
+        await message.answer("Ничего не найдено. Попробуйте другое слово.")
+        return
+    await state.update_data(services=found, smm_multi=False, smm_sel=[])
+    more = "" if len(found) < _SMM_RESULTS else f"\n(первые {_SMM_RESULTS} — уточните запрос)"
+    await message.answer(
+        f"Выберите услугу (цена — закуп у soc-proof за 1000):{more}",
+        reply_markup=_smm_services_kb(found, pid, multi=False, sel=[]),
+    )
+
+
+@router.callback_query(AdminUI.smm_search, F.data == "a_smmmulti")
+async def cb_smm_multi(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    services, pid = data.get("services") or [], data.get("pid")
+    await state.update_data(smm_multi=True, smm_sel=[])
+    await call.message.edit_text(
+        "Отметьте услуги <b>по порядку</b> (он задаёт порядок в каталоге), "
+        "затем «Добавить выбранные» и задайте общую наценку.",
+        reply_markup=_smm_services_kb(services, pid, multi=True, sel=[]),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.smm_search, F.data == "a_smmmx")
+async def cb_smm_multi_exit(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    services, pid = data.get("services") or [], data.get("pid")
+    await state.update_data(smm_multi=False, smm_sel=[])
+    await call.message.edit_text(
+        "Выберите услугу (цена — закуп у soc-proof за 1000):",
+        reply_markup=_smm_services_kb(services, pid, multi=False, sel=[]),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.smm_search, F.data.startswith("a_smmt:"))
+async def cb_smm_toggle(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    services, pid = data.get("services") or [], data.get("pid")
+    sel = list(data.get("smm_sel") or [])
+    j = int(call.data.split(":", 1)[1])
+    if j >= len(services):
+        await call.answer("Список устарел, начните заново", show_alert=True)
+        return
+    if j in sel:
+        sel.remove(j)
+    else:
+        sel.append(j)
+    await state.update_data(smm_sel=sel)
+    await call.message.edit_reply_markup(
+        reply_markup=_smm_services_kb(services, pid, multi=True, sel=sel)
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.smm_search, F.data == "a_smmadd")
+async def cb_smm_bulk_add(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    sel, pid = list(data.get("smm_sel") or []), data.get("pid")
+    if not sel:
+        await call.answer("Сначала отметьте услуги", show_alert=True)
+        return
+    await state.set_state(AdminUI.smm_bulk_markup)
+    await call.message.edit_text(
+        f"➕ Выбрано услуг: <b>{len(sel)}</b>\n\n"
+        "Пришлите <b>общую наценку в %</b> к закупу (например <code>50</code> — "
+        "цена за 1000 = закуп +50%).",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.smm_search, F.data.startswith("a_smms:"))
+async def cb_smm_single(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    services, pid = data.get("services") or [], data.get("pid")
+    j = int(call.data.split(":", 1)[1])
+    if j >= len(services):
+        await call.answer("Список устарел, начните заново", show_alert=True)
+        return
+    svc = services[j]
+    await state.update_data(smm_one=svc)
+    await state.set_state(AdminUI.smm_price)
+    await call.message.edit_text(
+        f"💲 <b>{svc.get('name')}</b>\n"
+        f"Закуп: <b>{svc.get('rate')}₽</b> за 1000 · лимиты {svc.get('min')}-{svc.get('max')}\n\n"
+        "Пришлите <b>наценку в %</b> к закупу (например <code>50</code>).",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+    )
+    await call.answer()
+
+
+async def _smm_create(message, db, state, services: list) -> None:
+    """Общий финал: распарсить наценку из сообщения и создать услуги."""
+    data = await state.get_data()
+    pid = data.get("pid")
+    raw = (message.text or "").strip().replace(",", ".").rstrip("%").strip()
+    try:
+        markup = Decimal(raw)
+    except InvalidOperation:
+        await message.answer("Пришлите число — наценку в % (например <code>50</code>).")
+        return
+    if markup < 0:
+        await message.answer("Наценка не может быть отрицательной.")
+        return
+    async with db.session() as session:
+        added, skipped = await catalog_service.bulk_create_smm_variants(
+            session, pid, services, markup
+        )
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
+    parts = [f"✅ Добавлено услуг SMM: <b>{added}</b> (наценка +{markup}%)"]
+    if skipped:
+        parts.append(f"⏭ Пропущено (уже были): <b>{skipped}</b>")
+    parts.append("\nℹ️ При покупке клиент укажет количество и ссылку; статус — в «Мои заказы».")
+    await message.answer("\n".join(parts), reply_markup=kb.as_markup())
+
+
+@router.message(AdminUI.smm_price)
+async def msg_smm_price(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    svc = data.get("smm_one")
+    if not svc:
+        await state.clear()
+        await message.answer("Сессия устарела, начните заново.")
+        return
+    await _smm_create(message, db, state, [svc])
+
+
+@router.message(AdminUI.smm_bulk_markup)
+async def msg_smm_bulk_markup(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    services = data.get("services") or []
+    sel = list(data.get("smm_sel") or [])
+    chosen = [services[j] for j in sel if j < len(services)]
+    if not chosen:
+        await state.clear()
+        await message.answer("Сессия устарела, начните заново.")
+        return
+    await _smm_create(message, db, state, chosen)
 
 
 @router.callback_query(F.data.startswith("a_vtitle:"))

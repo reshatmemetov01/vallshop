@@ -236,6 +236,72 @@ async def bulk_create_fzr_variants(
     return added, skipped
 
 
+async def bulk_create_smm_variants(
+    session: AsyncSession,
+    product_id: int,
+    services: list,
+    markup_pct: Decimal,
+) -> tuple[int, int]:
+    """Пакетно создать SMM-услуги (source="socproof") из ``services``.
+
+    Каждая услуга — нормализованный dict soc-proof
+    ``{id, name, rate, min, max, ...}``. Наценка (``markup_pct``) — общая для всех
+    и хранится в ``markup_percent``; закуп ₽/1000 — в ``smm_rate``. Услуги, уже
+    добавленные к товару (по ``smm_service``), пропускаются. ``sort_order`` —
+    по порядку списка (после существующих номиналов).
+
+    Возвращает ``(добавлено, пропущено)``.
+    """
+    existing = {
+        int(x)
+        for x in await session.scalars(
+            select(Variant.smm_service).where(
+                Variant.product_id == product_id, Variant.smm_service.is_not(None)
+            )
+        )
+    }
+    min_vid = await session.scalar(
+        select(func.min(Variant.liog_variation_id)).where(
+            Variant.product_id == product_id
+        )
+    )
+    next_vid = min(0, int(min_vid or 0))
+    max_sort = await session.scalar(
+        select(func.max(Variant.sort_order)).where(Variant.product_id == product_id)
+    )
+    base_sort = int(max_sort or 0)
+
+    markup = Decimal(markup_pct)
+    added = skipped = 0
+    for s in services:
+        sid = int(s.get("id") or 0)
+        if not sid or sid in existing:
+            skipped += 1
+            continue
+        try:
+            rate = Decimal(str(s.get("rate") or "0"))
+        except (InvalidOperation, TypeError):
+            rate = Decimal("0")
+        next_vid -= 1
+        base_sort += 1
+        session.add(
+            Variant(
+                product_id=product_id, title=(s.get("name") or str(sid))[:255],
+                liog_product_id=0, liog_variation_id=next_vid,
+                cost_usd=Decimal("0"), price_usd=None,
+                source="socproof", markup_percent=markup,
+                smm_service=sid, smm_min=int(s.get("min") or 0),
+                smm_max=int(s.get("max") or 0), smm_rate=rate,
+                sort_order=base_sort,
+            )
+        )
+        existing.add(sid)
+        added += 1
+    if added:
+        await session.commit()
+    return added, skipped
+
+
 async def resolve_text(
     session: AsyncSession, variant: Variant, field: str, default: str
 ) -> str:

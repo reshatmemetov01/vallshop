@@ -250,6 +250,8 @@ async def main() -> None:
     paydex = build_paydex(config)
     liog = LioGamesClient.from_env()
     fzr = FazerCardClient.from_env()
+    from socproof import SocProofClient
+    soc = SocProofClient.from_env()
     from vpnresellers import VPNResellersClient
     vpn = VPNResellersClient.from_env()
 
@@ -303,6 +305,7 @@ async def main() -> None:
     dp["paydex"] = paydex
     dp["liog"] = liog
     dp["fzr"] = fzr
+    dp["soc"] = soc
     dp["vpn"] = vpn
     dp["bots_by_merchant"] = bots_by_merchant
 
@@ -340,7 +343,7 @@ async def main() -> None:
 
     tasks = [
         asyncio.create_task(
-            run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant)
+            run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant, soc=soc)
         ),
         asyncio.create_task(
             run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex,

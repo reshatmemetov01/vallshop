@@ -5,13 +5,15 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal, InvalidOperation
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from sqlalchemy import func, select
 
@@ -24,10 +26,12 @@ from ..services import notify as notify_service
 from ..services import orders as order_service
 from ..services import paymethods as paymethods_service
 from ..services import rates as rates_service
+from ..services import smm as smm_service
 from ..services.balance import TOPUP_MAX, TOPUP_MIN
 from ..ui import render
 from .. import keyboards as kb
 from .. import texts
+from socproof import SocProofClient
 
 router = Router()
 
@@ -454,24 +458,86 @@ async def cb_my_orders(
         )
         items = rows.all()
 
+    has_active_smm = any(
+        o.supplier == "socproof" and o.status == OrderStatus.FULFILLING
+        for o, _ in items
+    )
     if not items:
         caption = texts.MY_ORDERS_TITLE + "\n\n" + texts.NO_ORDERS
     else:
         lines = [texts.MY_ORDERS_TITLE, ""]
         for order, vtitle in items:
-            total = Decimal(order.price_usd) * (order.quantity or 1)
-            line = (
-                f"#{order.id} · {vtitle} ×{order.quantity or 1} · "
-                f"{texts.rub(total)} · {_status_ru(order.status)}"
-            )
-            if order.status == OrderStatus.COMPLETED and order.delivery_code:
-                codes = ", ".join(order.delivery_code.splitlines())
-                line += f"\n   коды: <code>{codes}</code>"
-            lines.append(line)
+            lines.append(_order_line(order, vtitle))
         caption = "\n".join(lines)
 
-    await render(call, banner="profile", caption=caption, reply_markup=kb.back_profile_kb())
+    markup = kb.back_profile_kb()
+    if has_active_smm:
+        b = InlineKeyboardBuilder()
+        b.row(InlineKeyboardButton(text="🔄 Обновить статусы", callback_data="smmrefresh"))
+        for row in markup.inline_keyboard:
+            b.row(*row)
+        markup = b.as_markup()
+    await render(call, banner="profile", caption=caption, reply_markup=markup)
     await call.answer()
+
+
+def _order_line(order, vtitle: str) -> str:
+    """Строка заказа для списка «Мои заказы» (SMM — с количеством и прогрессом)."""
+    total = Decimal(order.price_usd) * (order.quantity or 1)
+    if order.supplier == "socproof":
+        try:
+            f = json.loads(order.fields_json) if order.fields_json else {}
+        except (ValueError, TypeError):
+            f = {}
+        qty = f.get("quantity") or "?"
+        if order.status == OrderStatus.FULFILLING:
+            st = smm_service.status_label(f.get("status"))
+            prog = f.get("progress")
+            st += f" · {prog}%" if isinstance(prog, int) else ""
+        elif order.status == OrderStatus.REFUNDED:
+            st = "↩️ Возврат"
+        elif order.status == OrderStatus.COMPLETED and order.fail_reason and "частично" in order.fail_reason:
+            st = "⚠️ Частично (с возвратом)"
+        else:
+            st = _status_ru(order.status)
+        return f"#{order.id} · {vtitle} · {qty} шт · {texts.rub(total)} · {st}"
+
+    line = (
+        f"#{order.id} · {vtitle} ×{order.quantity or 1} · "
+        f"{texts.rub(total)} · {_status_ru(order.status)}"
+    )
+    if order.status == OrderStatus.COMPLETED and order.delivery_code:
+        codes = ", ".join(order.delivery_code.splitlines())
+        line += f"\n   коды: <code>{codes}</code>"
+    return line
+
+
+@router.callback_query(F.data == "smmrefresh")
+async def cb_smm_refresh(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    soc: SocProofClient = None, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    """Обновить статусы активных SMM-заказов клиента по запросу."""
+    if soc is None or not getattr(soc, "configured", False):
+        await call.answer("Обновление недоступно", show_alert=True)
+        return
+    async with db.session() as session:
+        active = list(await session.scalars(
+            select(Order).where(
+                Order.user_id == call.from_user.id,
+                Order.merchant_id == merchant_id,
+                Order.supplier == "socproof",
+                Order.status == OrderStatus.FULFILLING,
+            )
+        ))
+        for order in active:
+            try:
+                await order_service.settle_socproof(session, order, soc)
+            except Exception:  # noqa: BLE001 — один сбой не рушит обновление
+                pass
+        await session.commit()
+    await call.answer("Статусы обновлены ✅")
+    await cb_my_orders(call, db, config, merchant_id)
 
 
 @router.callback_query(F.data == "mytopups")

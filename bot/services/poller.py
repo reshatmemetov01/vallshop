@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from liogames import LioGamesClient
 from fazercard import FazerCardClient
+from socproof import SocProofClient
 
 from ..config import BotConfig
 from ..db import Database
@@ -47,6 +48,54 @@ def _pick_bot(bots, merchant_id, default):
     return default
 
 
+async def _settle_smm(bot, db, soc, config, bots, order_id) -> None:
+    """Опросить один SMM-заказ и уведомить клиента при изменении терминала."""
+    if soc is None:
+        return
+    async with db.session() as session:
+        fresh = await session.get(Order, order_id)
+        if not fresh or fresh.status != OrderStatus.FULFILLING:
+            return
+        res = await order_service.settle_socproof(session, fresh, soc)
+        user_id = fresh.user_id
+        merchant_id = fresh.merchant_id
+        oid = fresh.id
+        variant_id = fresh.variant_id
+        variant = await session.get(Variant, fresh.variant_id)
+        item_name = variant.title if variant else "—"
+        await session.commit()
+
+    outcome = res.get("outcome")
+    if outcome == "progress":
+        return  # для клиента ничего не изменилось
+
+    cbot = _pick_bot(bots, merchant_id, bot)
+    admin_ids = list(config.admin_ids) if config else []
+    refund = res.get("refund") or Decimal(0)
+    amount_str = texts.rub(refund)
+    done_kb = kb.order_done_kb(oid, variant_id)
+    if outcome == "completed":
+        await _notify(cbot, user_id, f"✅ Заказ #{oid} «{item_name}» выполнен.", done_kb)
+    elif outcome == "partial":
+        await _notify(
+            cbot, user_id,
+            f"⚠️ Заказ #{oid} «{item_name}» выполнен частично.\n"
+            f"Возвращено на баланс: <b>{amount_str}</b>.",
+            done_kb,
+        )
+    elif outcome == "canceled":
+        await _notify(
+            cbot, user_id,
+            f"↩️ Заказ #{oid} «{item_name}» отменён поставщиком.\n"
+            f"Возвращено на баланс: <b>{amount_str}</b>.",
+        )
+        await notify_service.notify_admins(
+            bot, admin_ids,
+            f"↩️ SMM-заказ #{oid} (<b>{item_name}</b>) отменён поставщиком, "
+            f"возврат покупателю <b>{amount_str}</b>.",
+        )
+
+
 async def run_fulfillment_poller(
     bot: Bot,
     db: Database,
@@ -55,11 +104,12 @@ async def run_fulfillment_poller(
     config: BotConfig | None = None,
     interval: float = 20.0,
     bots: dict | None = None,
+    soc: SocProofClient | None = None,
 ) -> None:
-    """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard)."""
+    """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard + SMM)."""
     while True:
         try:
-            await _tick(bot, db, liog, fzr, config, bots)
+            await _tick(bot, db, liog, fzr, config, bots, soc)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — поллер не должен падать
@@ -74,6 +124,7 @@ async def _tick(
     fzr: FazerCardClient | None,
     config: BotConfig | None = None,
     bots: dict | None = None,
+    soc: SocProofClient | None = None,
 ) -> None:
     async with db.session() as session:
         orders = list(
@@ -83,6 +134,10 @@ async def _tick(
         )
 
     for order in orders:
+        # SMM (soc-proof) — своя логика опроса/возврата и уведомлений.
+        if order.supplier == "socproof":
+            await _settle_smm(bot, db, soc, config, bots, order.id)
+            continue
         async with db.session() as session:
             fresh = await session.get(Order, order.id)
             if not fresh or fresh.status != OrderStatus.FULFILLING:
