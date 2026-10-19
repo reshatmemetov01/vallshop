@@ -152,6 +152,47 @@ async def test_drop_claimable_right_after_create(db):
     assert st == "ok" and info["amount"] == Decimal("50")
 
 
+class _MsgObj:
+    class _Chat:
+        def __init__(self, i):
+            self.id = i
+
+    def __init__(self, uid):
+        self.chat = _MsgObj._Chat(uid)
+        self.message_id = uid * 10
+
+
+class _ParBot:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, uid, text, reply_markup=None):
+        self.sent.append(uid)
+        return _MsgObj(uid)
+
+    async def send_photo(self, uid, photo, caption=None, reply_markup=None):
+        self.sent.append(uid)
+        return _MsgObj(uid)
+
+
+@pytest.mark.asyncio
+async def test_deliver_drop_sends_to_all_in_parallel(db, monkeypatch):
+    monkeypatch.setattr(bn, "_DROP_RATE", 100000)       # не тормозим тест темпом
+    ids = list(range(1, 31))
+    await _users(db, ids)
+    async with db.session() as s:
+        d = await bn.create_drop(
+            s, merchant_id=0, created_by=9, text="t", photo=None, btn_label="go",
+            amount_rub=Decimal("10"), max_claims=100, success_text="ok", error_text="no",
+            success_btn_label=None, success_btn_kind=None, success_btn_target=None,
+        )
+    bot = _ParBot()
+    n = await bn.deliver_drop(bot, db, d.id)
+    assert n == 30 and sorted(bot.sent) == ids          # дошло всем
+    async with db.session() as s:
+        assert len(await bn.messages_to_delete(s, d.id)) == 30   # все id сохранены
+
+
 class _DelBot:
     def __init__(self):
         self.deleted = []

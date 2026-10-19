@@ -230,9 +230,18 @@ def _claim_kb(drop_id: int, label: str):
     return b.as_markup()
 
 
+# Массовая отправка дропа: параллельно, но с безопасным темпом (Telegram ~30
+# сообщений/сек на рассылку по разным людям — выше риск флуд-бана). Темп задаём
+# стартами отправок (_DROP_RATE/сек), а параллелизм (_DROP_CONCURRENCY) прячет
+# сетевую задержку, поэтому реальная скорость держится у предела, и пост приходит
+# всем максимально близко к одновременному.
+_DROP_RATE = 25          # сообщений в секунду (старты)
+_DROP_CONCURRENCY = 20   # одновременных отправок «в полёте»
+
+
 async def deliver_drop(bot, db: Database, drop_id: int) -> int:
-    """Разослать пост дропа клиентам магазина, сохранить message_id для удаления
-    через 24ч и открыть приём активаций. Возвращает число отправленных."""
+    """Разослать пост дропа клиентам магазина параллельно (с лимитом скорости),
+    сохранить message_id для удаления через 24ч. Возвращает число отправленных."""
     async with db.session() as s:
         drop = await s.get(BonusDrop, drop_id)
     if drop is None:
@@ -240,33 +249,54 @@ async def deliver_drop(bot, db: Database, drop_id: int) -> int:
     user_ids = await broadcast_service.recipients(db, drop.merchant_id)
     markup = _claim_kb(drop_id, drop.btn_label)
     text, photo = drop.text, drop.photo
-    sent = 0
-    pending: List[BonusDropMessage] = []
-    for uid in user_ids:
-        try:
-            if photo:
-                m = await bot.send_photo(uid, photo, caption=text or None, reply_markup=markup)
-            else:
-                m = await bot.send_message(uid, text, reply_markup=markup)
-            pending.append(BonusDropMessage(
-                drop_id=drop_id, chat_id=m.chat.id, message_id=m.message_id
-            ))
-            sent += 1
-            if len(pending) >= 200:
-                async with db.session() as s:
-                    s.add_all(pending)
-                    await s.commit()
-                pending = []
-        except Exception:  # noqa: BLE001 — заблокировал бота / недоступен
-            pass
-        await asyncio.sleep(_SEND_DELAY)
-    if pending:
+
+    loop = asyncio.get_event_loop()
+    interval = 1.0 / _DROP_RATE
+    pace = {"next": loop.time()}
+    pace_lock = asyncio.Lock()
+    sem = asyncio.Semaphore(_DROP_CONCURRENCY)
+
+    async def _gate():
+        # Токен-бакет: разносим СТАРТЫ отправок на ~_DROP_RATE/сек.
+        async with pace_lock:
+            now = loop.time()
+            wait = pace["next"] - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+            pace["next"] = max(now, pace["next"]) + interval
+
+    async def _send(uid):
+        if photo:
+            return await bot.send_photo(uid, photo, caption=text or None, reply_markup=markup)
+        return await bot.send_message(uid, text, reply_markup=markup)
+
+    async def _one(uid):
+        async with sem:
+            await _gate()
+            try:
+                m = await _send(uid)
+            except Exception as exc:  # noqa: BLE001
+                retry_after = getattr(exc, "retry_after", None)
+                if not retry_after:
+                    return None  # заблокировал бота / недоступен
+                await asyncio.sleep(float(retry_after))
+                try:
+                    m = await _send(uid)
+                except Exception:  # noqa: BLE001
+                    return None
+            return (m.chat.id, m.message_id)
+
+    results = await asyncio.gather(*[_one(u) for u in user_ids])
+    pairs = [p for p in results if p]
+    for i in range(0, len(pairs), 400):
+        chunk = pairs[i : i + 400]
         async with db.session() as s:
-            s.add_all(pending)
+            s.add_all([BonusDropMessage(drop_id=drop_id, chat_id=c, message_id=mid)
+                       for c, mid in chunk])
             await s.commit()
-    await activate_drop(db, drop_id, sent)
-    log.info("Бонус-дроп #%s разослан: %s получателей", drop_id, sent)
-    return sent
+    await activate_drop(db, drop_id, len(pairs))
+    log.info("Бонус-дроп #%s разослан: %s получателей", drop_id, len(pairs))
+    return len(pairs)
 
 
 async def claim(
