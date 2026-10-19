@@ -141,6 +141,7 @@ def _panel_kb() -> InlineKeyboardMarkup:
     kb.row(_btn("💱 Курс USDT→₽", "a_rate"), _btn("🛡 VPN", "vpn_home"))
     kb.row(_btn("💳 Пополнение Steam", "steam_home"))
     kb.row(_btn("⭐ Телеграм Звёзды", "stars_home"))
+    kb.row(_btn("📢 Канал", "ch:home"))
     kb.row(_btn("⬅️ Меню", "menu"))
     return kb.as_markup()
 
@@ -2333,3 +2334,15 @@ async def cb_stock(call: CallbackQuery, db: Database) -> None:
     kb.row(_btn("⬅️ Назад", "a_home"))
     await call.message.edit_text(text, reply_markup=kb.as_markup())
     await call.answer()
+
+
+# ── Настройка канала (обязательная подписка) ──────────────────────────────────
+from . import channel_flow  # noqa: E402
+
+
+class HeadChannel(StatesGroup):
+    wait_link = State()
+    wait_forward = State()
+
+
+channel_flow.register(router, prefix="ch", home_cb="a_home", states=HeadChannel)

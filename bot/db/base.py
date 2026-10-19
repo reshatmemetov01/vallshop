@@ -95,6 +95,8 @@ class Database:
             ("products", "head_only", "BOOLEAN NOT NULL DEFAULT 0"),
             # Рассылка: достижимость клиента (активен/неактивен). См. User.is_active.
             ("users", "is_active", "BOOLEAN NOT NULL DEFAULT 1"),
+            # Канал: показан ли разовый мягкий промо-линк. См. User.channel_notified.
+            ("users", "channel_notified", "BOOLEAN NOT NULL DEFAULT 0"),
         ]
         added_source = False
         for table, column, ddl in wanted:
@@ -132,6 +134,7 @@ class Database:
                     ("is_blocked", "BOOLEAN NOT NULL DEFAULT 0"),
                     ("block_reason", "VARCHAR(255)"),
                     ("is_active", "BOOLEAN NOT NULL DEFAULT 1"),
+                    ("channel_notified", "BOOLEAN NOT NULL DEFAULT 0"),
                     ("balance", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
                     ("created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
                     ("referred_by", "INTEGER"),

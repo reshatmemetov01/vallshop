@@ -237,6 +237,8 @@ async def main() -> None:
     from .services import rates as rates_service
     await menu_service.load(db)  # кэш оформления меню
     await rates_service.load(db)  # курс USDT→₽
+    from .services import channel as channel_service
+    await channel_service.load(db)  # кэш настроек каналов (обязательная подписка)
     await _migrate_to_rub(db, rates_service.get_rate())  # разовая конвертация балансов
     await _seed_vpn_category(db)  # разовое создание категории «VPN | VallShop»
     await _seed_steam_category(db)  # разовое создание кнопки «Пополнить Steam»
@@ -304,7 +306,9 @@ async def main() -> None:
     dp["vpn"] = vpn
     dp["bots_by_merchant"] = bots_by_merchant
 
-    from .middlewares import BlockedMiddleware, ClickTrackingMiddleware, MerchantMiddleware
+    from .middlewares import (
+        BlockedMiddleware, ChannelGateMiddleware, ClickTrackingMiddleware, MerchantMiddleware,
+    )
     # MerchantMiddleware — ВНЕШНИЙ (outer): кладёт merchant_id ДО фильтров роутеров,
     # иначе фильтры (напр. доступ в кабинет мерчанта) видят только дефолт 0.
     # Внутренний middleware выполняется после фильтров — для merchant_id это поздно.
@@ -316,6 +320,9 @@ async def main() -> None:
     # Blocked — внутренний: merchant_id уже проставлен внешним MerchantMiddleware.
     dp.message.middleware(BlockedMiddleware())
     dp.callback_query.middleware(BlockedMiddleware())
+    # Гейт подписки на канал (обязательная подписка) — после Blocked.
+    dp.message.middleware(ChannelGateMiddleware())
+    dp.callback_query.middleware(ChannelGateMiddleware())
 
     dp.include_router(build_root_router())
 

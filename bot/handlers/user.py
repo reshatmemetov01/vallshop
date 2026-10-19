@@ -26,6 +26,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..services import catalog as catalog_service
 from ..services import mcatalog as mcatalog_service
+from ..services import channel as channel_service
 from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..services import mprice as mprice_service
@@ -119,6 +120,22 @@ async def cmd_start(
     is_admin = config.is_admin(message.from_user.id)
     is_madmin = await merchants_service.admin_merchant(db, message.from_user.id, merchant_id) is not None
     await render(message, banner="main", caption=menu_service.caption("main", texts.START, merchant_id), reply_markup=kb.main_menu_kb(is_admin, is_madmin, merchant_id))
+    # Мягкий режим канала: показать ссылку один раз (если подписка НЕ обязательна).
+    cfg = channel_service.config(merchant_id)
+    if cfg.get("url") and not cfg.get("required"):
+        async with db.session() as session:
+            from ..services.users import get_user
+            u = await get_user(session, message.from_user.id, merchant_id)
+            show = u is not None and not u.channel_notified
+            if show:
+                u.channel_notified = True
+                await session.commit()
+        if show:
+            b = InlineKeyboardBuilder().row(kb._b("📢 Наш канал", url=cfg["url"]))
+            await message.answer(
+                "📢 Подпишитесь на наш канал — новинки, акции и бонусы!",
+                reply_markup=b.as_markup(),
+            )
 
 
 @router.message(Command("menu"))

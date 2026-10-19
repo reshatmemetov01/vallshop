@@ -152,6 +152,10 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1"
     )
+    # Показали ли разовое сообщение о канале (мягкий режим «ссылка один раз»).
+    channel_notified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
     # Баланс пользователя (USD ≈ USDT). Пополняется криптой, тратится на покупки.
     balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     # default (Python) И server_default: перестройка таблицы (составной ключ) не

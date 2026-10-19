@@ -18,6 +18,7 @@ from . import (
     admin_stats,
     admin_ui,
     bonus_user,
+    channel_user,
     franchise,
     menu_button,
     merchant_admin,
@@ -63,6 +64,7 @@ def build_root_router() -> Router:
     root.include_router(merchant_admin.router)
     root.include_router(reviews.router)
     root.include_router(bonus_user.router)  # промокод + клик по бонус-дропу (все боты)
+    root.include_router(channel_user.router)  # «Проверить подписку» (все боты)
     root.include_router(profile.router)
     root.include_router(user.router)
     return root

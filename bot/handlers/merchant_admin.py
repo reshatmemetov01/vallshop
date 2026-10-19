@@ -154,6 +154,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
     kb.row(_b("🎨 Оформление", "mo_home"))
     kb.row(_b("📣 Рассылка", "mb:home"), _b("🎁 Бонусы", "mbn:home"))
+    kb.row(_b("📢 Канал", "mch:home"))
     kb.row(_b("⬅️ В меню", "menu"))
     await _edit(call, caption, kb)
 
@@ -1418,3 +1419,17 @@ bonus_flow.register(
     sections=broadcast_flow.FRANCHISE_SECTIONS,
     states=FranchiseBonus,
 )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Канал франшизы (обязательная подписка) — prefix "mch".
+# ══════════════════════════════════════════════════════════════════════════════
+from . import channel_flow  # noqa: E402
+
+
+class FranchiseChannel(StatesGroup):
+    wait_link = State()
+    wait_forward = State()
+
+
+channel_flow.register(router, prefix="mch", home_cb="ma_home", states=FranchiseChannel)
