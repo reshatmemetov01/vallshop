@@ -69,7 +69,8 @@ async def _show(call: CallbackQuery, text: str, markup: InlineKeyboardMarkup) ->
         await call.message.answer(text, reply_markup=markup)
 
 
-def register(router: Router, *, prefix: str, home_cb: str, states: type[StatesGroup]) -> dict:
+def register(router: Router, *, prefix: str, home_cb: str, states: type[StatesGroup],
+             post_prefix: Optional[str] = None) -> dict:
     P = prefix
     S = states
 
@@ -99,6 +100,9 @@ def register(router: Router, *, prefix: str, home_cb: str, states: type[StatesGr
         b.row(_bt("📎 Привязать приватный (переслать пост)", f"{P}:fwd"))
         b.row(_bt(("🔔 Выключить обязательную" if req else "🔕 Включить обязательную"),
                   f"{P}:toggle"))
+        if post_prefix:
+            b.row(_bt("📝 Создать пост", f"{post_prefix}:new"),
+                  _bt("📊 Клики постов", f"{post_prefix}:ds"))
         b.row(_bt("🗑 Убрать канал", f"{P}:clear"))
         b.row(_bt("⬅️ Назад", home_cb))
         return text, b.as_markup()

@@ -316,6 +316,29 @@ def broadcast_post_kb(buttons, broadcast_id: Optional[int] = None) -> Optional[I
     return markup if markup.inline_keyboard else None
 
 
+def channel_post_kb(buttons, post_id: int) -> Optional[InlineKeyboardMarkup]:
+    """Клавиатура поста в канал. Кнопки-разделы → трекинг-колбэк cpk:<id>:<idx>:<target>
+    (клик считается, бот открывается по deep-link); ссылки — обычные url (не считаются).
+    По одной в ряд."""
+    if not buttons:
+        return None
+    kb = InlineKeyboardBuilder()
+    for idx, b in enumerate(buttons):
+        label = b.get("label") or "Кнопка"
+        style = b.get("style") or None
+        icon = b.get("icon") or None
+        if b.get("kind") == "url":
+            url = _as_url(b.get("target"))
+            if not url:
+                continue
+            kb.row(_b(label, url=url, style=style, icon=icon))
+        else:
+            target = b.get("target") or ""
+            kb.row(_b(label, callback_data=f"cpk:{post_id}:{idx}:{target}", style=style, icon=icon))
+    markup = kb.as_markup()
+    return markup if markup.inline_keyboard else None
+
+
 def after_purchase_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_b("Каталог", callback_data="catalog", style="primary", icon=EMOJI["catalog"]))

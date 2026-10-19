@@ -90,6 +90,16 @@ async def list_scheduled(session: AsyncSession, merchant_id: int) -> List[Broadc
     return list(rows)
 
 
+async def channel_posts(session: AsyncSession, merchant_id: int, limit: int = 10) -> List[Broadcast]:
+    """Последние посты в канал этого магазина (status='channel')."""
+    rows = await session.scalars(
+        select(Broadcast)
+        .where(Broadcast.merchant_id == merchant_id, Broadcast.status == "channel")
+        .order_by(Broadcast.id.desc()).limit(limit)
+    )
+    return list(rows)
+
+
 async def recent(session: AsyncSession, merchant_id: int, limit: int = 10) -> List[Broadcast]:
     """Последние отправленные/в процессе/неудавшиеся рассылки магазина."""
     rows = await session.scalars(

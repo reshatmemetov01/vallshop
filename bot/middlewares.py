@@ -89,8 +89,10 @@ class ChannelGateMiddleware(BaseMiddleware):
         if not cfg.get("required") or not cfg.get("chat"):
             return await handler(event, data)  # гейт выключен
 
-        # Колбэк проверки подписки — пропускаем к его обработчику.
-        if getattr(event, "data", None) == "chksub":
+        # Колбэк проверки подписки и клики по кнопкам поста в канале — пропускаем
+        # (их обработчики сами разберутся; на канальные посты гейт не распространяем).
+        ev_data = getattr(event, "data", None)
+        if ev_data == "chksub" or (isinstance(ev_data, str) and ev_data.startswith("cpk:")):
             return await handler(event, data)
 
         # Админы/владельцы магазина не блокируются.

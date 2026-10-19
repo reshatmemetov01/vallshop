@@ -13,6 +13,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID
 from ..services import channel as channel_service
+from ..services import broadcasts as broadcasts_service
 from ..services import menu as menu_service
 from ..services import merchants as merchants_service
 from ..ui import render
@@ -20,6 +21,27 @@ from .. import keyboards as kb
 from .. import texts
 
 router = Router(name="channel_user")
+
+
+@router.callback_query(F.data.startswith("cpk:"))
+async def cb_channel_post_click(
+    call: CallbackQuery, db: Database, merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    """Клик по кнопке поста в канале: засчитать и открыть бота по deep-link."""
+    parts = call.data.split(":")  # cpk:<post_id>:<idx>:<target>
+    try:
+        pid, idx = int(parts[1]), int(parts[2])
+    except (ValueError, IndexError):
+        await call.answer()
+        return
+    target = parts[3] if len(parts) > 3 else ""
+    await broadcasts_service.record_click(db, pid, idx, call.from_user.id)
+    try:
+        me = await call.bot.me()
+        payload = f"s{target}" if target else "open"
+        await call.answer(url=f"https://t.me/{me.username}?start={payload}")
+    except Exception:  # noqa: BLE001
+        await call.answer("Открываю бота…")
 
 
 @router.callback_query(F.data == "chksub")

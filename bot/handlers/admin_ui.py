@@ -2336,8 +2336,10 @@ async def cb_stock(call: CallbackQuery, db: Database) -> None:
     await call.answer()
 
 
-# ── Настройка канала (обязательная подписка) ──────────────────────────────────
+# ── Настройка канала (обязательная подписка) + посты в канал ──────────────────
 from . import channel_flow  # noqa: E402
+from . import channel_post  # noqa: E402
+from . import broadcast_flow as _bf  # noqa: E402
 
 
 class HeadChannel(StatesGroup):
@@ -2345,4 +2347,14 @@ class HeadChannel(StatesGroup):
     wait_forward = State()
 
 
-channel_flow.register(router, prefix="ch", home_cb="a_home", states=HeadChannel)
+class HeadChannelPost(StatesGroup):
+    compose = State()
+    url = State()
+    label = State()
+    emoji = State()
+
+
+channel_flow.register(router, prefix="ch", home_cb="a_home", states=HeadChannel,
+                      post_prefix="hpost")
+channel_post.register(router, prefix="hpost", home_cb="ch:home",
+                      sections=_bf.HEAD_SECTIONS, states=HeadChannelPost)

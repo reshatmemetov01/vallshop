@@ -1422,9 +1422,10 @@ bonus_flow.register(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Канал франшизы (обязательная подписка) — prefix "mch".
+# Канал франшизы (обязательная подписка + посты в канал) — prefix "mch"/"fpost".
 # ══════════════════════════════════════════════════════════════════════════════
 from . import channel_flow  # noqa: E402
+from . import channel_post  # noqa: E402
 
 
 class FranchiseChannel(StatesGroup):
@@ -1432,4 +1433,14 @@ class FranchiseChannel(StatesGroup):
     wait_forward = State()
 
 
-channel_flow.register(router, prefix="mch", home_cb="ma_home", states=FranchiseChannel)
+class FranchiseChannelPost(StatesGroup):
+    compose = State()
+    url = State()
+    label = State()
+    emoji = State()
+
+
+channel_flow.register(router, prefix="mch", home_cb="ma_home", states=FranchiseChannel,
+                      post_prefix="fpost")
+channel_post.register(router, prefix="fpost", home_cb="mch:home",
+                      sections=broadcast_flow.FRANCHISE_SECTIONS, states=FranchiseChannelPost)
