@@ -99,6 +99,18 @@ async def test_recompute_ignores_small_change(db):
 
 
 @pytest.mark.asyncio
+async def test_variant_description_persists(db):
+    vid = await _variant(db)
+    async with db.session() as s:
+        v = await s.get(Variant, vid)
+        assert v.description is None       # по умолчанию нет
+        v.description = "Запуск 0-1ч · скорость 20к/сутки · гарантия 3 дня"
+        await s.commit()
+    async with db.session() as s:
+        assert (await s.get(Variant, vid)).description.startswith("Запуск")
+
+
+@pytest.mark.asyncio
 async def test_recompute_skips_missing_service(db):
     vid = await _variant(db, service=707, rate="9.00")
     # услуги 707 нет в выдаче — закуп не трогаем (это обрабатывает «наличие»)

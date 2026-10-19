@@ -102,6 +102,8 @@ class Database:
             ("variants", "smm_min", "INTEGER"),
             ("variants", "smm_max", "INTEGER"),
             ("variants", "smm_rate", "NUMERIC(12,4)"),
+            # Описание номинала (показывается покупателю).
+            ("variants", "description", "TEXT"),
         ]
         added_source = False
         for table, column, ddl in wanted:

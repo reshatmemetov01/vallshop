@@ -72,6 +72,7 @@ class AdminUI(StatesGroup):
     add_variant_manual = State()
     add_subcat = State()
     set_var_title = State()
+    set_var_desc = State()
     set_price_rub = State()
     set_text = State()
     set_banner = State()
@@ -882,6 +883,7 @@ def _smm_variant_card(v: Variant, config: BotConfig):
     )
     kb = InlineKeyboardBuilder()
     kb.row(_btn("✏️ Название номинала", f"a_vtitle:{v.id}"))
+    kb.row(_btn("📝 Описание", f"a_vdesc:{v.id}"))
     kb.row(_btn("📈 Наценка", f"a_setmarkup:{v.id}"))
     kb.row(
         _btn("🙂 Эмодзи", f"a_vemoji:{v.id}"),
@@ -2333,6 +2335,46 @@ async def msg_var_title(message: Message, db: Database, state: FSMContext) -> No
     kb = InlineKeyboardBuilder()
     kb.row(_btn("⬅️ К номиналу", f"a_var:{vid}"))
     await message.answer("✅ Название номинала обновлено", reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("a_vdesc:"))
+async def cb_var_desc(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+    vid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        v = await session.get(Variant, vid)
+        cur = v.description if v else None
+    cur_line = (
+        f"сейчас:\n<blockquote>{cur}</blockquote>\n\n" if cur
+        else "сейчас: <i>нет описания</i>\n\n"
+    )
+    await state.set_state(AdminUI.set_var_desc)
+    await state.update_data(vid=vid)
+    await call.message.edit_text(
+        "📝 Редактирование <b>описания номинала</b> (покажется покупателю на "
+        "экране номинала).\n"
+        f"{cur_line}"
+        "Пришлите новый текст. Можно использовать премиум-эмодзи и форматирование "
+        "(жирный, курсив) — они сохранятся.\n"
+        "<code>-</code> — убрать описание.",
+        reply_markup=_cancel_kb(f"a_var:{vid}"),
+    )
+    await call.answer()
+
+
+@router.message(AdminUI.set_var_desc)
+async def msg_var_desc(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    vid = data.get("vid")
+    raw = (message.html_text or message.text or "").strip()
+    async with db.session() as session:
+        v = await session.get(Variant, vid)
+        if v:
+            v.description = None if raw == "-" else raw
+            await session.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("⬅️ К номиналу", f"a_var:{vid}"))
+    await message.answer("✅ Описание номинала обновлено", reply_markup=kb.as_markup())
 
 
 @router.callback_query(F.data.startswith("a_setrub:"))

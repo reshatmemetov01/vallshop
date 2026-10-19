@@ -452,6 +452,8 @@ async def cb_variant(
                 f"Цена: <b>{price_str}</b>\n"
                 f"Количество: от {smm_min} до {hi}"
             )
+            if variant.description:
+                caption += f"\n\n{variant.description}"
         else:
             out = True
             caption = f"<b>{v_title}</b>\nСтатус: ❌ нет в наличии"

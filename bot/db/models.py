@@ -249,6 +249,8 @@ class Variant(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Описание номинала (показывается покупателю на экране номинала). None/"" — нет.
+    description: Mapped[Optional[str]] = mapped_column(Text)
     # Кастом-эмодзи (custom_emoji_id) для иконки кнопки номинала.
     icon_emoji_id: Mapped[Optional[str]] = mapped_column(String(32))
     # Тексты уровня номинала (приоритетнее товара). None = наследовать, "" = скрыть.
