@@ -236,6 +236,37 @@ async def bulk_create_fzr_variants(
     return added, skipped
 
 
+async def move_product(
+    session: AsyncSession, product_id: int, direction: int
+) -> bool:
+    """Переместить товар в каталоге на одну позицию вверх (-1) / вниз (+1).
+
+    Переставляет ``sort_order`` среди соседей того же уровня (``parent_id``).
+    Предварительно нормализует ``sort_order`` соседей к их текущим индексам —
+    это корректно работает даже когда у всех товаров ``sort_order == 0``.
+    Возвращает ``True``, если перестановка произошла.
+    """
+    prod = await session.get(Product, product_id)
+    if prod is None:
+        return False
+    siblings = await list_products(
+        session, only_active=False, parent_id=prod.parent_id
+    )
+    for i, p in enumerate(siblings):
+        if p.sort_order != i:
+            p.sort_order = i
+    idx = next((i for i, p in enumerate(siblings) if p.id == product_id), None)
+    if idx is None:
+        return False
+    swap = idx + direction
+    if swap < 0 or swap >= len(siblings):
+        return False
+    a, b = siblings[idx], siblings[swap]
+    a.sort_order, b.sort_order = b.sort_order, a.sort_order
+    await session.commit()
+    return True
+
+
 async def bulk_create_smm_variants(
     session: AsyncSession,
     product_id: int,

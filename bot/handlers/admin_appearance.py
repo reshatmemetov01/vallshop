@@ -13,6 +13,8 @@ from fazercard import FazerCardClient
 
 from ..config import BotConfig
 from ..db import Database
+from ..db.models import Product
+from ..services import catalog as catalog_service
 from ..services import menu as menu_service
 from ..services import paymethods as paymethods_service
 
@@ -57,6 +59,7 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
     kb.row(_btn("📝 Тексты экранов", "ap_texts"))
     for m, title in menu_service.MENU_TITLES.items():
         kb.row(_btn(f"📋 Кнопки: {title}", f"ap_menu:{m}"))
+    kb.row(_btn("🛍 Кнопки каталога", "apc_home"))
     kb.row(_btn("💳 Способы оплаты", "pm_home"))
     kb.row(_btn("♻️ Перевести Цены", "ap_migprices"))
     kb.row(_btn("♻️ Сбросить к стандартному", "ap_reset"))
@@ -209,6 +212,138 @@ async def cb_down(call: CallbackQuery, db: Database) -> None:
     await menu_service.move(db, key, +1)
     await _show_button(call, key)
     await call.answer("⬇️")
+
+
+# ── Кнопки каталога: цвет, ширина, порядок (Product.*) ────────────────────────
+_CAT_STYLE_CYCLE = ["primary", "success", "danger"]
+_CAT_COLOR = {"primary": "🔵 синий", "success": "🟢 зелёный", "danger": "🔴 красный"}
+_CAT_DOT = {"primary": "🔵", "success": "🟢", "danger": "🔴"}
+
+
+def _cat_dot(style) -> str:
+    return _CAT_DOT.get(style or "primary", "🔵")
+
+
+async def _show_catalog_list(call: CallbackQuery, db: Database, parent_id) -> None:
+    async with db.session() as session:
+        products = await catalog_service.list_products(
+            session, only_active=False, parent_id=parent_id
+        )
+        parent = await session.get(Product, parent_id) if parent_id else None
+    kb = InlineKeyboardBuilder()
+    for p in products:
+        width = "↔️" if p.full_width else "▭"
+        hidden = "" if p.is_active else " 🚫"
+        kb.row(_btn(f"{_cat_dot(p.button_style)} {width} {p.title}{hidden}", f"apc_btn:{p.id}"))
+    back = f"apc_btn:{parent.id}" if parent else "ap_home"
+    kb.row(_btn("⬅️ Назад", back))
+    where = f" «{parent.title}»" if parent else ""
+    await call.message.edit_text(
+        f"🛍 <b>Кнопки каталога{where}</b>\n\n"
+        "Порядок сверху вниз = порядок в каталоге. "
+        "🔵/🟢/🔴 — цвет, ↔️ — во всю строку, ▭ — половина, 🚫 — скрыт.\n\n"
+        "Выберите кнопку для настройки:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _show_catalog_btn(call: CallbackQuery, db: Database, pid: int) -> None:
+    async with db.session() as session:
+        p = await session.get(Product, pid)
+        if not p:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        children = await catalog_service.list_products(
+            session, only_active=False, parent_id=pid
+        )
+        parent_id = p.parent_id
+        title = p.title
+        style = p.button_style or "primary"
+        full_width = bool(p.full_width)
+        has_children = bool(children)
+    fw_state = "↔️ во всю строку" if full_width else "▭ половина строки"
+    caption = (
+        f"🛍 <b>Кнопка каталога</b>\n"
+        f"Товар: <b>{title}</b>\n"
+        f"Цвет: {_CAT_COLOR.get(style, style)}\n"
+        f"Ширина: {fw_state}"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn(f"🎨 Цвет: {_CAT_COLOR.get(style, style)}", f"apc_color:{pid}"))
+    fw_lbl = "▭ Сделать половину" if full_width else "↔️ Во всю строку"
+    kb.row(_btn(fw_lbl, f"apc_fw:{pid}"))
+    kb.row(_btn("🔼 Вверх", f"apc_up:{pid}"), _btn("🔽 Вниз", f"apc_dn:{pid}"))
+    if has_children:
+        kb.row(_btn("📂 Кнопки внутри", f"apc_cat:{pid}"))
+    back = f"apc_cat:{parent_id}" if parent_id else "apc_home"
+    kb.row(_btn("⬅️ Назад", back))
+    await call.message.edit_text(caption, reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data == "apc_home")
+async def cb_cat_home(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+    await state.clear()
+    await _show_catalog_list(call, db, None)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("apc_cat:"))
+async def cb_cat_level(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    await _show_catalog_list(call, db, pid)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("apc_btn:"))
+async def cb_cat_btn(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    await _show_catalog_btn(call, db, pid)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("apc_color:"))
+async def cb_cat_color(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        p = await session.get(Product, pid)
+        if p:
+            cur = p.button_style if p.button_style in _CAT_STYLE_CYCLE else "primary"
+            p.button_style = _CAT_STYLE_CYCLE[
+                (_CAT_STYLE_CYCLE.index(cur) + 1) % len(_CAT_STYLE_CYCLE)
+            ]
+            await session.commit()
+    await _show_catalog_btn(call, db, pid)
+    await call.answer("Цвет изменён")
+
+
+@router.callback_query(F.data.startswith("apc_fw:"))
+async def cb_cat_fw(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        p = await session.get(Product, pid)
+        if p:
+            p.full_width = not bool(p.full_width)
+            await session.commit()
+    await _show_catalog_btn(call, db, pid)
+    await call.answer("Ширина изменена")
+
+
+@router.callback_query(F.data.startswith("apc_up:"))
+async def cb_cat_up(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        moved = await catalog_service.move_product(session, pid, -1)
+    await _show_catalog_btn(call, db, pid)
+    await call.answer("⬆️" if moved else "Уже вверху")
+
+
+@router.callback_query(F.data.startswith("apc_dn:"))
+async def cb_cat_down(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        moved = await catalog_service.move_product(session, pid, +1)
+    await _show_catalog_btn(call, db, pid)
+    await call.answer("⬇️" if moved else "Уже внизу")
 
 
 # ── Текст кнопки ─────────────────────────────────────────────────────────────
