@@ -30,6 +30,7 @@ from ..db import Database
 from ..db.models import Order, Product, StockItem, StockStatus, User, Variant
 from ..services import catalog as catalog_service
 from ..services import smartprice as smartprice_service
+from ..services import smm as smm_service
 from ..services import stock as stock_service
 from ..services.pricing import (
     _fmt_rub, margin, price_label, price_rub_value, round_price_rub, sale_price, usd_to_rub,
@@ -863,10 +864,47 @@ async def cb_prod_fullwidth(call: CallbackQuery, db: Database, config: BotConfig
 
 
 # ── Номинал (вариация) ───────────────────────────────────────────────────────
+def _smm_variant_card(v: Variant, config: BotConfig):
+    """Карточка SMM-номинала (soc-proof): закуп/цена за 1000, наценка, лимиты."""
+    vflag = "🟢 активен" if v.is_active else "🔴 выключен"
+    rate = Decimal(v.smm_rate or 0)  # закуп ₽ за 1000
+    markup = v.markup_percent if v.markup_percent is not None else config.default_markup_percent
+    sell = smm_service.sell_per_1000_rub(rate, markup)
+    lo, hi = int(v.smm_min or 1), int(v.smm_max or 0)
+    caption = (
+        f"🧩 <b>{v.title}</b> ({vflag})\n"
+        f"Поставщик: SMM soc-proof · услуга #{v.smm_service}\n"
+        f"Закуп: <b>{texts.rub(rate)}</b> за 1000\n"
+        f"💰 Цена клиенту: <b>{texts.rub(sell)}</b> за 1000\n"
+        f"Наценка: {_fmt_rub(markup)}%\n"
+        f"Количество: от {lo} до {hi or '—'}\n"
+        f"Наличие: под заказ (цена плавает от закупа, авто ±1%)"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("✏️ Название номинала", f"a_vtitle:{v.id}"))
+    kb.row(_btn("📈 Наценка", f"a_setmarkup:{v.id}"))
+    kb.row(
+        _btn("🙂 Эмодзи", f"a_vemoji:{v.id}"),
+        _btn("🔁 Вкл/выкл", f"a_tvar:{v.id}"),
+    )
+    kb.row(
+        _btn("⏳ Текст ожидания", f"a_txt:v:pend:{v.id}"),
+        _btn("✅ Текст выдачи", f"a_txt:v:deliv:{v.id}"),
+    )
+    kb.row(_btn("🗑 Удалить номинал", f"a_vdel:{v.id}"))
+    kb.row(_btn("⬅️ Назад", f"a_prod:{v.product_id}"))
+    return caption, kb.as_markup(), v.product_id
+
+
 async def _variant_card(session, config: BotConfig, variant_id: int):
     v = await session.get(Variant, variant_id)
     if not v:
         return None, None, None
+
+    # SMM (soc-proof): своя карточка — цена за 1000, закуп ₽/1000, лимиты.
+    if v.source == "socproof":
+        return _smm_variant_card(v, config)
+
     in_stock = await stock_service.available_count(session, variant_id)
     price = sale_price(v, config.default_markup_percent)  # USDT (внутр.)
     m = margin(v, config.default_markup_percent)
@@ -2092,8 +2130,9 @@ async def cb_add_variant_smm(call: CallbackQuery, state: FSMContext, soc: SocPro
     await state.set_state(AdminUI.smm_search)
     await call.message.edit_text(
         "🔎 <b>Услуга SMM (soc-proof)</b>\n\n"
-        "Пришлите название или часть — например <code>telegram подписчики</code>, "
-        "<code>просмотры</code>, <code>tiktok</code>.\n"
+        "Пришлите <b>ID услуги</b> (число, напр. <code>707</code>) — ищу по ID, "
+        "или <b>название</b> (<code>telegram подписчики</code>, <code>просмотры</code>) "
+        "— ищу по названию.\n"
         "Показываются только обычные услуги (ссылка + количество).",
         reply_markup=_cancel_kb(f"a_prod:{pid}"),
     )

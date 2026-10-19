@@ -104,6 +104,26 @@ async def fazercard_cost(fzr, variants: List[Variant]) -> Dict[int, "object"]:
     return result
 
 
+async def socproof_available(soc, variants: List[Variant]) -> Dict[int, bool]:
+    """Доступность SMM-услуг у soc-proof: ``{variant_id: есть ли услуга у поставщика}``.
+
+    Сверяет ``smm_service`` каждого SMM-номинала с живым списком услуг. При сбое
+    API возвращает пусто (fail-open) — продажи не блокируем из-за недоступности API.
+    """
+    smm_vs = [
+        v for v in variants
+        if getattr(v, "source", None) == "socproof" and v.smm_service
+    ]
+    if not smm_vs or soc is None or not getattr(soc, "configured", False):
+        return {}
+    try:
+        services = await asyncio.to_thread(soc.services)
+        ids = {int(s.get("id")) for s in services if s.get("id") is not None}
+    except Exception:  # noqa: BLE001 — сбой API не должен ломать каталог
+        return {}
+    return {v.id: (int(v.smm_service) in ids) for v in smm_vs}
+
+
 async def list_products(
     session: AsyncSession,
     *,

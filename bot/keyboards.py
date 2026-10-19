@@ -237,6 +237,15 @@ def variants_kb(
         if src == "vpnresellers":
             # VPN: выдача мгновенная от провайдера, своего стока нет — «под заказ» не показываем.
             note = " · ✅ в наличии"
+        elif src == "socproof":
+            # SMM: показываем просто название + цену, без «в наличии».
+            # «❌ нет в наличии» — только если услуга пропала у поставщика.
+            st = stock.get(v.id, 1)
+            if st is None or st > 0:
+                note = ""
+            else:
+                note = " · ❌ нет в наличии"
+                out = True
         elif src == "fazercard":
             st = stock.get(v.id)
             if st is None:

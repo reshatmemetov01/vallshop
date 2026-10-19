@@ -84,6 +84,22 @@ def test_search_default_only_and_query():
     assert {s["id"] for s in c.search("премиум", only_default=False)} == {2}
 
 
+def test_search_by_id_numeric():
+    rows = [
+        {"service": 707, "name": "TG подписчики", "type": "Default", "rate": "9",
+         "min": 10, "max": 100, "category": "Telegram"},
+        {"service": 452, "name": "TG просмотры 707", "type": "Default", "rate": "3",
+         "min": 10, "max": 100, "category": "Telegram"},
+    ]
+    c, _ = _client(rows)
+    # число → поиск по ID (вхождение), не по названию
+    assert [s["id"] for s in c.search("707")] == [707]
+    # частичный id
+    assert {s["id"] for s in c.search("7")} == {707}
+    # текст → по названию
+    assert {s["id"] for s in c.search("просмотры")} == {452}
+
+
 def test_add_and_status_params():
     c, sess = _client({"order": 42})
     assert c.add(service=707, link="https://t.me/x", quantity=100) == {"order": 42}

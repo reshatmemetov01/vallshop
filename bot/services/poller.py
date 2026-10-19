@@ -262,15 +262,20 @@ async def run_smartprice_poller(
     fzr: FazerCardClient | None = None,
     config: BotConfig | None = None,
     interval: float = 600.0,
+    soc: SocProofClient | None = None,
 ) -> None:
     """Фоновый пересчёт умных цен по живому закупу (порог 1%) + алерты о росте."""
     from ..services import smartprice as smartprice_service
     while True:
         try:
+            admin_ids = config.admin_ids if config else None
             if fzr is not None:
-                admin_ids = config.admin_ids if config else None
                 await smartprice_service.recompute_all(
                     db, fzr, bot=bot, admin_ids=admin_ids
+                )
+            if soc is not None and getattr(soc, "configured", False):
+                await smartprice_service.recompute_socproof(
+                    db, soc, bot=bot, admin_ids=admin_ids
                 )
         except asyncio.CancelledError:
             raise

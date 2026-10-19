@@ -53,13 +53,22 @@ router = Router()
 MAX_QTY_CAP = 50  # верхний предел количества за одну покупку
 
 
+def _owner_price(variant, config: BotConfig) -> Decimal:
+    """Цена владельца (₽). Для SMM (soc-proof) — за 1000 = закуп × (1+наценка/100)."""
+    if getattr(variant, "source", None) == "socproof":
+        mk = variant.markup_percent if variant.markup_percent is not None \
+            else config.default_markup_percent
+        return smm_service.sell_per_1000_rub(variant.smm_rate, mk)
+    return price_rub_value(variant, config.default_markup_percent)
+
+
 async def _client_price(session, merchant_id: int, variant, config: BotConfig) -> Decimal:
     """Цена для клиента текущего магазина (для головного — цена владельца).
 
-    Поверх цены владельца (``price_rub_value``) накладывается ценовой слой
-    мерчанта (наценка/фикс + стоп-лосс). Для головного возвращает цену владельца.
+    Поверх цены владельца накладывается ценовой слой мерчанта (наценка/фикс +
+    стоп-лосс). Для головного возвращает цену владельца. SMM — цена за 1000.
     """
-    owner = price_rub_value(variant, config.default_markup_percent)
+    owner = _owner_price(variant, config)
     return await mprice_service.client_price(session, merchant_id, variant.id, owner)
 
 
@@ -288,7 +297,7 @@ async def cb_catalog(
 @router.callback_query(F.data.startswith("prod:"))
 async def cb_product(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
 ) -> None:
     product_id = int(call.data.split(":", 1)[1])
     is_franchise = merchant_id != HEAD_MERCHANT_ID
@@ -347,11 +356,17 @@ async def cb_product(
             return
 
         variants = await catalog_service.list_variants(session, product_id)
-        owner_prices = {v.id: price_rub_value(v, config.default_markup_percent) for v in variants}
+        owner_prices = {v.id: _owner_price(v, config) for v in variants}
         client_prices = await mprice_service.client_prices(session, merchant_id, owner_prices)
-        prices = {
-            vid: (texts.rub(p) if p > 0 else "—") for vid, p in client_prices.items()
-        }
+        _smm_ids = {v.id for v in variants if v.source == "socproof"}
+        prices = {}
+        for vid, p in client_prices.items():
+            if p <= 0:
+                prices[vid] = "—"
+            elif vid in _smm_ids:
+                prices[vid] = f"{texts.rub(p)}/1000"
+            else:
+                prices[vid] = texts.rub(p)
         stock = await stock_service.counts_by_variant(session, [v.id for v in variants])
         v_ov = await mcatalog_service.overrides_map(
             session, merchant_id, mcatalog_service.VARIANT, [v.id for v in variants]
@@ -364,6 +379,9 @@ async def cb_product(
     # Живой сток FazerCard (под заказ — только у LioGames/своего стока).
     stock = dict(stock)
     stock.update(await catalog_service.fazercard_stock(fzr, variants))
+    # SMM soc-proof: 1 — услуга есть у поставщика (под заказ), 0 — пропала.
+    for vid, ok in (await catalog_service.socproof_available(soc, variants)).items():
+        stock[vid] = 1 if ok else 0
 
     caption = f"{prod_emoji} <b>{p_title}</b>"
     if p_desc:
@@ -385,7 +403,7 @@ async def cb_product(
 @router.callback_query(F.data.startswith("var:"))
 async def cb_variant(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
 ) -> None:
     await state.clear()  # сбросить незавершённый сбор данных топапа (в т.ч. отмену)
     variant_id = int(call.data.split(":", 1)[1])
@@ -413,12 +431,35 @@ async def cb_variant(
         in_stock = await stock_service.available_count(session, variant_id)
         ondemand = variant.source == "fazercard"
         is_vpn = variant.source == "vpnresellers"
+        is_smm = variant.source == "socproof"
+        smm_min = int(variant.smm_min or 1)
+        smm_max = int(variant.smm_max or 0)
         back = f"prod:{variant.product_id}"
         if ondemand:
             fz = await catalog_service.fazercard_stock(fzr, [variant])
             in_stock = fz.get(variant.id)  # int (реальный сток) или None (неизвестно)
 
     out = False
+    # SMM: просто название + цена за 1000, без «в наличии». «Нет в наличии» —
+    # только если услуга пропала у поставщика.
+    if is_smm:
+        av = await catalog_service.socproof_available(soc, [variant])
+        if av.get(variant_id, True):
+            price_str = f"{texts.rub(client_price)} за 1000" if client_price > 0 else "—"
+            hi = smm_max or "—"
+            caption = (
+                f"<b>{v_title}</b>\n"
+                f"Цена: <b>{price_str}</b>\n"
+                f"Количество: от {smm_min} до {hi}"
+            )
+        else:
+            out = True
+            caption = f"<b>{v_title}</b>\nСтатус: ❌ нет в наличии"
+        markup = kb.out_of_stock_kb(back) if out else kb.buy_kb(variant_id, back=back)
+        await render(call, banner="catalog", caption=caption, reply_markup=markup)
+        await call.answer()
+        return
+
     if is_vpn:
         note = "в наличии ✅ (выдача сразу после оплаты)"
     elif ondemand:
@@ -506,7 +547,7 @@ async def _render_quantity(
 @router.callback_query(F.data.startswith("buy:"))
 async def cb_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext, soc: SocProofClient = None, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
 ) -> None:
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -1288,7 +1329,7 @@ async def msg_smm_link(
 @router.callback_query(SmmFlow.confirming, F.data == "smmbuy")
 async def cb_smm_buy(
     call: CallbackQuery, db: Database, config: BotConfig,
-    state: FSMContext, soc: SocProofClient = None, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
 ) -> None:
     data = await state.get_data()
     vid = data.get("vid")

@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from typing import List, Optional
 
 from sqlalchemy import select
@@ -130,6 +131,86 @@ async def recompute_all(db: Database, fzr, *, bot=None, admin_ids=None) -> list:
                 await notify_service.notify_admins(bot, admin_ids, "\n".join(lines))
             except Exception:  # noqa: BLE001
                 log.warning("Не удалось отправить алерт о падении цен")
+    return changes
+
+
+async def recompute_socproof(db: Database, soc, *, bot=None, admin_ids=None) -> list:
+    """SMM soc-proof: сверить закуп (₽/1000) каждой услуги с живым и обновить.
+
+    Цена SMM = ``закуп × (1+наценка/100)``, поэтому достаточно обновить ``smm_rate``
+    — цена пересчитается автоматически везде. Порог 1%: при изменении закупа > 1%
+    обновляем закуп и шлём админу алерт (рост/падение). Работает для всех
+    SMM-номиналов без ручного включения.
+    """
+    from . import smm as smm_service
+    if soc is None or not getattr(soc, "configured", False):
+        return []
+    try:
+        services = await asyncio.to_thread(soc.services, force=True)
+    except Exception:  # noqa: BLE001
+        log.warning("soc-proof: не удалось получить услуги для пересчёта цен")
+        return []
+    rate_map = {}
+    for s in services:
+        try:
+            rate_map[int(s.get("id"))] = Decimal(str(s.get("rate") or "0"))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+
+    changes: list = []
+    ups: list = []
+    downs: list = []
+    async with db.session() as session:
+        variants = list(
+            await session.scalars(select(Variant).where(Variant.source == "socproof"))
+        )
+        if not variants:
+            return []
+        for v in variants:
+            if not v.smm_service:
+                continue
+            live = rate_map.get(int(v.smm_service))
+            if live is None or live <= 0:
+                continue  # услуга пропала — это обрабатывает «наличие», цену не трогаем
+            old = Decimal(v.smm_rate or 0)
+            mk = v.markup_percent if v.markup_percent is not None else Decimal("0")
+            if old <= 0:
+                v.smm_rate = live
+                continue
+            if abs(live - old) / old > TOLERANCE:
+                old_sell = smm_service.sell_per_1000_rub(old, mk)
+                new_sell = smm_service.sell_per_1000_rub(live, mk)
+                v.smm_rate = live
+                changes.append((v.id, v.title, old_sell, new_sell))
+                (ups if live > old else downs).append((v.title, old_sell, new_sell, old, live))
+        await session.commit()
+
+    if (ups or downs) and bot is not None and admin_ids:
+        from . import notify as notify_service
+        if ups:
+            lines = ["📈 <b>SMM: цены выросли (поднялся закуп):</b>", ""]
+            for title, old, new, oc, nc in ups:
+                pct = (new - old) / old * 100 if old else Decimal(0)
+                lines.append(
+                    f"• {title}: {old:.2f} → {new:.2f} ₽/1000 (+{pct:.1f}%)\n"
+                    f"   закуп: {oc:.2f} → {nc:.2f} ₽/1000"
+                )
+            try:
+                await notify_service.notify_admins(bot, admin_ids, "\n".join(lines))
+            except Exception:  # noqa: BLE001
+                log.warning("Не удалось отправить SMM-алерт о росте цен")
+        if downs:
+            lines = ["📉 <b>SMM: цены упали (снизился закуп):</b>", ""]
+            for title, old, new, oc, nc in downs:
+                pct = (old - new) / old * 100 if old else Decimal(0)
+                lines.append(
+                    f"• {title}: {old:.2f} → {new:.2f} ₽/1000 (−{pct:.1f}%)\n"
+                    f"   закуп: {oc:.2f} → {nc:.2f} ₽/1000"
+                )
+            try:
+                await notify_service.notify_admins(bot, admin_ids, "\n".join(lines))
+            except Exception:  # noqa: BLE001
+                log.warning("Не удалось отправить SMM-алерт о падении цен")
     return changes
 
 

@@ -515,7 +515,7 @@ def _order_line(order, vtitle: str) -> str:
 @router.callback_query(F.data == "smmrefresh")
 async def cb_smm_refresh(
     call: CallbackQuery, db: Database, config: BotConfig,
-    soc: SocProofClient = None, merchant_id: int = HEAD_MERCHANT_ID,
+    merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
 ) -> None:
     """Обновить статусы активных SMM-заказов клиента по запросу."""
     if soc is None or not getattr(soc, "configured", False):

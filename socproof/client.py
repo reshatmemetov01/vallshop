@@ -186,13 +186,20 @@ class SocProofClient:
     def search(
         self, query: str, *, only_default: bool = True, limit: int = 40
     ) -> List[Dict[str, Any]]:
-        """Поиск услуг по названию/категории (подстрока, без регистра)."""
+        """Поиск услуг. Число → по ID услуги (вхождение), текст → по названию/категории."""
         q = (query or "").strip().lower()
+        numeric = q.isdigit()
         out: List[Dict[str, Any]] = []
         for s in self.services():
             if only_default and s["type"] != "Default":
                 continue
-            if not q or q in s["name"].lower() or q in s["category"].lower() or q == str(s["id"]):
+            if not q:
+                match = True
+            elif numeric:
+                match = q in str(s["id"])
+            else:
+                match = q in s["name"].lower() or q in s["category"].lower()
+            if match:
                 out.append(s)
             if len(out) >= limit:
                 break
