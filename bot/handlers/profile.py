@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal, InvalidOperation
+from html import escape as _esc
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -51,7 +52,8 @@ class TopUpFlow(StatesGroup):
     waiting_network = State()
 
 
-def _status_ru(status: str) -> str:
+def _status_ru(status) -> str:
+    key = str(getattr(status, "value", status))  # строка или OrderStatus-enum
     return {
         "completed": "✅ выполнен",
         "created": "🕒 создаётся",
@@ -59,10 +61,11 @@ def _status_ru(status: str) -> str:
         "paid": "💳 оплачен",
         "fulfilling": "⏳ выдаётся",
         "failed": "⚠️ ошибка",
+        "needs_action": "⚠️ в обработке",
         "expired": "❌ просрочен",
         "refunded": "↩️ возврат",
         "pending": "⏳ ожидает",
-    }.get(str(status), str(status))
+    }.get(key, key)
 
 
 async def _profile_caption(
@@ -454,99 +457,153 @@ async def cb_my_orders(
             .join(Variant, Variant.id == Order.variant_id)
             .where(Order.user_id == call.from_user.id, Order.merchant_id == merchant_id)
             .order_by(Order.id.desc())
-            .limit(15)
+            .limit(20)
         )
         items = rows.all()
 
-    has_active_smm = any(
-        o.supplier == "socproof" and o.status == OrderStatus.FULFILLING
-        for o, _ in items
-    )
+    b = InlineKeyboardBuilder()
     if not items:
         caption = texts.MY_ORDERS_TITLE + "\n\n" + texts.NO_ORDERS
     else:
-        lines = [texts.MY_ORDERS_TITLE, ""]
+        caption = texts.MY_ORDERS_TITLE + "\n\nВыберите заказ, чтобы посмотреть детали:"
         for order, vtitle in items:
             try:
-                lines.append(_order_line(order, vtitle))
-            except Exception:  # noqa: BLE001 — один «кривой» заказ не ломает весь список
-                lines.append(f"#{order.id} · {vtitle}")
-        caption = "\n".join(lines)
-
-    markup = kb.back_profile_kb()
-    if has_active_smm:
-        try:
-            b = InlineKeyboardBuilder()
-            b.row(InlineKeyboardButton(text="🔄 Обновить статусы", callback_data="smmrefresh"))
-            for row in markup.inline_keyboard:
-                b.row(*row)
-            markup = b.as_markup()
-        except Exception:  # noqa: BLE001 — без кнопки обновления, но список покажем
-            markup = kb.back_profile_kb()
-    await render(call, banner="profile", caption=caption, reply_markup=markup)
+                label = _order_button_label(order, vtitle)
+            except Exception:  # noqa: BLE001 — «кривой» заказ не ломает список
+                label = f"{vtitle}"
+            b.row(InlineKeyboardButton(text=label, callback_data=f"order:{order.id}"))
+    b.row(InlineKeyboardButton(text="⬅️ В профиль", callback_data="profile"))
+    await render(call, banner="profile", caption=caption, reply_markup=b.as_markup())
     await call.answer()
 
 
-def _order_line(order, vtitle: str) -> str:
-    """Строка заказа для списка «Мои заказы» (SMM — с количеством и прогрессом)."""
+def _order_fields(order) -> dict:
+    """Безопасно распарсить fields_json SMM-заказа в словарь."""
+    try:
+        parsed = json.loads(order.fields_json) if order.fields_json else {}
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _order_status_emoji(order) -> str:
+    s = order.status
+    if s == OrderStatus.COMPLETED:
+        return "✅"
+    if s == OrderStatus.FULFILLING:
+        return "🚀" if order.supplier == "socproof" else "⏳"
+    if s == OrderStatus.REFUNDED:
+        return "↩️"
+    if s in (OrderStatus.FAILED, OrderStatus.NEEDS_ACTION):
+        return "⚠️"
+    return "🕒"
+
+
+def _order_button_label(order, vtitle: str) -> str:
+    """Короткая подпись кнопки заказа в списке (без нумерации)."""
     total = Decimal(order.price_usd or 0) * (order.quantity or 1)
+    name = vtitle if len(vtitle) <= 26 else vtitle[:25] + "…"
+    extra = ""
+    if order.supplier == "socproof" and order.status == OrderStatus.FULFILLING:
+        prog = _order_fields(order).get("progress")
+        if isinstance(prog, int):
+            extra = f" · {prog}%"
+    return f"{_order_status_emoji(order)} {name} · {texts.rub(total)}{extra}"
+
+
+def _order_detail_caption(order, vtitle: str) -> str:
+    """Подробности заказа для экрана деталей."""
+    total = Decimal(order.price_usd or 0) * (order.quantity or 1)
+    name = _esc(vtitle)
+    lines = [f"🧾 <b>{name}</b>", f"Заказ: <code>#{order.id}</code>"]
     if order.supplier == "socproof":
-        f = {}
-        try:
-            parsed = json.loads(order.fields_json) if order.fields_json else {}
-            if isinstance(parsed, dict):
-                f = parsed
-        except (ValueError, TypeError):
-            pass
+        f = _order_fields(order)
         qty = f.get("quantity") or order.quantity or "?"
+        lines.append(f"Количество: <b>{qty}</b>")
+        lines.append(f"Сумма: <b>{texts.rub(total)}</b>")
+        link = f.get("link")
+        if link:
+            lines.append(f"Ссылка: {_esc(str(link))}")
         if order.status == OrderStatus.FULFILLING:
             st = smm_service.status_label(f.get("status"))
             prog = f.get("progress")
-            st += f" · {prog}%" if isinstance(prog, int) else ""
+            lines.append(f"Статус: {st}" + (f" · {prog}%" if isinstance(prog, int) else ""))
+            rem = f.get("remains")
+            if isinstance(rem, int) and isinstance(qty, int):
+                lines.append(f"Выполнено: <b>{qty - rem}</b> из <b>{qty}</b>")
         elif order.status == OrderStatus.REFUNDED:
-            st = "↩️ Возврат"
-        elif order.status == OrderStatus.COMPLETED and order.fail_reason and "частично" in order.fail_reason:
-            st = "⚠️ Частично (с возвратом)"
+            lines.append("Статус: ↩️ <b>возврат</b> (деньги возвращены на баланс)")
+        elif (order.status == OrderStatus.COMPLETED and order.fail_reason
+              and "частично" in order.fail_reason):
+            lines.append("Статус: ⚠️ <b>частично выполнен</b> (часть возвращена на баланс)")
         else:
-            st = _status_ru(order.status)
-        return f"#{order.id} · {vtitle} · {qty} шт · {texts.rub(total)} · {st}"
+            lines.append(f"Статус: {_order_status_emoji(order)} {_status_ru(order.status)}")
+    else:
+        lines.append(f"Количество: <b>{order.quantity or 1}</b>")
+        lines.append(f"Сумма: <b>{texts.rub(total)}</b>")
+        lines.append(f"Статус: {_order_status_emoji(order)} {_status_ru(order.status)}")
+        if order.status == OrderStatus.COMPLETED and order.delivery_code:
+            codes = _esc("\n".join(order.delivery_code.splitlines()))
+            lines.append(f"\nВыдача (нажмите, чтобы скопировать):\n<code>{codes}</code>")
+    if order.created_at:
+        dt = order.created_at + timedelta(hours=3)  # МСК
+        lines.append(f"\n🗓 {dt.strftime('%d.%m.%Y %H:%M')} (МСК)")
+    return "\n".join(lines)
 
-    line = (
-        f"#{order.id} · {vtitle} ×{order.quantity or 1} · "
-        f"{texts.rub(total)} · {_status_ru(order.status)}"
-    )
-    if order.status == OrderStatus.COMPLETED and order.delivery_code:
-        codes = ", ".join(order.delivery_code.splitlines())
-        line += f"\n   коды: <code>{codes}</code>"
-    return line
+
+async def _show_order_detail(call, db, order_id, merchant_id) -> bool:
+    """Отрисовать детали заказа. Возвращает False, если заказ не найден."""
+    async with db.session() as session:
+        order = await session.get(Order, order_id)
+        if not order or order.user_id != call.from_user.id or order.merchant_id != merchant_id:
+            return False
+        variant = await session.get(Variant, order.variant_id)
+        vtitle = variant.title if variant else "Товар"
+        caption = _order_detail_caption(order, vtitle)
+        is_smm_active = order.supplier == "socproof" and order.status == OrderStatus.FULFILLING
+    b = InlineKeyboardBuilder()
+    if is_smm_active:
+        b.row(InlineKeyboardButton(text="🔄 Обновить статус", callback_data=f"ordref:{order_id}"))
+    b.row(InlineKeyboardButton(text="⬅️ К заказам", callback_data="myorders"))
+    await render(call, banner="profile", caption=caption, reply_markup=b.as_markup())
+    return True
 
 
-@router.callback_query(F.data == "smmrefresh")
-async def cb_smm_refresh(
+@router.callback_query(F.data.startswith("order:"))
+async def cb_order_detail(
+    call: CallbackQuery, db: Database, config: BotConfig,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    order_id = int(call.data.split(":", 1)[1])
+    if not await _show_order_detail(call, db, order_id, merchant_id):
+        await call.answer("Заказ не найден", show_alert=True)
+        return
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("ordref:"))
+async def cb_order_refresh(
     call: CallbackQuery, db: Database, config: BotConfig,
     merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
 ) -> None:
-    """Обновить статусы активных SMM-заказов клиента по запросу."""
+    """Обновить статус одного SMM-заказа по запросу клиента."""
+    order_id = int(call.data.split(":", 1)[1])
     if soc is None or not getattr(soc, "configured", False):
-        await call.answer("Обновление недоступно", show_alert=True)
+        await call.answer("Обновление сейчас недоступно", show_alert=True)
         return
     async with db.session() as session:
-        active = list(await session.scalars(
-            select(Order).where(
-                Order.user_id == call.from_user.id,
-                Order.merchant_id == merchant_id,
-                Order.supplier == "socproof",
-                Order.status == OrderStatus.FULFILLING,
-            )
-        ))
-        for order in active:
+        order = await session.get(Order, order_id)
+        if (order and order.user_id == call.from_user.id
+                and order.merchant_id == merchant_id
+                and order.supplier == "socproof"
+                and order.status == OrderStatus.FULFILLING):
             try:
                 await order_service.settle_socproof(session, order, soc)
-            except Exception:  # noqa: BLE001 — один сбой не рушит обновление
-                pass
-        await session.commit()
-    await call.answer("Статусы обновлены ✅")
-    await cb_my_orders(call, db, config, merchant_id)
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                await session.rollback()
+    await _show_order_detail(call, db, order_id, merchant_id)
+    await call.answer("Обновлено ✅")
 
 
 @router.callback_query(F.data == "mytopups")

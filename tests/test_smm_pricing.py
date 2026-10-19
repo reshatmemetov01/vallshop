@@ -98,10 +98,11 @@ async def test_recompute_ignores_small_change(db):
         assert (await s.get(Variant, vid)).smm_rate == Decimal("100.0000")
 
 
-def test_order_line_robust_to_bad_fields_json():
-    """Регрессия: «Мои заказы» не падают, если fields_json не словарь/пустой."""
+def test_order_views_robust_to_bad_fields_json():
+    """Регрессия: кнопка и детали заказа не падают при «кривом» fields_json."""
     import json
-    from bot.handlers.profile import _order_line
+    from datetime import datetime
+    from bot.handlers.profile import _order_button_label, _order_detail_caption
     from bot.db.models import OrderStatus
 
     class O:
@@ -109,14 +110,19 @@ def test_order_line_robust_to_bad_fields_json():
             self.id = 1; self.price_usd = Decimal("1.01"); self.quantity = 1
             self.supplier = "socproof"; self.status = OrderStatus.FULFILLING
             self.fail_reason = None; self.delivery_code = None; self.fields_json = None
+            self.created_at = datetime(2026, 10, 19, 17, 0)
             self.__dict__.update(k)
 
     # список вместо словаря — раньше крашило AttributeError
-    assert "Быстрые" in _order_line(O(fields_json=json.dumps([{"a": 1}])), "Быстрые")
+    assert "Быстрые" in _order_button_label(O(fields_json=json.dumps([{"a": 1}])), "Быстрые")
+    assert "Быстрые" in _order_detail_caption(O(fields_json=json.dumps([{"a": 1}])), "Быстрые")
     # None fields_json
-    assert "Быстрые" in _order_line(O(fields_json=None), "Быстрые")
-    # price None
-    assert "0 ₽" in _order_line(O(price_usd=None), "Быстрые")
+    assert "Быстрые" in _order_button_label(O(fields_json=None), "Быстрые")
+    # price None → 0 ₽
+    assert "0 ₽" in _order_button_label(O(price_usd=None), "Быстрые")
+    # кнопка с прогрессом
+    lbl = _order_button_label(O(fields_json=json.dumps({"progress": 60})), "Быстрые")
+    assert "60%" in lbl
 
 
 @pytest.mark.asyncio
