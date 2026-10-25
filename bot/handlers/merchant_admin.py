@@ -204,8 +204,11 @@ async def msg_setdef(message: Message, db: Database, state: FSMContext,
 
 # ── Навигация по каталогу для ценообразования ─────────────────────────────────
 async def _show_products(call: CallbackQuery, db: Database, parent_id: int | None) -> None:
+    # Кабинет только у франшиз (merchant_id>0) → скрываем head_only-товары.
     async with db.session() as s:
-        products = await catalog_service.list_products(s, parent_id=parent_id)
+        products = await catalog_service.list_products(
+            s, parent_id=parent_id, exclude_head_only=True
+        )
     kb = InlineKeyboardBuilder()
     for p in products:
         kb.row(_b(f"{p.title}", f"ma_prod:{p.id}"))
@@ -230,7 +233,11 @@ async def cb_prod(call: CallbackQuery, db: Database, config: BotConfig,
                   merchant_id: int = HEAD_MERCHANT_ID) -> None:
     pid = int(call.data.split(":", 1)[1])
     async with db.session() as s:
-        children = await catalog_service.list_children(s, pid)
+        product = await catalog_service.get_product(s, pid)
+        if not product or product.head_only:
+            await call.answer("Товар недоступен", show_alert=True)
+            return
+        children = await catalog_service.list_children(s, pid, exclude_head_only=True)
         if children:
             # подкатегории — углубляемся
             kb = InlineKeyboardBuilder()

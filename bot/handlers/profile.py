@@ -370,12 +370,12 @@ async def msg_topup_amount(
 async def cb_topup_check(
     call: CallbackQuery, db: Database, config: BotConfig, provider: PaymentProvider,
     payhot: PaymentProvider = None, paydex: PaymentProvider = None,
-    bots_by_merchant: dict = None,
+    bots_by_merchant: dict = None, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     topup_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
         topup = await session.get(TopUp, topup_id)
-        if not topup or topup.user_id != call.from_user.id:
+        if not topup or topup.user_id != call.from_user.id or topup.merchant_id != merchant_id:
             await call.answer("Пополнение не найдено", show_alert=True)
             return
 

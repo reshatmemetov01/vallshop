@@ -171,9 +171,20 @@ async def deliver(bot, db: Database, bc_id: int) -> tuple[int, int]:
 
 
 # ── Клики по кнопкам поста ──────────────────────────────────────────────────
-async def record_click(db: Database, broadcast_id: int, btn_idx: int, user_id: int) -> None:
-    """Учесть клик по кнопке поста (инкремент счётчика для пользователя)."""
+async def record_click(
+    db: Database, broadcast_id: int, btn_idx: int, user_id: int,
+    merchant_id: Optional[int] = None,
+) -> None:
+    """Учесть клик по кнопке поста (инкремент счётчика для пользователя).
+
+    Если передан ``merchant_id`` — засчитываем только для рассылки своего
+    магазина (защита от накрутки чужих счётчиков поддельным callback'ом).
+    """
     async with db.session() as s:
+        if merchant_id is not None:
+            bc = await s.get(Broadcast, broadcast_id)
+            if bc is None or bc.merchant_id != merchant_id:
+                return
         row = await s.get(
             BroadcastClick,
             {"broadcast_id": broadcast_id, "btn_idx": btn_idx, "user_id": user_id},

@@ -408,7 +408,7 @@ async def cb_variant(
     await state.clear()  # сбросить незавершённый сбор данных топапа (в т.ч. отмену)
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, variant_id)
+        variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active:
             await call.answer("Недоступно", show_alert=True)
             return
@@ -422,7 +422,7 @@ async def cb_variant(
         await _start_stars(call, db, state)
         return
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, variant_id)
+        variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         client_price = await _client_price(session, merchant_id, variant, config)
         v_ov = await mcatalog_service.get_override(
             session, merchant_id, mcatalog_service.VARIANT, variant_id
@@ -494,7 +494,7 @@ async def _render_quantity(
     variant_id: int, qty: int, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, variant_id)
+        variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active:
             await call.answer("Недоступно", show_alert=True)
             return
@@ -553,7 +553,7 @@ async def cb_buy(
 ) -> None:
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, variant_id)
+        variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         needs_fields = bool(variant and variant.is_active and _needs_fields(variant))
         is_steam = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "steam")
         is_stars = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "stars")
@@ -713,7 +713,7 @@ async def cb_topup_confirm(
     data = await state.get_data()
     vid, answers = data["vid"], data["answers"]
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, vid)
+        variant = await catalog_service.get_variant(session, vid, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active:
             await state.clear()
             await call.answer("Недоступно", show_alert=True)
@@ -965,7 +965,7 @@ async def cb_steam_buy(
     owner_price = Decimal(data.get("owner_price", data.get("price", "0")))
     cost_usd = data.get("cost_usd", "0")
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, vid)
+        variant = await catalog_service.get_variant(session, vid, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active:
             await state.clear()
             await call.answer("Недоступно", show_alert=True)
@@ -1156,7 +1156,7 @@ async def cb_stars_buy(
     owner_price = Decimal(data.get("owner_price", data.get("price", "0")))
     cost_usd = data.get("cost_usd", "0")
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, vid)
+        variant = await catalog_service.get_variant(session, vid, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active:
             await state.clear()
             await call.answer("Недоступно", show_alert=True)
@@ -1256,7 +1256,7 @@ async def _start_smm(
     variant_id: int, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, variant_id)
+        variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active or variant.source != "socproof":
             await call.answer("Недоступно", show_alert=True)
             return
@@ -1338,7 +1338,7 @@ async def cb_smm_buy(
     qty = int(data.get("qty", 0))
     link = data.get("link", "")
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, vid)
+        variant = await catalog_service.get_variant(session, vid, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active or variant.source != "socproof":
             await state.clear()
             await call.answer("Недоступно", show_alert=True)
@@ -1412,7 +1412,7 @@ async def cb_confirm(
     variant_id, qty = int(vid), int(n)
 
     async with db.session() as session:
-        variant = await catalog_service.get_variant(session, variant_id)
+        variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
         if not variant or not variant.is_active:
             await call.answer("Недоступно", show_alert=True)
             return

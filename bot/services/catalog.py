@@ -581,11 +581,18 @@ async def reparent_product(
     return True, "ok"
 
 
-async def get_variant(session: AsyncSession, variant_id: int) -> Optional[Variant]:
+async def get_variant(
+    session: AsyncSession, variant_id: int, *, exclude_head_only: bool = False
+) -> Optional[Variant]:
     # Жадно подгружаем product, чтобы обращение к variant.product не вызывало
     # ленивую загрузку в async-контексте (SQLAlchemy async её не допускает).
-    return await session.scalar(
+    v = await session.scalar(
         select(Variant)
         .where(Variant.id == variant_id)
         .options(selectinload(Variant.product))
     )
+    # В боте франшизы номинал товара, помеченного «только для головного»
+    # (head_only), недоступен — даже прямым callback'ом (не только скрытием кнопки).
+    if v is not None and exclude_head_only and v.product is not None and v.product.head_only:
+        return None
+    return v

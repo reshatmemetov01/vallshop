@@ -35,7 +35,7 @@ async def cb_channel_post_click(
         await call.answer()
         return
     target = parts[3] if len(parts) > 3 else ""
-    await broadcasts_service.record_click(db, pid, idx, call.from_user.id)
+    await broadcasts_service.record_click(db, pid, idx, call.from_user.id, merchant_id=merchant_id)
     try:
         me = await call.bot.me()
         payload = f"s{target}" if target else "open"

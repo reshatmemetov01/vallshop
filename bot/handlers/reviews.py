@@ -35,11 +35,14 @@ def _stars(rating: int) -> str:
 
 # ── Оставить отзыв ────────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("review:"))
-async def cb_review(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_review(
+    call: CallbackQuery, db: Database, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
     order_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
         order = await session.get(Order, order_id)
-        if not order or order.user_id != call.from_user.id:
+        if not order or order.user_id != call.from_user.id or order.merchant_id != merchant_id:
             await call.answer("Заказ не найден", show_alert=True)
             return
         if order.status != OrderStatus.COMPLETED:
@@ -77,7 +80,7 @@ async def msg_review_text(
     await state.clear()
     async with db.session() as session:
         order = await session.get(Order, order_id)
-        if not order or order.user_id != message.from_user.id:
+        if not order or order.user_id != message.from_user.id or order.merchant_id != merchant_id:
             await message.answer("Заказ не найден.")
             return
         variant = await session.get(Variant, order.variant_id)

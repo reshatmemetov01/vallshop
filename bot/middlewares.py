@@ -55,7 +55,10 @@ class ClickTrackingMiddleware(BaseMiddleware):
                 user = data.get("event_from_user")
                 if db is not None and user is not None:
                     from .services import broadcasts as broadcasts_service
-                    await broadcasts_service.record_click(db, int(bid), int(idx), user.id)
+                    await broadcasts_service.record_click(
+                        db, int(bid), int(idx), user.id,
+                        merchant_id=data.get("merchant_id"),
+                    )
             except Exception:  # noqa: BLE001 — учёт клика не должен ломать навигацию
                 log.exception("Не удалось учесть клик рассылки (data=%s)", d)
             # Переписываем событие на реальный раздел (модели aiogram неизменяемы).
