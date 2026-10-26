@@ -68,3 +68,11 @@ async def test_catalog_and_prices(seeded):
 async def test_unknown_product_404(seeded):
     async with _client() as c:
         assert (await c.get("/api/catalog/999999")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_storefront_page_served(seeded):
+    async with _client() as c:
+        r = await c.get("/")
+        assert r.status_code == 200
+        assert "VallShop" in r.text and "/api/catalog" in r.text

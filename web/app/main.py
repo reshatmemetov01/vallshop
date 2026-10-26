@@ -9,10 +9,11 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from .config import settings
-from .routers import catalog
+from .routers import catalog, pages
 
 app = FastAPI(title="VallShop Web API", version="0.1.0")
 app.include_router(catalog.router)
+app.include_router(pages.router)
 
 
 @app.get("/healthz")
