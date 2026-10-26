@@ -1,0 +1,10 @@
+# VallShop публичный сайт — отдельный сервис (FastAPI).
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+SQLAlchemy>=2.0,<2.1
+aiosqlite>=0.19
+asyncpg>=0.29            # Postgres (Phase 0: включаем вместо SQLite)
+pydantic>=2.9,<3
+passlib[bcrypt]>=1.7     # хеш паролей (Phase 1)
+python-jose[cryptography]>=3.3   # JWT (Phase 1)
+httpx>=0.27             # тесты + вызовы провайдеров

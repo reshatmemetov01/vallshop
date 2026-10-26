@@ -54,12 +54,9 @@ MAX_QTY_CAP = 50  # верхний предел количества за одн
 
 
 def _owner_price(variant, config: BotConfig) -> Decimal:
-    """Цена владельца (₽). Для SMM (soc-proof) — за 1000 = закуп × (1+наценка/100)."""
-    if getattr(variant, "source", None) == "socproof":
-        mk = variant.markup_percent if variant.markup_percent is not None \
-            else config.default_markup_percent
-        return smm_service.sell_per_1000_rub(variant.smm_rate, mk)
-    return price_rub_value(variant, config.default_markup_percent)
+    """Цена владельца (₽). Общий расчёт для бота и сайта (SMM — за 1000)."""
+    from ..services.pricing import owner_price_rub
+    return owner_price_rub(variant, config.default_markup_percent)
 
 
 async def _client_price(session, merchant_id: int, variant, config: BotConfig) -> Decimal:

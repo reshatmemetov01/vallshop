@@ -83,6 +83,20 @@ def price_rub_value(
     return usd_to_rub(sale_price(variant, default_markup_percent))
 
 
+def owner_price_rub(variant: Variant, default_markup_percent: Decimal = Decimal("0")) -> Decimal:
+    """Цена владельца (₽) для ЛЮБОГО источника, включая SMM.
+
+    Единый источник правды для бота и сайта. Для SMM (soc-proof) — цена за 1000
+    = закуп × (1 + наценка/100); для остальных — ``price_rub_value``.
+    """
+    if getattr(variant, "source", None) == "socproof":
+        from . import smm as smm_service  # ленивый импорт (без циклов)
+        mk = variant.markup_percent if variant.markup_percent is not None \
+            else default_markup_percent
+        return smm_service.sell_per_1000_rub(variant.smm_rate, mk)
+    return price_rub_value(variant, default_markup_percent)
+
+
 def price_label(variant: Variant, default_markup_percent: Decimal = Decimal("0")) -> str:
     """Короткая цена для кнопки/карточки клиента — в рублях."""
     rub = price_rub_value(variant, default_markup_percent)

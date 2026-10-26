@@ -1,0 +1,23 @@
+# Публичный сайт VallShop — отдельный деплой от бота.
+# Запуск:   docker compose -f docker-compose.web.yml up -d --build
+# Остановка: docker compose -f docker-compose.web.yml down
+#
+# На старте делит тот же SQLite-том с ботом (./data). Это временно:
+# для продакшена рекомендуется Postgres (общий для бота и сайта) — тогда
+# оба сервиса указывают DATABASE_URL на postgres (см. заготовку в docker-compose.yml).
+services:
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////app/data/vallshop.db
+      DEFAULT_MARKUP_PERCENT: "0"
+      SHOP_CURRENCY: USDT
+      WEB_BASE_URL: https://shop.vallshop.com
+      # Phase 1: WEB_JWT_SECRET, SMTP_*, BOT_TOKEN (для Telegram Login Widget)
+    volumes:
+      - ./data:/app/data          # та же БД, что у бота (на старте SQLite)
+    ports:
+      - "127.0.0.1:8090:8090"     # nginx проксирует домен сайта сюда
