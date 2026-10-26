@@ -12,6 +12,6 @@ router = APIRouter()
 _INDEX = Path(__file__).resolve().parents[2] / "static" / "index.html"
 
 
-@router.get("/")
+@router.api_route("/", methods=["GET", "HEAD"])
 async def index() -> FileResponse:
     return FileResponse(_INDEX)
