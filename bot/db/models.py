@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -729,3 +730,27 @@ class BonusDropMessage(Base):
     message_id: Mapped[int] = mapped_column(Integer)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class WebAccount(Base):
+    """Аккаунт публичного сайта (email+пароль, опционально привязан к Telegram).
+
+    Кошелёк (баланс/заказы) хранится в строке ``User`` с ``merchant_id=0``:
+    ``wallet_user_id`` указывает на неё. При входе через Telegram и связывании
+    аккаунтов кошелёк Telegram становится главным (балансы складываются,
+    история объединяется) — см. сервис связывания.
+    """
+
+    __tablename__ = "web_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Telegram user id (если вошёл/связал через Telegram), иначе None.
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, index=True)
+    # Кошелёк аккаунта: User.id при merchant_id=0 (баланс/заказы). None — ещё не создан.
+    wallet_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, index=True)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
