@@ -151,5 +151,5 @@ def _result(variant: Variant, order, items: list) -> dict:
         out["message"] = "Готово! Ваши коды ниже."
     else:
         out["kind"] = "pending"
-        out["message"] = "Заказ оформлен. Коды появятся в разделе «Мои заказы»."
+        out["message"] = "Заказ оформлен. Выдача появится в разделе «Мои заказы»."
     return out

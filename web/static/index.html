@@ -61,6 +61,20 @@
   .okmsg{color:#9fe8bd;font-weight:600;margin-bottom:8px}
   .copybtn{margin-top:8px;background:var(--panel2);border:1px solid var(--line);color:var(--text);
     border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
+  .orow{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:.15s}
+  .orow:hover{border-color:var(--accent)}
+  .orow .ot{font-weight:600;flex:1 1 auto;min-width:0}
+  .orow .od{color:var(--muted);font-size:13px}
+  .st{font-size:12px;padding:3px 9px;border-radius:999px;white-space:nowrap;border:1px solid var(--line)}
+  .st.done{color:#bff3d2;background:#0f2f1e;border-color:#1e5a37}
+  .st.work{color:#ffe0bf;background:#2f2314;border-color:#5a3a22}
+  .st.bad{color:#ffd0d2;background:#2f1314;border-color:#5a2122}
+  .st.ref{color:#cdbff3;background:#1e1a2f;border-color:#3a2f5a}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .kv .k{color:var(--muted);font-size:14px}.kv .v{font-weight:600}
+  .bar2{height:8px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:10px}
+  .bar2 i{display:block;height:100%;background:var(--accent)}
   .loginbtn{background:var(--accent);color:#1a0f07;padding:7px 15px;border-radius:999px;font-weight:700}
   .auth button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
     padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
@@ -107,6 +121,16 @@
   <div id="crumbs" class="crumbs"></div>
   <div id="content"><div class="state">Загрузка каталога…</div></div>
 </main>
+
+<div id="ordovl" class="ovl">
+  <div class="modal">
+    <h3 id="ordtitle">Заказ</h3>
+    <div id="ordbody"></div>
+    <div class="row">
+      <button class="cancel" onclick="closeOrder()">Закрыть</button>
+    </div>
+  </div>
+</div>
 
 <div id="buyovl" class="ovl">
   <div class="modal">
@@ -252,6 +276,7 @@ async function initAuth(){
     const link = me.telegram_linked ? "" :
       '<a class="loginbtn" href="/login" style="font-size:13px;padding:6px 12px">+ Telegram</a>';
     el.innerHTML = `${bal}<button class="topup" onclick="openTopup()">Пополнить</button>`
+      + `<button onclick="showOrders()">Мои заказы</button>`
       + `<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
   }catch(e){
     localStorage.removeItem("vs_token");
@@ -386,7 +411,7 @@ function showBuyResult(d){
     html += `<div class="codebox"><a href="${esc(d.link)}" style="color:var(--accent2)">${esc(d.link)}</a></div>`
       + `<button class="copybtn" onclick="copyText(${JSON.stringify(d.link)})">Скопировать ссылку</button>`;
   }else{
-    html += `<div class="hint">Статус и детали — в разделе «Мои заказы» в боте.</div>`;
+    html += `<a href="#" class="copybtn" onclick="closeBuy();openOrder(${d.order_id});return false;">Открыть заказ в «Мои заказы»</a>`;
   }
   $("buyresult").innerHTML = html;
 }
@@ -407,6 +432,85 @@ async function refreshVariants(productId){
 
 document.getElementById("buyqty").addEventListener("input", updateBuyTotal);
 document.getElementById("buyovl").addEventListener("click", (e)=>{ if(e.target.id==="buyovl") closeBuy(); });
+
+// ── Мои заказы ───────────────────────────────────────────────────────────────
+function _stClass(s){
+  if(s==="completed") return "done";
+  if(s==="refunded") return "ref";
+  if(s==="failed"||s==="needs_action"||s==="expired") return "bad";
+  return "work";
+}
+function _fmtDate(iso){
+  if(!iso) return "";
+  try{ return new Date(iso).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return iso; }
+}
+async function showOrders(){
+  const token = localStorage.getItem("vs_token");
+  if(!token){ location.href="/login"; return; }
+  stack = [];
+  crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
+  content.innerHTML = '<div class="state">Загрузка…</div>';
+  try{
+    const r = await fetch("/api/orders", {headers:{Authorization:"Bearer "+token}});
+    if(!r.ok) throw 0;
+    const data = await r.json();
+    if(!data.orders.length){ content.innerHTML = '<div class="state">У вас пока нет заказов.</div>'; return; }
+    content.innerHTML = '<div class="vlist">' + data.orders.map(orderRow).join("") + '</div>';
+  }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить заказы.</div>'; }
+}
+function orderRow(o){
+  const prog = (typeof o.progress === "number") ? ` · ${o.progress}%` : "";
+  return `<div class="orow" onclick="openOrder(${o.id})">
+    <div class="ot">${esc(o.title)}<div class="od">#${o.id} · ${esc(_fmtDate(o.created_at))}</div></div>
+    <div class="price">${rub(o.total_rub)}</div>
+    <span class="st ${_stClass(o.status)}">${esc(o.status_label)}${prog}</span>
+  </div>`;
+}
+async function openOrder(id){
+  const token = localStorage.getItem("vs_token");
+  $("ordtitle").textContent = "Заказ #" + id;
+  $("ordbody").innerHTML = '<div class="hint">Загрузка…</div>';
+  $("ordovl").classList.add("show");
+  try{
+    const r = await fetch("/api/orders/"+id, {headers:{Authorization:"Bearer "+token}});
+    if(!r.ok) throw 0;
+    renderOrderDetail(await r.json());
+  }catch(e){ $("ordbody").innerHTML = '<div class="mmsg">Не удалось загрузить заказ.</div>'; }
+}
+function closeOrder(){ $("ordovl").classList.remove("show"); }
+function renderOrderDetail(o){
+  $("ordtitle").textContent = o.title;
+  let h = "";
+  const kv = (k,v)=>`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  h += kv("Заказ", "#"+o.id);
+  h += kv("Количество", o.quantity);
+  h += kv("Сумма", rub(o.total_rub));
+  h += kv("Статус", `<span class="st ${_stClass(o.status)}">${esc(o.status_label)}</span>`);
+  if(o.smm){
+    if(o.smm.link) h += kv("Ссылка", `<a href="${esc(o.smm.link)}" style="color:var(--accent2)">ссылка</a>`);
+    if(typeof o.smm.progress === "number"){
+      h += kv("Выполнено", (o.smm.done!=null && o.smm.quantity!=null) ? `${o.smm.done} из ${o.smm.quantity}` : o.smm.progress+"%");
+      h += `<div class="bar2"><i style="width:${o.smm.progress}%"></i></div>`;
+    }
+  }
+  if(o.note) h += `<div class="hint" style="margin-top:10px">${esc(o.note)}</div>`;
+  if(o.codes && o.codes.length){
+    const text = o.codes.join("\n");
+    h += `<div class="okmsg" style="margin-top:12px">Выдача:</div><div class="codebox">${esc(text)}</div>`
+      + `<button class="copybtn" onclick="copyText(${JSON.stringify(text)})">Скопировать</button>`;
+  }
+  if(o.vpn_link){
+    h += `<div class="okmsg" style="margin-top:12px">Ссылка на подписку VPN:</div>`
+      + `<div class="codebox"><a href="${esc(o.vpn_link)}" style="color:var(--accent2)">${esc(o.vpn_link)}</a></div>`
+      + `<button class="copybtn" onclick="copyText(${JSON.stringify(o.vpn_link)})">Скопировать</button>`;
+  }
+  if(o.status!=="completed" && !o.codes && !o.vpn_link && !o.smm){
+    h += `<div class="hint" style="margin-top:12px">Заказ обрабатывается. Обновите страницу позже.</div>`;
+  }
+  $("ordbody").innerHTML = h;
+}
+document.getElementById("ordovl").addEventListener("click", (e)=>{ if(e.target.id==="ordovl") closeOrder(); });
 
 initAuth();
 goHome();
