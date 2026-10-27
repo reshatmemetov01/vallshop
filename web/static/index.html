@@ -141,6 +141,10 @@
       <input id="buyuname" type="text" autocomplete="off" placeholder="username (без @)">
       <div class="hint">Зачисление придёт на этот Telegram-аккаунт.</div>
     </div>
+    <div id="buylinkwrap" style="display:none">
+      <label>Ссылка для накрутки</label>
+      <input id="buylink" type="text" autocomplete="off" placeholder="https://t.me/... или ссылка на пост/профиль">
+    </div>
     <div id="buyqtywrap">
       <label id="buyqtylabel">Количество</label>
       <input id="buyqty" type="number" inputmode="numeric" min="1" step="1" value="1">
@@ -371,8 +375,11 @@ function openBuy(id){
   // @username — для Звёзд/Премиум
   $("buyunamewrap").style.display = (kind==="stars"||kind==="premium") ? "" : "none";
   $("buyuname").value = "";
-  // количество — для simple и stars (у vpn/premium скрыто, кол-во = 1)
-  const showQty = (kind==="simple"||kind==="stars");
+  // ссылка — для SMM
+  $("buylinkwrap").style.display = (kind==="smm") ? "" : "none";
+  $("buylink").value = "";
+  // количество — для simple, stars, smm (у vpn/premium скрыто, кол-во = 1)
+  const showQty = (kind==="simple"||kind==="stars"||kind==="smm");
   $("buyqtywrap").style.display = showQty ? "" : "none";
   const q = $("buyqty");
   $("buyqtyhint").textContent = "";
@@ -381,6 +388,12 @@ function openBuy(id){
     $("buyprice").textContent = "Цена рассчитывается по количеству";
     q.value = ""; q.min = 1; q.max = 100000;
     loadStarsLimits();
+  }else if(kind==="smm"){
+    $("buyqtylabel").textContent = "Количество";
+    $("buyprice").textContent = v.price_rub != null ? ("Цена: " + rub(v.price_rub) + " / 1000") : "";
+    const lo = v.smm_min || 1, hi = v.smm_max || 1000000;
+    $("buyqtyhint").textContent = `От ${lo} до ${hi}`;
+    q.value = lo; q.min = lo; q.max = hi;
   }else{
     $("buyqtylabel").textContent = "Количество";
     $("buyprice").textContent = v.price_rub != null ? ("Цена: " + rub(v.price_rub)) : "";
@@ -425,12 +438,18 @@ async function refreshStarsPrice(){
   }catch(e){ $("buytotal").textContent = "Не удалось рассчитать цену."; }
 }
 function updateBuyTotal(){
-  if(buyKind()==="stars"){
+  const k = buyKind();
+  if(k==="stars"){
     clearTimeout(starsTimer);
     starsTimer = setTimeout(refreshStarsPrice, 400);
     return;
   }
   if(!buyVar || buyVar.price_rub == null){ $("buytotal").textContent = ""; return; }
+  if(k==="smm"){
+    // цена указана за 1000 единиц
+    $("buytotal").textContent = "Итого: " + rub(buyVar.price_rub * buyQty() / 1000);
+    return;
+  }
   $("buytotal").textContent = "Итого: " + rub(buyVar.price_rub * buyQty());
 }
 async function doBuy(){
@@ -443,6 +462,13 @@ async function doBuy(){
       $("buymsg").textContent = "Укажите корректный Telegram @username (5–32 символа)."; return;
     }
     fields.telegram_username = u;
+  }
+  if(kind==="smm"){
+    const link = $("buylink").value.trim();
+    if(!link || link.indexOf(" ")>=0 || link.indexOf(".")<0){
+      $("buymsg").textContent = "Пришлите корректную ссылку (например https://t.me/...)."; return;
+    }
+    fields.link = link;
   }
   $("buybtn").disabled = true; $("buymsg").textContent = ""; $("buymsg").className = "mmsg";
   try{

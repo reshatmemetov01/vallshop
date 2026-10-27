@@ -25,6 +25,7 @@ from bot.services import mprice as mprice_service
 from bot.services import orders as order_service
 from bot.services import rates as rates_service
 from bot.services import settings as settings_service
+from bot.services import smm as smm_service
 from bot.services import stars as stars_service
 from bot.services.pricing import owner_price_rub
 
@@ -56,11 +57,13 @@ def _sup() -> dict:
     global _suppliers
     if _suppliers is None:
         from fazercard import FazerCardClient
+        from socproof import SocProofClient
         from vpnresellers import VPNResellersClient
 
         _suppliers = {
             "fazercard": FazerCardClient.from_env(),
             "vpn": VPNResellersClient.from_env(),
+            "soc": SocProofClient.from_env(),
         }
     return _suppliers
 
@@ -78,6 +81,8 @@ def buy_kind(variant: Variant) -> Optional[str]:
         return "vpn"
     if src in ("stock", "liogames"):
         return "simple"
+    if src == "socproof":
+        return "smm"
     if src == "fazercard":
         if variant.fzr_a == "telegram_stars":
             return "stars"
@@ -85,11 +90,18 @@ def buy_kind(variant: Variant) -> Optional[str]:
             return "premium"
         if variant.fzr_kind in _FZR_KINDS:
             return "simple"
-    return None  # socproof (SMM), Steam/topup — позже
+    return None  # Steam/topup — позже
 
 
 def web_buyable(variant: Variant) -> bool:
     return buy_kind(variant) is not None
+
+
+def _smm_link(fields: Optional[dict]) -> str:
+    link = ((fields or {}).get("link") or "").strip()
+    if not link or " " in link or "." not in link:
+        raise CheckoutError("Пришлите корректную ссылку (например https://t.me/...)")
+    return link
 
 
 def _username(fields: Optional[dict]) -> str:
@@ -158,6 +170,8 @@ async def purchase(
     owner_unit_price: Optional[Decimal] = None
     topup_fields: Optional[dict] = None
     display_fields: Optional[list] = None
+    smm_link: Optional[str] = None
+    smm_quantity: Optional[int] = None
 
     if kind == "stars":
         uname = _username(fields)
@@ -187,6 +201,21 @@ async def purchase(
         unit_price = await _unit_price(session, variant)
         topup_fields = {"telegram_username": uname}
         display_fields = [{"label": "Получатель", "value": "@" + uname}]
+    elif kind == "smm":
+        link = _smm_link(fields)
+        smm_n = quantity
+        err = smm_service.validate_quantity(smm_n, variant.smm_min, variant.smm_max)
+        if err:
+            raise CheckoutError(err)
+        owner_1000 = owner_price_rub(variant, settings.default_markup_percent)
+        prices = await mprice_service.client_prices(
+            session, HEAD_MERCHANT_ID, {variant.id: owner_1000}
+        )
+        client_1000 = Decimal(prices.get(variant.id) or 0)
+        unit_price = smm_service.order_total_rub(client_1000, smm_n)      # итог за весь заказ
+        owner_unit_price = smm_service.order_total_rub(owner_1000, smm_n)
+        call_quantity = 1
+        smm_link, smm_quantity = link, smm_n
     else:
         if kind == "vpn":
             call_quantity = 1                     # VPN — одна подписка на заказ
@@ -208,6 +237,9 @@ async def purchase(
             owner_unit_price=owner_unit_price,
             fzr=sup["fazercard"],
             vpn=sup["vpn"],
+            soc=sup["soc"],
+            smm_link=smm_link,
+            smm_quantity=smm_quantity,
             topup_fields=topup_fields,
             public_base_url=cfg.public_base_url,
         )
@@ -247,6 +279,12 @@ def _result(variant: Variant, order, items: list, kind: str) -> dict:
         out["message"] = (
             "Заказ оформлен и отправлен поставщику. Зачисление придёт на "
             "указанный Telegram-аккаунт. Статус — в разделе «Мои заказы»."
+        )
+    elif kind == "smm":
+        out["kind"] = "pending"
+        out["message"] = (
+            "Заказ оформлен. Накрутка запущена — прогресс виден в разделе "
+            "«Мои заказы»."
         )
     elif status == OrderStatus.COMPLETED.value and items:
         out["kind"] = "codes"
