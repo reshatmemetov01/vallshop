@@ -1,4 +1,4 @@
-"""Отдача HTML-витрины (одностраничник, читает /api/catalog)."""
+"""Отдача HTML-страниц сайта (витрина + вход/регистрация)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,21 @@ from fastapi.responses import FileResponse
 
 router = APIRouter()
 
-_INDEX = Path(__file__).resolve().parents[2] / "static" / "index.html"
+_STATIC = Path(__file__).resolve().parents[2] / "static"
+_INDEX = _STATIC / "index.html"
+_AUTH = _STATIC / "auth.html"
 
 
 @router.api_route("/", methods=["GET", "HEAD"])
 async def index() -> FileResponse:
     return FileResponse(_INDEX)
+
+
+@router.get("/login")
+async def login_page() -> FileResponse:
+    return FileResponse(_AUTH)
+
+
+@router.get("/register")
+async def register_page() -> FileResponse:
+    return FileResponse(_AUTH)

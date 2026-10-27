@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VallShop — вход</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --panel2:#1f242d; --line:#2a303a;
+    --text:#e8edf3; --muted:#8b96a5; --accent:#ff7a2f; --accent2:#2fb4a6;
+    --ok:#36c26b; --bad:#e5484d; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;
+    display:flex;flex-direction:column;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+  a{color:var(--accent2);text-decoration:none}
+  header{border-bottom:1px solid var(--line)}
+  .bar{max-width:1000px;margin:0 auto;padding:14px 16px;display:flex;align-items:center;gap:12px}
+  .logo{font-weight:800;font-size:20px}.logo span{color:var(--accent)}
+  main{flex:1;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+  .card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:24px}
+  .tabs{display:flex;gap:6px;background:var(--panel2);border-radius:10px;padding:4px;margin-bottom:18px}
+  .tabs button{flex:1;background:none;border:none;color:var(--muted);padding:9px;border-radius:8px;
+    cursor:pointer;font-weight:600;font-size:15px}
+  .tabs button.active{background:var(--accent);color:#1a0f07}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
+  input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;color:var(--text);font-size:15px}
+  input:focus{outline:none;border-color:var(--accent)}
+  .btn{width:100%;margin-top:18px;background:var(--accent);color:#1a0f07;border:none;
+    border-radius:10px;padding:12px;font-weight:700;font-size:15px;cursor:pointer}
+  .btn:disabled{opacity:.6;cursor:default}
+  .tg{margin-top:12px;background:var(--panel2);color:var(--muted);border:1px solid var(--line);
+    width:100%;border-radius:10px;padding:11px;font-weight:600;cursor:not-allowed}
+  .msg{margin-top:14px;font-size:14px;min-height:20px}
+  .msg.err{color:#ffb3b5}.msg.ok{color:#9fe8bd}
+  .foot{text-align:center;color:var(--muted);font-size:13px;margin-top:16px}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px}
+</style>
+</head>
+<body>
+<header><div class="bar"><a href="/" class="logo">Vall<span>Shop</span></a></div></header>
+<main>
+  <div class="card">
+    <div class="tabs">
+      <button id="tab-login" class="active" onclick="setTab('login')">Вход</button>
+      <button id="tab-reg" onclick="setTab('reg')">Регистрация</button>
+    </div>
+
+    <form id="form" onsubmit="return submitForm(event)">
+      <label>Email</label>
+      <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+      <label>Пароль</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      <div id="pwhint" class="hint" style="display:none">Минимум 8 символов</div>
+      <button id="submit" class="btn" type="submit">Войти</button>
+    </form>
+
+    <button class="tg" title="Появится на следующем этапе" disabled>Войти через Telegram · скоро</button>
+
+    <div id="msg" class="msg"></div>
+    <div class="foot"><a href="/">← на витрину</a></div>
+  </div>
+</main>
+
+<script>
+const $ = (id)=>document.getElementById(id);
+let tab = "login";
+
+function setTab(t){
+  tab = t;
+  $("tab-login").classList.toggle("active", t==="login");
+  $("tab-reg").classList.toggle("active", t==="reg");
+  $("submit").textContent = t==="login" ? "Войти" : "Создать аккаунт";
+  $("password").setAttribute("autocomplete", t==="login" ? "current-password" : "new-password");
+  $("pwhint").style.display = t==="reg" ? "block" : "none";
+  msg("");
+}
+function msg(text, ok){ const m=$("msg"); m.textContent=text||""; m.className="msg"+(text?(ok?" ok":" err"):""); }
+
+async function submitForm(e){
+  e.preventDefault();
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  const path = tab==="login" ? "/api/auth/login" : "/api/auth/register";
+  $("submit").disabled = true; msg("");
+  try{
+    const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({email, password})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ msg(data.detail || "Ошибка. Попробуйте ещё раз."); $("submit").disabled=false; return false; }
+    localStorage.setItem("vs_token", data.token);
+    msg(tab==="login" ? "Вход выполнен. Перенаправляем…" : "Аккаунт создан. Перенаправляем…", true);
+    setTimeout(()=>{ location.href = "/"; }, 600);
+  }catch(err){ msg("Нет связи с сервером."); $("submit").disabled=false; }
+  return false;
+}
+
+// стартовая вкладка: /register → регистрация
+if(location.pathname.endsWith("/register")) setTab("reg");
+</script>
+</body>
+</html>

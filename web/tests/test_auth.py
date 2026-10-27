@@ -72,3 +72,12 @@ async def test_me_requires_token(db):
     async with _client() as c:
         assert (await c.get("/api/auth/me")).status_code == 401
         assert (await c.get("/api/auth/me", headers={"Authorization": "Bearer nonsense"})).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_page_served(db):
+    async with _client() as c:
+        for path in ("/login", "/register"):
+            r = await c.get(path)
+            assert r.status_code == 200
+            assert "VallShop" in r.text and "/api/auth/" in r.text
