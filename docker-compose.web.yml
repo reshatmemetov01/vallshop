@@ -16,12 +16,16 @@ services:
       context: .
       dockerfile: web/Dockerfile
     restart: unless-stopped
+    # Общий .env с ботом — отсюда берутся BOT_TOKEN (для проверки подписи
+    # Telegram), WEB_JWT_SECRET, TELEGRAM_BOT_USERNAME и прочие секреты.
+    env_file: .env
     environment:
+      # Эти значения ПЕРЕОПРЕДЕЛЯЮТ .env (приоритет у environment),
+      # чтобы сайт смотрел на тот же файл БД внутри контейнера.
       DATABASE_URL: sqlite+aiosqlite:////app/data/vallshop.db
       DEFAULT_MARKUP_PERCENT: "0"
       SHOP_CURRENCY: USDT
       WEB_BASE_URL: https://vallshop.com
-      # Phase 1: WEB_JWT_SECRET, SMTP_*, BOT_TOKEN (для Telegram Login Widget)
     volumes:
       - ./data:/app/data          # та же БД, что у бота (на старте SQLite)
     ports:
