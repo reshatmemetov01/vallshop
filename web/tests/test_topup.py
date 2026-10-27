@@ -110,6 +110,67 @@ async def test_settlement_credits_account_balance(db):
         assert me.json()["balance_rub"] == 500.0
 
 
+class _FakeBolt:
+    """Заглушка BoltUtil без сети: возвращает hosted checkout + крипто-поля."""
+
+    name = "boltutil"
+
+    async def create_invoice(self, *, amount, client_ref, description,
+                             notify_url=None, success_url=None, network=None):
+        from bot.payments.base import Invoice
+        return Invoice(
+            provider_order_id="bolt-" + client_ref,
+            checkout_url="https://pay.bolt/" + client_ref,
+            address="TAddrXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+            network=network or "TRC20",
+            amount=Decimal(amount),
+            currency="USDT",
+        )
+
+
+@pytest.mark.asyncio
+async def test_usdt_topup_converts_and_stores_crypto(db):
+    payments_service._provs()                 # заполнить кэш провайдеров
+    payments_service._providers["bolt"] = _FakeBolt()   # внедрить заглушку
+    async with db.session() as s:
+        acc = await account_service.register(s, "c@c.com", "secret12")
+        await s.commit()
+        acc_id = acc.id
+    async with db.session() as s:
+        acc = await account_service.get_by_id(s, acc_id)
+        topup = await payments_service.create_topup(s, acc, Decimal("500"), "usdt")
+        await s.commit()
+        assert topup.provider == "boltutil"
+        assert topup.currency == "USDT"
+        assert topup.address and topup.checkout_url
+        # 500 ₽ / курс 95 ≈ 5.26 USDT
+        assert topup.pay_amount == Decimal("5.26")
+        assert topup.amount_usd == Decimal("500.00")   # зачислим рубли
+
+
+@pytest.mark.asyncio
+async def test_usdt_below_min_rejected(db):
+    payments_service._provs()
+    payments_service._providers["bolt"] = _FakeBolt()
+    async with db.session() as s:
+        acc = await account_service.register(s, "d@d.com", "secret12")
+        await s.commit()
+        acc_id = acc.id
+    async with db.session() as s:
+        acc = await account_service.get_by_id(s, acc_id)
+        # 50 ₽ / 95 ≈ 0.53 USDT < 1 USDT (минимум BoltUtil)
+        with pytest.raises(payments_service.TopupError, match="минимум"):
+            await payments_service.create_topup(s, acc, Decimal("50"), "usdt")
+
+
+@pytest.mark.asyncio
+async def test_usdt_hidden_when_bolt_not_configured(db):
+    # в тестовом окружении BoltUtil не настроен → usdt не показываем на сайте
+    async with db.session() as s:
+        methods = await payments_service.available_methods(s)
+    assert "usdt" not in {m["id"] for m in methods}
+
+
 @pytest.mark.asyncio
 async def test_cannot_see_other_accounts_topup(db):
     async with _client() as c:
