@@ -53,7 +53,7 @@ def build_root_router() -> Router:
     head_group.callback_query.filter(_HeadOnly())
     for _r in (
         admin.router, admin_ui.router, admin_codes.router, admin_orders.router,
-        admin_reviews.router, admin_appearance.router, admin_referral.router,
+        admin_appearance.router, admin_referral.router,
         admin_merchants.router, admin_stats.router, franchise.router,
         activation.router,  # «Активировать Код» — только у головного
     ):
@@ -62,6 +62,9 @@ def build_root_router() -> Router:
 
     root.include_router(referral.router)
     root.include_router(merchant_admin.router)
+    # Модерация отзывов — во ВСЕХ ботах: доступ и область видимости определяет
+    # собственный фильтр роутера (головной админ — все, владелец франшизы — свои).
+    root.include_router(admin_reviews.router)
     root.include_router(reviews.router)
     root.include_router(bonus_user.router)  # промокод + клик по бонус-дропу (все боты)
     root.include_router(channel_user.router)  # «Проверить подписку» (все боты)
