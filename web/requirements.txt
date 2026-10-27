@@ -7,4 +7,5 @@ asyncpg>=0.29            # Postgres (Phase 0: включаем вместо SQLi
 pydantic>=2.9,<3
 bcrypt>=4.1              # хеш паролей (Phase 1)
 python-jose[cryptography]>=3.3   # JWT (Phase 1)
-httpx>=0.27             # тесты + вызовы провайдеров
+httpx>=0.27             # тесты + вызовы платёжек (PayHot/Paydex/BoltUtil)
+requests>=2.31,<3       # клиенты поставщиков (FazerCard/soc-proof/VPN/LioGames)
