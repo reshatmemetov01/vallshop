@@ -744,8 +744,10 @@ class WebAccount(Base):
     __tablename__ = "web_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    # email/пароль необязательны, если вход только через Telegram (NULL-ы в
+    # unique-индексе допускаются и SQLite, и Postgres — не конфликтуют).
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # Telegram user id (если вошёл/связал через Telegram), иначе None.
     telegram_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, index=True)
