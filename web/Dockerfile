@@ -10,6 +10,11 @@ RUN pip install --no-cache-dir -r /app/web/requirements.txt
 # Общий код с ботом (бизнес-логика, модели) + код сайта.
 COPY bot /app/bot
 COPY web /app/web
+# Пакеты поставщиков — их импортирует bot/services/orders.py (покупка на сайте).
+COPY fazercard /app/fazercard
+COPY socproof /app/socproof
+COPY vpnresellers /app/vpnresellers
+COPY liogames /app/liogames
 
 ENV PYTHONPATH=/app
 EXPOSE 8090

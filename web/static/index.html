@@ -55,6 +55,12 @@
     border-radius:10px;padding:12px 16px;cursor:pointer}
   .modal .mmsg{margin-top:12px;font-size:14px;min-height:18px;color:#ffb3b5}
   .modal .hint{color:var(--muted);font-size:12px;margin-top:6px}
+  .codebox{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;word-break:break-all;
+    white-space:pre-wrap;user-select:all}
+  .okmsg{color:#9fe8bd;font-weight:600;margin-bottom:8px}
+  .copybtn{margin-top:8px;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
   .loginbtn{background:var(--accent);color:#1a0f07;padding:7px 15px;border-radius:999px;font-weight:700}
   .auth button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
     padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
@@ -82,8 +88,10 @@
   .badge{font-size:12px;padding:3px 9px;border-radius:999px;white-space:nowrap}
   .badge.ok{color:#bff3d2;background:#0f2f1e;border:1px solid #1e5a37}
   .badge.bad{color:#ffd0d2;background:#2f1314;border:1px solid #5a2122}
-  .buy{background:var(--accent);color:#1a0f07;border:none;border-radius:10px;
-    padding:9px 16px;font-weight:700;cursor:not-allowed;opacity:.65}
+  .buy{background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:10px;
+    padding:9px 16px;font-weight:700;cursor:not-allowed}
+  .buy.active{background:var(--accent);color:#1a0f07;border:none;cursor:pointer;opacity:1}
+  .buy.active:hover{filter:brightness(1.05)}
   .state{color:var(--muted);padding:40px 0;text-align:center}
   footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);
     padding:20px 0 40px;text-align:center}
@@ -99,6 +107,24 @@
   <div id="crumbs" class="crumbs"></div>
   <div id="content"><div class="state">Загрузка каталога…</div></div>
 </main>
+
+<div id="buyovl" class="ovl">
+  <div class="modal">
+    <h3 id="buytitle">Покупка</h3>
+    <div id="buyprice" class="hint"></div>
+    <div id="buyqtywrap">
+      <label>Количество</label>
+      <input id="buyqty" type="number" inputmode="numeric" min="1" step="1" value="1">
+    </div>
+    <div id="buytotal" class="hint" style="margin-top:8px"></div>
+    <div id="buyresult" style="margin-top:14px"></div>
+    <div class="mmsg" id="buymsg"></div>
+    <div class="row">
+      <button class="cancel" onclick="closeBuy()" id="buycancel">Отмена</button>
+      <button class="pay" id="buybtn" onclick="doBuy()">Купить</button>
+    </div>
+  </div>
+</div>
 
 <div id="ovl" class="ovl">
   <div class="modal">
@@ -123,6 +149,7 @@
 const $ = (id) => document.getElementById(id);
 const content = $("content"), crumbs = $("crumbs");
 let stack = [];  // хлебные крошки: [{id, title}]
+let vmap = {};   // id номинала -> данные (для покупки)
 
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
 
@@ -153,6 +180,7 @@ function productCard(p){
 }
 
 function variantRow(v){
+  vmap[v.id] = v;
   const price = v.price_rub == null ? "—" :
     `${rub(v.price_rub)}${v.per_1000 ? ' <small>/ 1000</small>' : ''}`;
   const badge = v.available
@@ -160,11 +188,19 @@ function variantRow(v){
     : `<span class="badge bad">нет в наличии</span>`;
   const lim = v.per_1000 && v.smm_min ? `<div class="desc">Количество: от ${v.smm_min} до ${v.smm_max||'—'}</div>` : '';
   const desc = v.description ? `<div class="desc">${esc(v.description)}</div>` : '';
+  let btn;
+  if(!v.buyable){
+    btn = `<button class="buy" title="Скоро на сайте" disabled>Скоро</button>`;
+  }else if(!v.available){
+    btn = `<button class="buy" disabled>Нет в наличии</button>`;
+  }else{
+    btn = `<button class="buy active" onclick="openBuy(${v.id})">Купить</button>`;
+  }
   return `<div class="vrow">
     <div class="vt">${esc(v.title)}</div>
     <div class="price">${price}</div>
     ${badge}
-    <button class="buy" title="Покупка появится на следующем этапе" disabled>Купить</button>
+    ${btn}
     ${lim}${desc}
   </div>`;
 }
@@ -282,6 +318,95 @@ async function doTopup(){
 }
 document.getElementById("amount").addEventListener("input", refreshPay);
 document.getElementById("ovl").addEventListener("click", (e)=>{ if(e.target.id==="ovl") closeTopup(); });
+
+// ── Покупка товара ───────────────────────────────────────────────────────────
+let buyVar = null;
+
+function openBuy(id){
+  const token = localStorage.getItem("vs_token");
+  if(!token){ location.href = "/login"; return; }
+  const v = vmap[id];
+  if(!v) return;
+  buyVar = v;
+  $("buytitle").textContent = "Покупка · " + v.title;
+  $("buyprice").textContent = v.price_rub != null ? ("Цена: " + rub(v.price_rub)) : "";
+  $("buyresult").innerHTML = "";
+  $("buymsg").textContent = "";
+  $("buymsg").className = "mmsg";
+  $("buycancel").textContent = "Отмена";
+  $("buybtn").style.display = "";
+  // VPN — всегда 1; для стока ограничиваем количеством в наличии
+  const noQty = v.source === "vpnresellers";
+  $("buyqtywrap").style.display = noQty ? "none" : "";
+  const q = $("buyqty");
+  q.value = 1;
+  q.max = (v.source === "stock" && v.stock) ? v.stock : 999;
+  updateBuyTotal();
+  $("buybtn").disabled = false;
+  $("buyovl").classList.add("show");
+}
+function closeBuy(){ $("buyovl").classList.remove("show"); }
+function buyQty(){ return buyVar && buyVar.source === "vpnresellers" ? 1 : Math.max(1, parseInt($("buyqty").value||"1",10)); }
+function updateBuyTotal(){
+  if(!buyVar || buyVar.price_rub == null){ $("buytotal").textContent = ""; return; }
+  $("buytotal").textContent = "Итого: " + rub(buyVar.price_rub * buyQty());
+}
+async function doBuy(){
+  const token = localStorage.getItem("vs_token");
+  $("buybtn").disabled = true; $("buymsg").textContent = ""; $("buymsg").className = "mmsg";
+  try{
+    const r = await fetch("/api/buy", {method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body: JSON.stringify({variant_id: buyVar.id, quantity: buyQty()})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){
+      $("buymsg").textContent = data.detail || "Не удалось оформить покупку.";
+      if((data.detail||"").indexOf("Недостаточно") >= 0){
+        $("buymsg").innerHTML = esc(data.detail) +
+          ' <a href="#" onclick="closeBuy();openTopup();return false;" style="color:var(--accent)">Пополнить</a>';
+      }
+      $("buybtn").disabled = false;
+      return;
+    }
+    showBuyResult(data);
+    initAuth();                      // обновить баланс в шапке
+    const cur = stack[stack.length-1];
+    if(cur) refreshVariants(cur.id); // обновить остаток в наличии
+  }catch(e){ $("buymsg").textContent = "Нет связи с сервером."; $("buybtn").disabled = false; }
+}
+function showBuyResult(d){
+  $("buybtn").style.display = "none";
+  $("buycancel").textContent = "Закрыть";
+  let html = `<div class="okmsg">${esc(d.message||"Готово!")}</div>`;
+  if(d.kind === "codes" && d.codes){
+    const text = d.codes.join("\n");
+    html += `<div class="codebox" id="codebox">${esc(text)}</div>`
+      + `<button class="copybtn" onclick="copyText(${JSON.stringify(text)})">Скопировать</button>`;
+  }else if(d.kind === "vpn" && d.link){
+    html += `<div class="codebox"><a href="${esc(d.link)}" style="color:var(--accent2)">${esc(d.link)}</a></div>`
+      + `<button class="copybtn" onclick="copyText(${JSON.stringify(d.link)})">Скопировать ссылку</button>`;
+  }else{
+    html += `<div class="hint">Статус и детали — в разделе «Мои заказы» в боте.</div>`;
+  }
+  $("buyresult").innerHTML = html;
+}
+function copyText(t){ navigator.clipboard && navigator.clipboard.writeText(t); }
+
+// тихо перезагрузить список номиналов текущего товара (обновить остатки)
+async function refreshVariants(productId){
+  try{
+    const data = await api("/api/catalog/" + productId);
+    if(data.type === "product"){
+      const rows = data.variants.map(variantRow).join("");
+      if(stack.length && stack[stack.length-1].id === productId)
+        content.innerHTML = rows ? `<div class="vlist">${rows}</div>`
+          : '<div class="state">Нет доступных номиналов.</div>';
+    }
+  }catch(e){}
+}
+
+document.getElementById("buyqty").addEventListener("input", updateBuyTotal);
+document.getElementById("buyovl").addEventListener("click", (e)=>{ if(e.target.id==="buyovl") closeBuy(); });
 
 initAuth();
 goHome();

@@ -16,7 +16,7 @@ from bot.db.base import Base
 from .config import settings
 from .db import database
 from .migrate import ensure_web_accounts_nullable
-from .routers import auth, catalog, pages, topup
+from .routers import auth, buy, catalog, pages, topup
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app = FastAPI(title="VallShop Web API", version="0.1.0", lifespan=lifespan)
 app.include_router(catalog.router)
 app.include_router(auth.router)
 app.include_router(topup.router)
+app.include_router(buy.router)
 app.include_router(pages.router)
 
 
