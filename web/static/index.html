@@ -26,6 +26,35 @@
   .auth .email{color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .auth .bal{color:var(--ok);font-weight:700;background:#0f2f1e;border:1px solid #1e5a37;
     padding:5px 11px;border-radius:999px}
+  .auth .topup{background:var(--accent)!important;color:#1a0f07!important;border:none!important;
+    font-weight:700!important}
+  /* модалка пополнения */
+  .ovl{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;
+    justify-content:center;z-index:20;padding:16px}
+  .ovl.show{display:flex}
+  .modal{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:22px}
+  .modal h3{margin:0 0 16px;font-size:18px}
+  .modal label{display:block;font-size:13px;color:var(--muted);margin:10px 0 6px}
+  .modal input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;color:var(--text);font-size:16px}
+  .modal input:focus{outline:none;border-color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .chip{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px 12px;
+    border-radius:999px;cursor:pointer;font-size:14px}
+  .chip:hover{border-color:var(--accent)}
+  .methods{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .method{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);
+    border-radius:10px;padding:11px 13px;cursor:pointer;font-weight:600}
+  .method.sel{border-color:var(--accent);background:#2a1a0e}
+  .modal .row{display:flex;gap:10px;margin-top:18px}
+  .modal .pay{flex:1;background:var(--accent);color:#1a0f07;border:none;border-radius:10px;
+    padding:12px;font-weight:700;font-size:15px;cursor:pointer}
+  .modal .pay:disabled{opacity:.6;cursor:default}
+  .modal .cancel{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:10px;padding:12px 16px;cursor:pointer}
+  .modal .mmsg{margin-top:12px;font-size:14px;min-height:18px;color:#ffb3b5}
+  .modal .hint{color:var(--muted);font-size:12px;margin-top:6px}
   .loginbtn{background:var(--accent);color:#1a0f07;padding:7px 15px;border-radius:999px;font-weight:700}
   .auth button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
     padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
@@ -71,7 +100,24 @@
   <div id="content"><div class="state">Загрузка каталога…</div></div>
 </main>
 
-<footer class="wrap">VallShop · демо-витрина. Оплата и покупка появятся на следующих этапах.</footer>
+<div id="ovl" class="ovl">
+  <div class="modal">
+    <h3>Пополнить баланс</h3>
+    <label>Сумма, ₽</label>
+    <input id="amount" type="number" inputmode="numeric" min="50" step="1" placeholder="например, 500">
+    <div class="chips" id="chips"></div>
+    <div id="mhint" class="hint"></div>
+    <label>Способ оплаты</label>
+    <div id="methods" class="methods"><div class="hint">Загрузка способов…</div></div>
+    <div class="mmsg" id="mmsg"></div>
+    <div class="row">
+      <button class="cancel" onclick="closeTopup()">Отмена</button>
+      <button class="pay" id="paybtn" onclick="doTopup()" disabled>Перейти к оплате</button>
+    </div>
+  </div>
+</div>
+
+<footer class="wrap">VallShop · покупка товаров появится на следующем этапе.</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -169,13 +215,73 @@ async function initAuth(){
     const bal = `<span class="bal">${rub(me.balance_rub)}</span>`;
     const link = me.telegram_linked ? "" :
       '<a class="loginbtn" href="/login" style="font-size:13px;padding:6px 12px">+ Telegram</a>';
-    el.innerHTML = `${bal}<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
+    el.innerHTML = `${bal}<button class="topup" onclick="openTopup()">Пополнить</button>`
+      + `<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
   }catch(e){
     localStorage.removeItem("vs_token");
     el.innerHTML = '<a class="loginbtn" href="/login">Войти</a>';
   }
 }
 function logout(){ localStorage.removeItem("vs_token"); location.reload(); }
+
+// ── Пополнение баланса ───────────────────────────────────────────────────────
+let topupMethod = null, topupMin = 50, topupMax = 50000;
+
+async function openTopup(){
+  const token = localStorage.getItem("vs_token");
+  if(!token){ location.href = "/login"; return; }
+  $("ovl").classList.add("show");
+  $("mmsg").textContent = "";
+  $("amount").value = "";
+  topupMethod = null;
+  try{
+    const cfg = await api("/api/topup/methods");
+    topupMin = cfg.min; topupMax = cfg.max;
+    $("mhint").textContent = `От ${topupMin} до ${topupMax} ₽`;
+    $("chips").innerHTML = [100,300,500,1000,3000].map(a =>
+      `<span class="chip" onclick="setAmount(${a})">${a} ₽</span>`).join("");
+    if(!cfg.methods.length){
+      $("methods").innerHTML = '<div class="hint">Способы оплаты временно недоступны.</div>';
+      return;
+    }
+    $("methods").innerHTML = cfg.methods.map(m =>
+      `<div class="method" id="m-${m.id}" onclick="selMethod('${m.id}')">${esc(m.label)}</div>`).join("");
+  }catch(e){
+    $("methods").innerHTML = '<div class="hint">Не удалось загрузить способы оплаты.</div>';
+  }
+}
+function closeTopup(){ $("ovl").classList.remove("show"); }
+function setAmount(a){ $("amount").value = a; refreshPay(); }
+function selMethod(id){
+  topupMethod = id;
+  document.querySelectorAll(".method").forEach(e => e.classList.remove("sel"));
+  const el = $("m-"+id); if(el) el.classList.add("sel");
+  refreshPay();
+}
+function refreshPay(){
+  const amt = parseFloat($("amount").value);
+  const ok = topupMethod && amt >= topupMin && amt <= topupMax;
+  $("paybtn").disabled = !ok;
+}
+async function doTopup(){
+  const token = localStorage.getItem("vs_token");
+  const amount = String($("amount").value).trim();
+  $("paybtn").disabled = true; $("mmsg").textContent = "";
+  try{
+    const r = await fetch("/api/topup", {method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body: JSON.stringify({amount, method: topupMethod})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok || !data.checkout_url){
+      $("mmsg").textContent = data.detail || "Не удалось создать счёт.";
+      refreshPay(); return;
+    }
+    // уходим на страницу оплаты провайдера; после оплаты вернёмся на сайт
+    location.href = data.checkout_url;
+  }catch(e){ $("mmsg").textContent = "Нет связи с сервером."; refreshPay(); }
+}
+document.getElementById("amount").addEventListener("input", refreshPay);
+document.getElementById("ovl").addEventListener("click", (e)=>{ if(e.target.id==="ovl") closeTopup(); });
 
 initAuth();
 goHome();
