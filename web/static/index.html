@@ -24,6 +24,8 @@
     border:1px solid #5a3a22;padding:5px 10px;border-radius:999px}
   .auth{margin-left:auto;display:flex;gap:10px;align-items:center;font-size:14px}
   .auth .email{color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .auth .bal{color:var(--ok);font-weight:700;background:#0f2f1e;border:1px solid #1e5a37;
+    padding:5px 11px;border-radius:999px}
   .loginbtn{background:var(--accent);color:#1a0f07;padding:7px 15px;border-radius:999px;font-weight:700}
   .auth button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
     padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
@@ -163,7 +165,11 @@ async function initAuth(){
     const r = await fetch("/api/auth/me", {headers:{Authorization:"Bearer "+token}});
     if(!r.ok) throw 0;
     const me = await r.json();
-    el.innerHTML = `<span class="email">${esc(me.email)}</span><button onclick="logout()">Выйти</button>`;
+    const name = me.email || "Telegram";
+    const bal = `<span class="bal">${rub(me.balance_rub)}</span>`;
+    const link = me.telegram_linked ? "" :
+      '<a class="loginbtn" href="/login" style="font-size:13px;padding:6px 12px">+ Telegram</a>';
+    el.innerHTML = `${bal}<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
   }catch(e){
     localStorage.removeItem("vs_token");
     el.innerHTML = '<a class="loginbtn" href="/login">Войти</a>';

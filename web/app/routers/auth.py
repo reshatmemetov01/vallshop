@@ -32,6 +32,12 @@ class LoginIn(BaseModel):
     password: str
 
 
+@router.get("/config")
+async def public_config() -> dict:
+    """Публичные параметры для фронта (кнопка Telegram показывается только если задано имя бота)."""
+    return {"telegram_bot_username": settings.telegram_bot_username}
+
+
 def _dto(acc: WebAccount) -> dict:
     return {
         "id": acc.id,

@@ -25,6 +25,9 @@ class Settings:
     # Phase 1 (заполним позже): JWT, SMTP, токен бота для Telegram Login Widget.
     jwt_secret: str = _get("WEB_JWT_SECRET", "change-me-in-prod")
     telegram_bot_token: str = _get("BOT_TOKEN", "")
+    # Имя бота (без @) для Telegram Login Widget. Домен сайта должен быть
+    # привязан к этому боту через @BotFather → /setdomain.
+    telegram_bot_username: str = _get("TELEGRAM_BOT_USERNAME", "")
 
 
 settings = Settings()

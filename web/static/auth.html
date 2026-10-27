@@ -38,6 +38,9 @@
   .msg.err{color:#ffb3b5}.msg.ok{color:#9fe8bd}
   .foot{text-align:center;color:var(--muted);font-size:13px;margin-top:16px}
   .hint{color:var(--muted);font-size:12px;margin-top:6px}
+  .orline{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin:16px 0 12px}
+  .orline::before,.orline::after{content:"";flex:1;height:1px;background:var(--line)}
+  .tgwrap{display:flex;justify-content:center;min-height:40px}
 </style>
 </head>
 <body>
@@ -58,7 +61,11 @@
       <button id="submit" class="btn" type="submit">Войти</button>
     </form>
 
-    <button class="tg" title="Появится на следующем этапе" disabled>Войти через Telegram · скоро</button>
+    <div class="orline"><span>или</span></div>
+    <div id="tgwrap" class="tgwrap">
+      <div id="tgbtn"></div>
+      <button class="tg" id="tgsoon" disabled style="display:none">Войти через Telegram · скоро</button>
+    </div>
 
     <div id="msg" class="msg"></div>
     <div class="foot"><a href="/">← на витрину</a></div>
@@ -100,6 +107,41 @@ async function submitForm(e){
 
 // стартовая вкладка: /register → регистрация
 if(location.pathname.endsWith("/register")) setTab("reg");
+
+// вход через Telegram прошёл — отправляем данные виджета на сервер
+window.onTelegramAuth = async function(user){
+  msg("Проверяем Telegram…", true);
+  try{
+    // если пользователь уже вошёл — передаём токен: это привязка, а не новый вход
+    const headers = {"Content-Type":"application/json"};
+    const tok = localStorage.getItem("vs_token");
+    if(tok) headers["Authorization"] = "Bearer " + tok;
+    const r = await fetch("/api/auth/telegram", {method:"POST",
+      headers, body: JSON.stringify(user)});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ msg(data.detail || "Не удалось войти через Telegram."); return; }
+    localStorage.setItem("vs_token", data.token);
+    msg("Вход через Telegram выполнен. Перенаправляем…", true);
+    setTimeout(()=>{ location.href = "/"; }, 600);
+  }catch(err){ msg("Нет связи с сервером."); }
+};
+
+// подгружаем виджет Telegram, только если задано имя бота на сервере
+(async ()=>{
+  try{
+    const cfg = await (await fetch("/api/auth/config")).json();
+    if(!cfg.telegram_bot_username){ $("tgsoon").style.display="block"; return; }
+    const s = document.createElement("script");
+    s.async = true;
+    s.src = "https://telegram.org/js/telegram-widget.js?22";
+    s.setAttribute("data-telegram-login", cfg.telegram_bot_username);
+    s.setAttribute("data-size", "large");
+    s.setAttribute("data-radius", "10");
+    s.setAttribute("data-onauth", "onTelegramAuth(user)");
+    s.setAttribute("data-request-access", "write");
+    $("tgbtn").appendChild(s);
+  }catch(err){ $("tgsoon").style.display="block"; }
+})();
 </script>
 </body>
 </html>
