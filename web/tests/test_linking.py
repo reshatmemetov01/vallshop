@@ -49,6 +49,50 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+# ── Миграция старой схемы web_accounts (email NOT NULL → nullable) ────────────
+@pytest.mark.asyncio
+async def test_migrate_web_accounts_nullable():
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from web.app.migrate import ensure_web_accounts_nullable
+
+    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+    old = (
+        "CREATE TABLE web_accounts (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
+        "email VARCHAR(255) NOT NULL, password_hash VARCHAR(255) NOT NULL, "
+        "email_verified BOOLEAN DEFAULT '0' NOT NULL, telegram_user_id BIGINT, "
+        "wallet_user_id BIGINT, is_blocked BOOLEAN DEFAULT '0' NOT NULL, "
+        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, last_login_at DATETIME)"
+    )
+    async with eng.begin() as c:
+        await c.exec_driver_sql(old)
+        await c.exec_driver_sql(
+            "CREATE UNIQUE INDEX ix_web_accounts_email ON web_accounts(email)"
+        )
+        await c.exec_driver_sql(
+            "INSERT INTO web_accounts (email,password_hash) VALUES ('a@b.com','x')"
+        )
+    async with eng.begin() as c:
+        await c.run_sync(ensure_web_accounts_nullable)
+    async with eng.begin() as c:
+        info = (await c.exec_driver_sql("PRAGMA table_info(web_accounts)")).fetchall()
+        nn = {r[1]: r[3] for r in info}
+        assert nn["email"] == 0 and nn["password_hash"] == 0        # стали nullable
+        row = (await c.exec_driver_sql("SELECT email FROM web_accounts")).fetchone()
+        assert row[0] == "a@b.com"                                  # запись сохранилась
+        # Telegram-аккаунты без email (несколько NULL) — разрешены
+        for tg in (6344910452, 999):
+            await c.exec_driver_sql(
+                "INSERT INTO web_accounts (email,password_hash,telegram_user_id,"
+                f"wallet_user_id) VALUES (NULL,NULL,{tg},{tg})"
+            )
+        cnt = (await c.exec_driver_sql("SELECT COUNT(*) FROM web_accounts")).fetchone()[0]
+        assert cnt == 3
+    async with eng.begin() as c:
+        await c.run_sync(ensure_web_accounts_nullable)              # идемпотентность
+    await eng.dispose()
+
+
 # ── Проверка подписи Telegram ────────────────────────────────────────────────
 def test_verify_login_widget():
     data = _sign({"id": 42, "first_name": "A", "auth_date": int(time.time())})

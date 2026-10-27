@@ -15,6 +15,7 @@ from bot.db.base import Base
 
 from .config import settings
 from .db import database
+from .migrate import ensure_web_accounts_nullable
 from .routers import auth, catalog, pages
 
 
@@ -25,6 +26,9 @@ async def lifespan(app: FastAPI):
     # не должны мигрировать одновременно. create_all не трогает существующие.
     async with database.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Довести web_accounts до nullable email/password_hash (для аккаунтов
+        # через Telegram без email) — если таблица создана старой схемой.
+        await conn.run_sync(ensure_web_accounts_nullable)
     yield
 
 
