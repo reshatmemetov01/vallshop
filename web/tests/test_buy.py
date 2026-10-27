@@ -68,9 +68,11 @@ def test_web_buyable():
     assert checkout_service.web_buyable(mk(source="vpnresellers")) is True
     assert checkout_service.web_buyable(mk(source="fazercard", fzr_kind="gamekey")) is True
     assert checkout_service.web_buyable(mk(source="fazercard", fzr_kind="giftcard")) is True
+    # Telegram Звёзды/Премиум — теперь тоже доступны:
+    assert checkout_service.web_buyable(mk(source="fazercard", fzr_a="telegram_stars")) is True
+    assert checkout_service.web_buyable(mk(source="fazercard", fzr_a="telegram_premium")) is True
     # ещё не на сайте:
     assert checkout_service.web_buyable(mk(source="fazercard", fzr_kind="steam")) is False
-    assert checkout_service.web_buyable(mk(source="fazercard", fzr_a="telegram_stars")) is False
     assert checkout_service.web_buyable(mk(source="socproof")) is False
 
 

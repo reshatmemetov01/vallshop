@@ -18,7 +18,7 @@ from bot.services.pricing import owner_price_rub
 
 from ..config import settings
 from ..db import get_session
-from ..services.checkout import web_buyable
+from ..services.checkout import buy_kind, web_buyable
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
@@ -99,5 +99,7 @@ async def product_detail(product_id: int,
             "description": v.description,
             # Можно ли купить на сайте на этом этапе (иначе кнопка «скоро»).
             "buyable": web_buyable(v),
+            # Как покупать: simple|vpn|premium|stars (форма ввода на фронте).
+            "buy_kind": buy_kind(v),
         })
     return {"type": "product", "product": _product_dto(product), "variants": items}

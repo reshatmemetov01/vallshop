@@ -136,9 +136,15 @@
   <div class="modal">
     <h3 id="buytitle">Покупка</h3>
     <div id="buyprice" class="hint"></div>
+    <div id="buyunamewrap" style="display:none">
+      <label>Telegram @username получателя</label>
+      <input id="buyuname" type="text" autocomplete="off" placeholder="username (без @)">
+      <div class="hint">Зачисление придёт на этот Telegram-аккаунт.</div>
+    </div>
     <div id="buyqtywrap">
-      <label>Количество</label>
+      <label id="buyqtylabel">Количество</label>
       <input id="buyqty" type="number" inputmode="numeric" min="1" step="1" value="1">
+      <div id="buyqtyhint" class="hint"></div>
     </div>
     <div id="buytotal" class="hint" style="margin-top:8px"></div>
     <div id="buyresult" style="margin-top:14px"></div>
@@ -347,42 +353,102 @@ document.getElementById("ovl").addEventListener("click", (e)=>{ if(e.target.id==
 // ── Покупка товара ───────────────────────────────────────────────────────────
 let buyVar = null;
 
+let starsPrice = null, starsMin = 1, starsMax = 10000, starsTimer = null;
+
 function openBuy(id){
   const token = localStorage.getItem("vs_token");
   if(!token){ location.href = "/login"; return; }
   const v = vmap[id];
   if(!v) return;
   buyVar = v;
+  const kind = v.buy_kind || "simple";
+  starsPrice = null;
   $("buytitle").textContent = "Покупка · " + v.title;
-  $("buyprice").textContent = v.price_rub != null ? ("Цена: " + rub(v.price_rub)) : "";
   $("buyresult").innerHTML = "";
-  $("buymsg").textContent = "";
-  $("buymsg").className = "mmsg";
+  $("buymsg").textContent = ""; $("buymsg").className = "mmsg";
   $("buycancel").textContent = "Отмена";
   $("buybtn").style.display = "";
-  // VPN — всегда 1; для стока ограничиваем количеством в наличии
-  const noQty = v.source === "vpnresellers";
-  $("buyqtywrap").style.display = noQty ? "none" : "";
+  // @username — для Звёзд/Премиум
+  $("buyunamewrap").style.display = (kind==="stars"||kind==="premium") ? "" : "none";
+  $("buyuname").value = "";
+  // количество — для simple и stars (у vpn/premium скрыто, кол-во = 1)
+  const showQty = (kind==="simple"||kind==="stars");
+  $("buyqtywrap").style.display = showQty ? "" : "none";
   const q = $("buyqty");
-  q.value = 1;
-  q.max = (v.source === "stock" && v.stock) ? v.stock : 999;
+  $("buyqtyhint").textContent = "";
+  if(kind==="stars"){
+    $("buyqtylabel").textContent = "Количество звёзд";
+    $("buyprice").textContent = "Цена рассчитывается по количеству";
+    q.value = ""; q.min = 1; q.max = 100000;
+    loadStarsLimits();
+  }else{
+    $("buyqtylabel").textContent = "Количество";
+    $("buyprice").textContent = v.price_rub != null ? ("Цена: " + rub(v.price_rub)) : "";
+    q.value = 1; q.min = 1;
+    q.max = (v.source==="stock" && v.stock) ? v.stock : 999;
+  }
   updateBuyTotal();
-  $("buybtn").disabled = false;
+  $("buybtn").disabled = (kind==="stars");   // Звёзды — до ввода корректного количества
   $("buyovl").classList.add("show");
 }
 function closeBuy(){ $("buyovl").classList.remove("show"); }
-function buyQty(){ return buyVar && buyVar.source === "vpnresellers" ? 1 : Math.max(1, parseInt($("buyqty").value||"1",10)); }
+function buyKind(){ return (buyVar && buyVar.buy_kind) || "simple"; }
+function buyQty(){
+  const k = buyKind();
+  if(k==="vpn"||k==="premium") return 1;
+  return Math.max(1, parseInt($("buyqty").value||"1",10));
+}
+async function loadStarsLimits(){
+  try{
+    const d = await api("/api/buy/stars-quote");
+    starsMin = d.min; starsMax = d.max;
+    $("buyqtyhint").textContent = `От ${starsMin} до ${starsMax} звёзд`;
+    $("buyqty").min = starsMin; $("buyqty").max = starsMax;
+  }catch(e){}
+}
+async function refreshStarsPrice(){
+  const q = parseInt($("buyqty").value||"0",10);
+  starsPrice = null;
+  if(!q){ $("buytotal").textContent = ""; $("buybtn").disabled = true; return; }
+  if(q < starsMin || q > starsMax){
+    $("buytotal").textContent = `Введите от ${starsMin} до ${starsMax}`;
+    $("buybtn").disabled = true; return;
+  }
+  $("buytotal").textContent = "Расчёт цены…"; $("buybtn").disabled = true;
+  try{
+    const d = await api("/api/buy/stars-quote?quantity=" + q);
+    if(d.price_rub != null){
+      starsPrice = d.price_rub;
+      $("buytotal").textContent = "Итого: " + rub(d.price_rub);
+      $("buybtn").disabled = false;
+    }else{ $("buytotal").textContent = `Введите от ${d.min} до ${d.max}`; }
+  }catch(e){ $("buytotal").textContent = "Не удалось рассчитать цену."; }
+}
 function updateBuyTotal(){
+  if(buyKind()==="stars"){
+    clearTimeout(starsTimer);
+    starsTimer = setTimeout(refreshStarsPrice, 400);
+    return;
+  }
   if(!buyVar || buyVar.price_rub == null){ $("buytotal").textContent = ""; return; }
   $("buytotal").textContent = "Итого: " + rub(buyVar.price_rub * buyQty());
 }
 async function doBuy(){
   const token = localStorage.getItem("vs_token");
+  const kind = buyKind();
+  const fields = {};
+  if(kind==="stars"||kind==="premium"){
+    const u = $("buyuname").value.trim().replace(/^@/,"");
+    if(!/^[A-Za-z0-9_]{5,32}$/.test(u)){
+      $("buymsg").textContent = "Укажите корректный Telegram @username (5–32 символа)."; return;
+    }
+    fields.telegram_username = u;
+  }
   $("buybtn").disabled = true; $("buymsg").textContent = ""; $("buymsg").className = "mmsg";
   try{
     const r = await fetch("/api/buy", {method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
-      body: JSON.stringify({variant_id: buyVar.id, quantity: buyQty()})});
+      body: JSON.stringify({variant_id: buyVar.id, quantity: buyQty(), fields})});
     const data = await r.json().catch(()=>({}));
     if(!r.ok){
       $("buymsg").textContent = data.detail || "Не удалось оформить покупку.";
@@ -487,6 +553,9 @@ function renderOrderDetail(o){
   h += kv("Количество", o.quantity);
   h += kv("Сумма", rub(o.total_rub));
   h += kv("Статус", `<span class="st ${_stClass(o.status)}">${esc(o.status_label)}</span>`);
+  if(o.info && o.info.length){
+    o.info.forEach(f => { h += kv(esc(f.label), esc(String(f.value))); });
+  }
   if(o.smm){
     if(o.smm.link) h += kv("Ссылка", `<a href="${esc(o.smm.link)}" style="color:var(--accent2)">ссылка</a>`);
     if(typeof o.smm.progress === "number"){

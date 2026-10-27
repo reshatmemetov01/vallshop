@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from decimal import Decimal
 from typing import Optional
 
@@ -21,13 +23,18 @@ from bot.db.models import HEAD_MERCHANT_ID, OrderStatus, Variant, WebAccount
 from bot.services import catalog as catalog_service
 from bot.services import mprice as mprice_service
 from bot.services import orders as order_service
+from bot.services import rates as rates_service
+from bot.services import settings as settings_service
+from bot.services import stars as stars_service
 from bot.services.pricing import owner_price_rub
 
 from ..config import settings
 from . import wallet as wallet_service
 
-# Типы, доступные для покупки на сайте на этом этапе.
+# Типы FazerCard с мгновенной выдачей кода (без доп. полей).
 _FZR_KINDS = {"gamekey", "giftcard"}
+# Telegram @username (после снятия ведущего @).
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
 
 _config: Optional[BotConfig] = None
 _suppliers: Optional[dict] = None
@@ -58,19 +65,64 @@ def _sup() -> dict:
     return _suppliers
 
 
-def web_buyable(variant: Variant) -> bool:
-    """Можно ли купить этот номинал на сайте на текущем этапе."""
+def buy_kind(variant: Variant) -> Optional[str]:
+    """Как покупать номинал на сайте: simple|vpn|premium|stars; None — пока нельзя.
+
+    * simple  — количество + фикс-цена (сток/LioGames, ключи/гифткарты FazerCard)
+    * vpn     — без ввода, выдаётся ссылка
+    * premium — Telegram Premium: @username, цена фиксированная
+    * stars   — Telegram Звёзды: @username + количество, цена по живой котировке
+    """
     src = variant.source or "stock"
     if src == "vpnresellers":
-        return True
+        return "vpn"
     if src in ("stock", "liogames"):
-        return True
+        return "simple"
     if src == "fazercard":
-        # Звёзды/Премиум (спец-получатель) и Steam/topup — позже.
-        if variant.fzr_a in ("telegram_stars", "telegram_premium"):
-            return False
-        return variant.fzr_kind in _FZR_KINDS
-    return False  # socproof (SMM) — позже
+        if variant.fzr_a == "telegram_stars":
+            return "stars"
+        if variant.fzr_a == "telegram_premium":
+            return "premium"
+        if variant.fzr_kind in _FZR_KINDS:
+            return "simple"
+    return None  # socproof (SMM), Steam/topup — позже
+
+
+def web_buyable(variant: Variant) -> bool:
+    return buy_kind(variant) is not None
+
+
+def _username(fields: Optional[dict]) -> str:
+    raw = ((fields or {}).get("telegram_username") or "").strip().lstrip("@")
+    if not _USERNAME_RE.match(raw):
+        raise CheckoutError("Укажите корректный Telegram @username (5–32 символа)")
+    return raw
+
+
+async def _db_rate(session: AsyncSession) -> Decimal:
+    """Актуальный курс USDT→₽ из БД (кэш бота живёт в другом процессе)."""
+    raw = await settings_service.get(session, settings_service.USDT_RATE)
+    try:
+        return Decimal(raw) if raw else rates_service.DEFAULT_RATE
+    except Exception:  # noqa: BLE001
+        return rates_service.DEFAULT_RATE
+
+
+async def stars_quote(session: AsyncSession, quantity: Optional[int] = None) -> dict:
+    """Границы и (если задано количество) цена для Telegram Звёзд."""
+    fzr = _sup()["fazercard"]
+    pps, api_min, api_max = await stars_service.get_quote(fzr)
+    lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
+    out = {"min": lo, "max": hi, "price_rub": None}
+    if quantity is not None:
+        q = int(quantity)
+        if lo <= q <= hi:
+            markup = await stars_service.get_markup(session)
+            rate = await _db_rate(session)
+            out["price_rub"] = float(
+                stars_service.price_rub(q, pps, markup=markup, our_rate=rate)
+            )
+    return out
 
 
 async def _unit_price(session: AsyncSession, variant: Variant) -> Decimal:
@@ -82,29 +134,68 @@ async def _unit_price(session: AsyncSession, variant: Variant) -> Decimal:
 
 
 async def purchase(
-    session: AsyncSession, account: WebAccount, variant_id: int, quantity: int
+    session: AsyncSession,
+    account: WebAccount,
+    variant_id: int,
+    quantity: int,
+    fields: Optional[dict] = None,
 ) -> dict:
     """Купить номинал с баланса. Возвращает описание результата для фронта."""
     variant = await catalog_service.get_variant(session, variant_id)
     if variant is None:
         raise CheckoutError("Товар не найден")
-    if not web_buyable(variant):
+    kind = buy_kind(variant)
+    if kind is None:
         raise CheckoutError("Покупка этого товара на сайте скоро будет доступна")
 
-    src = variant.source or "stock"
     quantity = int(quantity or 1)
-    if src == "vpnresellers":
-        quantity = 1                      # VPN — одна подписка на заказ
-    if quantity < 1:
-        raise CheckoutError("Неверное количество")
-
-    unit_price = await _unit_price(session, variant)
-    if unit_price <= 0:
-        raise CheckoutError("Цена товара недоступна")
-
     wallet_id = await wallet_service.ensure_wallet(session, account)
     cfg = _cfg()
     sup = _sup()
+
+    # Параметры вызова покупки зависят от типа товара.
+    call_quantity = quantity
+    owner_unit_price: Optional[Decimal] = None
+    topup_fields: Optional[dict] = None
+    display_fields: Optional[list] = None
+
+    if kind == "stars":
+        uname = _username(fields)
+        stars_n = quantity
+        fzr = sup["fazercard"]
+        pps, api_min, api_max = await stars_service.get_quote(fzr)
+        lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
+        if not (lo <= stars_n <= hi):
+            raise CheckoutError(f"Количество звёзд — от {lo} до {hi}")
+        markup = await stars_service.get_markup(session)
+        rate = await _db_rate(session)
+        owner_unit_price = stars_service.price_rub(stars_n, pps, markup=markup, our_rate=rate)
+        unit_price = owner_unit_price            # сайт — головной
+        call_quantity = 1                         # кол-во звёзд — в полях, не в quantity
+        topup_fields = {
+            "telegram_username": uname,
+            "stars_qty": stars_n,
+            "_cost_usd": str(stars_service.cost_usd(stars_n, pps)),
+        }
+        display_fields = [
+            {"label": "Получатель", "value": "@" + uname},
+            {"label": "Количество", "value": f"{stars_n} ⭐️"},
+        ]
+    elif kind == "premium":
+        uname = _username(fields)
+        call_quantity = 1
+        unit_price = await _unit_price(session, variant)
+        topup_fields = {"telegram_username": uname}
+        display_fields = [{"label": "Получатель", "value": "@" + uname}]
+    else:
+        if kind == "vpn":
+            call_quantity = 1                     # VPN — одна подписка на заказ
+        if call_quantity < 1:
+            raise CheckoutError("Неверное количество")
+        unit_price = await _unit_price(session, variant)
+
+    if unit_price <= 0:
+        raise CheckoutError("Цена товара недоступна")
 
     try:
         order, items = await order_service.purchase_from_balance(
@@ -112,10 +203,12 @@ async def purchase(
             user_id=wallet_id,
             variant=variant,
             unit_price=unit_price,
-            quantity=quantity,
+            quantity=call_quantity,
             merchant_id=HEAD_MERCHANT_ID,     # сайт — головной, маржи нет
+            owner_unit_price=owner_unit_price,
             fzr=sup["fazercard"],
             vpn=sup["vpn"],
+            topup_fields=topup_fields,
             public_base_url=cfg.public_base_url,
         )
     except order_service.InsufficientBalance:
@@ -128,11 +221,16 @@ async def purchase(
         await session.rollback()
         raise CheckoutError(str(e))
 
+    # Для Звёзд/Премиум сохраняем получателя для показа в «Мои заказы».
+    if display_fields is not None:
+        order.fields_json = json.dumps(display_fields, ensure_ascii=False)
+        await session.flush()
+
     await session.commit()
-    return _result(variant, order, items)
+    return _result(variant, order, items, kind)
 
 
-def _result(variant: Variant, order, items: list) -> dict:
+def _result(variant: Variant, order, items: list, kind: str) -> dict:
     status = order.status.value if isinstance(order.status, OrderStatus) else str(order.status)
     out = {
         "order_id": order.id,
@@ -140,11 +238,16 @@ def _result(variant: Variant, order, items: list) -> dict:
         "title": variant.title,
         "quantity": order.quantity,
     }
-    src = variant.source or "stock"
-    if src == "vpnresellers":
+    if kind == "vpn":
         out["kind"] = "vpn"
         out["link"] = items[0] if items else None
         out["message"] = "VPN готов — ссылка на подписку ниже."
+    elif kind in ("stars", "premium"):
+        out["kind"] = "pending"
+        out["message"] = (
+            "Заказ оформлен и отправлен поставщику. Зачисление придёт на "
+            "указанный Telegram-аккаунт. Статус — в разделе «Мои заказы»."
+        )
     elif status == OrderStatus.COMPLETED.value and items:
         out["kind"] = "codes"
         out["codes"] = items

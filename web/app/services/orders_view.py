@@ -65,6 +65,15 @@ def _total(order: Order) -> float:
     return float(Decimal(order.price_usd or 0) * (order.quantity or 1))
 
 
+def _fields_list(order: Order) -> list:
+    """fields_json как список {label,value} (Звёзды/Премиум); иначе []."""
+    try:
+        parsed = json.loads(order.fields_json) if order.fields_json else []
+        return parsed if isinstance(parsed, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
 async def _titles(session: AsyncSession, variant_ids: List[int]) -> dict:
     if not variant_ids:
         return {}
@@ -149,6 +158,10 @@ async def order_detail(
     elif source == "vpnresellers":
         dto["vpn_link"] = await _vpn_link(session, order)
     else:
+        # Звёзды/Премиум (FazerCard): получатель хранится списком {label,value}.
+        info = _fields_list(order)
+        if info:
+            dto["info"] = info
         if status == OrderStatus.COMPLETED.value and order.delivery_code:
             dto["codes"] = order.delivery_code.splitlines()
 
