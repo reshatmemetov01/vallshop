@@ -10,6 +10,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from bot.db import models as _models  # noqa: F401 — регистрация моделей (web_accounts)
+from bot.db.base import Base
+
 from .config import settings
 from .db import database
 from .routers import auth, catalog, pages
@@ -17,8 +20,11 @@ from .routers import auth, catalog, pages
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Гарантируем, что таблицы (в т.ч. web_accounts) существуют в общей БД.
-    await database.create_all()
+    # Создаём ТОЛЬКО недостающие таблицы (в т.ч. web_accounts). НЕ запускаем
+    # мигратор колонок бота — схемой владеет бот, а два процесса на общей БД
+    # не должны мигрировать одновременно. create_all не трогает существующие.
+    async with database.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
 
 
