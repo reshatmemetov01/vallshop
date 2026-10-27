@@ -153,6 +153,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
     kb.row(_b("📈 Наценка по умолчанию", "ma_setdef"))
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
     kb.row(_b("🎨 Оформление", "mo_home"))
+    kb.row(_b("⭐ Отзывы", "arv_home"))
     kb.row(_b("📣 Рассылка", "mb:home"), _b("🎁 Бонусы", "mbn:home"))
     kb.row(_b("📢 Канал", "mch:home"))
     kb.row(_b("⬅️ В меню", "menu"))

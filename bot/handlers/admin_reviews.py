@@ -13,24 +13,58 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import BotConfig
 from ..db import Database
+from ..db.models import HEAD_MERCHANT_ID
+from ..services import merchants as merchants_service
 from ..services import reviews as review_service
 from .. import texts
 
 router = Router(name="admin_reviews")
 
 
+async def _can_moderate(user_id: int, config: BotConfig, db: Database, merchant_id: int) -> bool:
+    """Доступ к модерации: головной админ в головном боте ИЛИ владелец франшизы в её боте."""
+    if merchant_id == HEAD_MERCHANT_ID:
+        return config.is_admin(user_id)
+    return await merchants_service.admin_merchant(db, user_id, merchant_id) is not None
+
+
 class IsAdminCb(BaseFilter):
-    async def __call__(self, call: CallbackQuery, config: BotConfig) -> bool:
-        return bool(call.from_user and config.is_admin(call.from_user.id))
+    async def __call__(
+        self, call: CallbackQuery, config: BotConfig, db: Database,
+        merchant_id: int = HEAD_MERCHANT_ID,
+    ) -> bool:
+        return bool(call.from_user) and await _can_moderate(
+            call.from_user.id, config, db, merchant_id
+        )
 
 
 class IsAdminMsg(BaseFilter):
-    async def __call__(self, message: Message, config: BotConfig) -> bool:
-        return bool(message.from_user and config.is_admin(message.from_user.id))
+    async def __call__(
+        self, message: Message, config: BotConfig, db: Database,
+        merchant_id: int = HEAD_MERCHANT_ID,
+    ) -> bool:
+        return bool(message.from_user) and await _can_moderate(
+            message.from_user.id, config, db, merchant_id
+        )
 
 
 router.callback_query.filter(IsAdminCb())
 router.message.filter(IsAdminMsg())
+
+
+def _scope(merchant_id: int):
+    """Область видимости отзывов: None = все (головной), иначе id мерчанта."""
+    return None if merchant_id == HEAD_MERCHANT_ID else merchant_id
+
+
+async def _in_scope(session, review_id: int, scope):
+    """Отзыв, если он в области видимости (для франшизы — только её отзывы)."""
+    r = await review_service.get(session, review_id)
+    if r is None:
+        return None
+    if scope is not None and r.merchant_id != scope:
+        return None
+    return r
 
 
 class ARVState(StatesGroup):
@@ -53,17 +87,19 @@ _STATUS_RU = {"new": "🆕 новый", "published": "✅ опубликован
 
 
 @router.callback_query(F.data == "arv_home")
-async def cb_home(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_home(call: CallbackQuery, db: Database, state: FSMContext,
+                  merchant_id: int = HEAD_MERCHANT_ID) -> None:
     await state.clear()
+    scope = _scope(merchant_id)
     async with db.session() as session:
-        items = await review_service.list_all(session, limit=40)
-        total = await review_service.count_published(session)
+        items = await review_service.list_all(session, limit=40, merchant_id=scope)
+        total = await review_service.count_published(session, scope)
     kb = InlineKeyboardBuilder()
     for r in items:
         mark = "✅" if r.status == "published" else "🆕"
         kb.row(_btn(f"{mark} {_stars(r.rating)} · {r.product_title or '—'}", f"arv:{r.id}"))
     kb.row(_btn("➕ Добавить отзыв", "arv_add"))
-    kb.row(_btn("⬅️ Назад", "a_home"))
+    kb.row(_btn("⬅️ Назад", "a_home" if scope is None else "ma_home"))
     caption = (
         "⭐ <b>Отзывы</b>\n"
         f"Опубликовано: <b>{total}</b> · всего в списке: <b>{len(items)}</b>\n\n"
@@ -102,22 +138,29 @@ async def _detail(session, review_id: int) -> tuple[str, InlineKeyboardMarkup] |
 
 
 @router.callback_query(F.data.startswith("arv:"))
-async def cb_detail(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_detail(call: CallbackQuery, db: Database, state: FSMContext,
+                    merchant_id: int = HEAD_MERCHANT_ID) -> None:
     await state.clear()
     rid = int(call.data.split(":", 1)[1])
+    scope = _scope(merchant_id)
     async with db.session() as session:
+        if await _in_scope(session, rid, scope) is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
         caption, markup = await _detail(session, rid)
-    if not caption:
-        await call.answer("Не найдено", show_alert=True)
-        return
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("arv_pub:"))
-async def cb_publish(call: CallbackQuery, db: Database) -> None:
+async def cb_publish(call: CallbackQuery, db: Database,
+                     merchant_id: int = HEAD_MERCHANT_ID) -> None:
     rid = int(call.data.split(":", 1)[1])
+    scope = _scope(merchant_id)
     async with db.session() as session:
+        if await _in_scope(session, rid, scope) is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
         await review_service.set_status(session, rid, "published")
         await session.commit()
         caption, markup = await _detail(session, rid)
@@ -126,9 +169,14 @@ async def cb_publish(call: CallbackQuery, db: Database) -> None:
 
 
 @router.callback_query(F.data.startswith("arv_unpub:"))
-async def cb_unpublish(call: CallbackQuery, db: Database) -> None:
+async def cb_unpublish(call: CallbackQuery, db: Database,
+                       merchant_id: int = HEAD_MERCHANT_ID) -> None:
     rid = int(call.data.split(":", 1)[1])
+    scope = _scope(merchant_id)
     async with db.session() as session:
+        if await _in_scope(session, rid, scope) is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
         await review_service.set_status(session, rid, "new")
         await session.commit()
         caption, markup = await _detail(session, rid)
@@ -137,8 +185,13 @@ async def cb_unpublish(call: CallbackQuery, db: Database) -> None:
 
 
 @router.callback_query(F.data.startswith("arv_del:"))
-async def cb_delete_ask(call: CallbackQuery) -> None:
+async def cb_delete_ask(call: CallbackQuery, db: Database,
+                        merchant_id: int = HEAD_MERCHANT_ID) -> None:
     rid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        if await _in_scope(session, rid, _scope(merchant_id)) is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
     kb = InlineKeyboardBuilder()
     kb.row(_btn("🗑 Да, удалить", f"arv_delok:{rid}"))
     kb.row(_btn("⬅️ Отмена", f"arv:{rid}"))
@@ -149,17 +202,26 @@ async def cb_delete_ask(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("arv_delok:"))
-async def cb_delete(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_delete(call: CallbackQuery, db: Database, state: FSMContext,
+                    merchant_id: int = HEAD_MERCHANT_ID) -> None:
     rid = int(call.data.split(":", 1)[1])
     async with db.session() as session:
+        if await _in_scope(session, rid, _scope(merchant_id)) is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
         await review_service.delete(session, rid)
         await session.commit()
-    await cb_home(call, db, state)
+    await cb_home(call, db, state, merchant_id)
 
 
 @router.callback_query(F.data.startswith("arv_edit:"))
-async def cb_edit_ask(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_edit_ask(call: CallbackQuery, db: Database, state: FSMContext,
+                      merchant_id: int = HEAD_MERCHANT_ID) -> None:
     rid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        if await _in_scope(session, rid, _scope(merchant_id)) is None:
+            await call.answer("Не найдено", show_alert=True)
+            return
     await state.set_state(ARVState.edit_text)
     await state.update_data(rid=rid)
     kb = InlineKeyboardBuilder()
@@ -172,7 +234,8 @@ async def cb_edit_ask(call: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(ARVState.edit_text)
-async def msg_edit(message: Message, db: Database, state: FSMContext) -> None:
+async def msg_edit(message: Message, db: Database, state: FSMContext,
+                   merchant_id: int = HEAD_MERCHANT_ID) -> None:
     data = await state.get_data()
     rid = data.get("rid")
     text = (message.html_text or message.text or "").strip()
@@ -180,6 +243,10 @@ async def msg_edit(message: Message, db: Database, state: FSMContext) -> None:
         await message.answer("Пусто. Пришлите текст.")
         return
     async with db.session() as session:
+        if await _in_scope(session, rid, _scope(merchant_id)) is None:
+            await message.answer("Отзыв не найден.")
+            await state.clear()
+            return
         await review_service.update_text(session, rid, text)
         await session.commit()
     await state.clear()
@@ -241,7 +308,8 @@ async def msg_add_username(message: Message, state: FSMContext) -> None:
 
 
 @router.message(ARVState.add_text)
-async def msg_add_text(message: Message, db: Database, state: FSMContext) -> None:
+async def msg_add_text(message: Message, db: Database, state: FSMContext,
+                       merchant_id: int = HEAD_MERCHANT_ID) -> None:
     data = await state.get_data()
     text = (message.html_text or message.text or "").strip()
     if not text:
@@ -258,6 +326,7 @@ async def msg_add_text(message: Message, db: Database, state: FSMContext) -> Non
             amount_usd=None,
             rating=int(data.get("rating", 5)),
             text=text,
+            merchant_id=merchant_id,   # отзыв привязывается к магазину-владельцу
         )
         # Ручной отзыв сразу публикуем.
         await review_service.set_status(session, review.id, "published")

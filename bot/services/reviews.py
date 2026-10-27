@@ -68,25 +68,24 @@ async def delete(session: AsyncSession, review_id: int) -> None:
         await session.flush()
 
 
-async def list_all(session: AsyncSession, limit: int = 50) -> List[Review]:
-    return list(
-        await session.scalars(
-            select(Review).order_by(Review.id.desc()).limit(limit)
-        )
-    )
+async def list_all(
+    session: AsyncSession, limit: int = 50, merchant_id: Optional[int] = None
+) -> List[Review]:
+    """Все отзывы (для модерации). merchant_id=None — по всем магазинам (головной)."""
+    q = select(Review).order_by(Review.id.desc()).limit(limit)
+    if merchant_id is not None:
+        q = q.where(Review.merchant_id == merchant_id)
+    return list(await session.scalars(q))
 
 
 async def count_published(
-    session: AsyncSession, merchant_id: int = HEAD_MERCHANT_ID
+    session: AsyncSession, merchant_id: Optional[int] = HEAD_MERCHANT_ID
 ) -> int:
-    return int(
-        await session.scalar(
-            select(func.count()).select_from(Review).where(
-                Review.status == "published", Review.merchant_id == merchant_id
-            )
-        )
-        or 0
-    )
+    """Число опубликованных. merchant_id=None — по всем магазинам."""
+    q = select(func.count()).select_from(Review).where(Review.status == "published")
+    if merchant_id is not None:
+        q = q.where(Review.merchant_id == merchant_id)
+    return int(await session.scalar(q) or 0)
 
 
 async def list_published(

@@ -15,6 +15,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, Variant
 from ..services import menu as menu_service
+from ..services import merchants as merchants_service
 from ..services import notify as notify_service
 from ..services import reviews as review_service
 from ..ui import render
@@ -101,11 +102,18 @@ async def msg_review_text(
         await session.commit()
 
     # Уведомляем админов о новом отзыве.
-    await notify_service.notify_admins(
-        message.bot, config.admin_ids,
+    note = (
         f"🆕 Новый отзыв #{review_id} ({_stars(rating)}) на «{product_title or '—'}».\n"
-        "Админ-панель → Отзывы.",
+        "Админ-панель → Отзывы."
     )
+    # Головные админы — всегда (надзор над всей платформой).
+    await notify_service.notify_admins(message.bot, config.admin_ids, note)
+    # Отзыв франшизы — дополнительно уведомляем её владельца (о своих отзывах).
+    if merchant_id != HEAD_MERCHANT_ID:
+        merchant = await merchants_service.get_merchant(db, merchant_id)
+        owner_id = merchant.admin_user_id if merchant else None
+        if owner_id and owner_id not in set(config.admin_ids):
+            await notify_service.notify_admins(message.bot, [owner_id], note)
     await message.answer(texts.REVIEW_THANKS)
     # Сразу возвращаем в главное меню.
     is_admin = config.is_admin(message.from_user.id)
