@@ -13,7 +13,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import BotConfig
 from ..db import Database
-from ..db.models import HEAD_MERCHANT_ID
+from ..db.models import HEAD_MERCHANT_ID, Merchant
 from ..services import merchants as merchants_service
 from ..services import reviews as review_service
 from .. import texts
@@ -67,6 +67,14 @@ async def _in_scope(session, review_id: int, scope):
     return r
 
 
+async def _shop_label(session, merchant_id: int) -> str:
+    """Короткая метка магазина отзыва (для головного представления)."""
+    if merchant_id == HEAD_MERCHANT_ID:
+        return "🏠 Головной"
+    m = await session.get(Merchant, merchant_id)
+    return f"🏬 {m.title}" if m and m.title else f"🏬 Франшиза #{merchant_id}"
+
+
 class ARVState(StatesGroup):
     edit_text = State()
     add_product = State()
@@ -94,10 +102,22 @@ async def cb_home(call: CallbackQuery, db: Database, state: FSMContext,
     async with db.session() as session:
         items = await review_service.list_all(session, limit=40, merchant_id=scope)
         total = await review_service.count_published(session, scope)
+    # В головном представлении (scope=None) помечаем магазин каждого отзыва.
+    shop_names: dict[int, str] = {}
+    if scope is None:
+        async with db.session() as session:
+            for mid in {r.merchant_id for r in items}:
+                shop_names[mid] = await _shop_label(session, mid)
     kb = InlineKeyboardBuilder()
     for r in items:
         mark = "✅" if r.status == "published" else "🆕"
-        kb.row(_btn(f"{mark} {_stars(r.rating)} · {r.product_title or '—'}", f"arv:{r.id}"))
+        prefix = ""
+        if scope is None:
+            tag = shop_names.get(r.merchant_id, "")
+            if len(tag) > 16:
+                tag = tag[:15] + "…"
+            prefix = f"{tag} · " if tag else ""
+        kb.row(_btn(f"{mark} {prefix}{_stars(r.rating)} · {r.product_title or '—'}", f"arv:{r.id}"))
     kb.row(_btn("➕ Добавить отзыв", "arv_add"))
     kb.row(_btn("⬅️ Назад", "a_home" if scope is None else "ma_home"))
     caption = (
@@ -109,15 +129,19 @@ async def cb_home(call: CallbackQuery, db: Database, state: FSMContext,
     await call.answer()
 
 
-async def _detail(session, review_id: int) -> tuple[str, InlineKeyboardMarkup] | tuple[None, None]:
+async def _detail(session, review_id: int, show_shop: bool = False) -> tuple[str, InlineKeyboardMarkup] | tuple[None, None]:
     r = await review_service.get(session, review_id)
     if not r:
         return None, None
     who = f"@{r.username}" if r.username else f"id {r.user_id}"
     when = r.created_at.strftime("%d.%m.%Y %H:%M") if r.created_at else "—"
     amount = texts.rub(Decimal(r.amount_usd)) if r.amount_usd is not None else "—"
+    shop_line = ""
+    if show_shop:
+        shop_line = f"Магазин: <b>{await _shop_label(session, r.merchant_id)}</b>\n"
     caption = (
         f"⭐ <b>Отзыв #{r.id}</b> · {_STATUS_RU.get(r.status, r.status)}\n"
+        f"{shop_line}"
         f"Заказ: <code>{r.order_id or '—'}</code>\n"
         f"Дата: {when}\n"
         f"Товар: <b>{r.product_title or '—'}</b>\n"
@@ -147,7 +171,7 @@ async def cb_detail(call: CallbackQuery, db: Database, state: FSMContext,
         if await _in_scope(session, rid, scope) is None:
             await call.answer("Не найдено", show_alert=True)
             return
-        caption, markup = await _detail(session, rid)
+        caption, markup = await _detail(session, rid, show_shop=scope is None)
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer()
 
@@ -163,7 +187,7 @@ async def cb_publish(call: CallbackQuery, db: Database,
             return
         await review_service.set_status(session, rid, "published")
         await session.commit()
-        caption, markup = await _detail(session, rid)
+        caption, markup = await _detail(session, rid, show_shop=scope is None)
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer("Опубликовано ✅")
 
@@ -179,7 +203,7 @@ async def cb_unpublish(call: CallbackQuery, db: Database,
             return
         await review_service.set_status(session, rid, "new")
         await session.commit()
-        caption, markup = await _detail(session, rid)
+        caption, markup = await _detail(session, rid, show_shop=scope is None)
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer("Снято с публикации")
 
