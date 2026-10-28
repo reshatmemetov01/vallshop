@@ -39,6 +39,9 @@
   .modal input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
     padding:11px 13px;color:var(--text);font-size:16px}
   .modal input:focus{outline:none;border-color:var(--accent)}
+  .modal select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;color:var(--text);font-size:15px;margin-top:6px}
+  .modal select:focus{outline:none;border-color:var(--accent)}
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
   .chip{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px 12px;
     border-radius:999px;cursor:pointer;font-size:14px}
@@ -144,6 +147,14 @@
     <div id="buylinkwrap" style="display:none">
       <label>Ссылка для накрутки</label>
       <input id="buylink" type="text" autocomplete="off" placeholder="https://t.me/... или ссылка на пост/профиль">
+    </div>
+    <div id="buysteamwrap" style="display:none">
+      <label>Логин Steam</label>
+      <input id="buysteamlogin" type="text" autocomplete="off" placeholder="ваш логин Steam (не email)">
+      <label>Валюта пополнения</label>
+      <select id="buysteamcur"></select>
+      <label>Сумма в валюте</label>
+      <input id="buysteamamt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="например, 500">
     </div>
     <div id="buyqtywrap">
       <label id="buyqtylabel">Количество</label>
@@ -378,12 +389,17 @@ function openBuy(id){
   // ссылка — для SMM
   $("buylinkwrap").style.display = (kind==="smm") ? "" : "none";
   $("buylink").value = "";
-  // количество — для simple, stars, smm (у vpn/premium скрыто, кол-во = 1)
+  // Steam — логин + валюта + сумма
+  $("buysteamwrap").style.display = (kind==="steam") ? "" : "none";
+  if(kind==="steam"){ $("buysteamlogin").value = ""; $("buysteamamt").value = ""; loadSteamConfig(); }
+  // количество — для simple, stars, smm (у vpn/premium/steam скрыто)
   const showQty = (kind==="simple"||kind==="stars"||kind==="smm");
   $("buyqtywrap").style.display = showQty ? "" : "none";
   const q = $("buyqty");
   $("buyqtyhint").textContent = "";
-  if(kind==="stars"){
+  if(kind==="steam"){
+    $("buyprice").textContent = "Цена рассчитывается по сумме пополнения";
+  }else if(kind==="stars"){
     $("buyqtylabel").textContent = "Количество звёзд";
     $("buyprice").textContent = "Цена рассчитывается по количеству";
     q.value = ""; q.min = 1; q.max = 100000;
@@ -401,7 +417,7 @@ function openBuy(id){
     q.max = (v.source==="stock" && v.stock) ? v.stock : 999;
   }
   updateBuyTotal();
-  $("buybtn").disabled = (kind==="stars");   // Звёзды — до ввода корректного количества
+  $("buybtn").disabled = (kind==="stars"||kind==="steam");   // до ввода суммы/количества
   $("buyovl").classList.add("show");
 }
 function closeBuy(){ $("buyovl").classList.remove("show"); }
@@ -437,8 +453,45 @@ async function refreshStarsPrice(){
     }else{ $("buytotal").textContent = `Введите от ${d.min} до ${d.max}`; }
   }catch(e){ $("buytotal").textContent = "Не удалось рассчитать цену."; }
 }
+let steamPrice = null, steamTimer = null, steamLoaded = false;
+async function loadSteamConfig(){
+  steamPrice = null;
+  $("buytotal").textContent = "";
+  if(!steamLoaded){
+    try{
+      const cfg = await api("/api/buy/steam-config");
+      const sel = $("buysteamcur");
+      sel.innerHTML = cfg.currencies.map(c => `<option value="${c.code}">${esc(c.label)}</option>`).join("");
+      sel.onchange = () => updateBuyTotal();
+      $("buysteamamt").addEventListener("input", updateBuyTotal);
+      steamLoaded = true;
+    }catch(e){}
+  }
+}
+async function refreshSteamPrice(){
+  const amt = String($("buysteamamt").value||"").trim();
+  const cur = $("buysteamcur").value || "RUB";
+  steamPrice = null;
+  if(!amt || parseFloat(amt) <= 0){ $("buytotal").textContent = ""; $("buybtn").disabled = true; return; }
+  $("buytotal").textContent = "Расчёт цены…"; $("buybtn").disabled = true;
+  try{
+    const d = await api(`/api/buy/steam-quote?amount=${encodeURIComponent(amt)}&currency=${encodeURIComponent(cur)}`);
+    if(d.price_rub != null){
+      steamPrice = d.price_rub;
+      $("buytotal").textContent = "Итого: " + rub(d.price_rub);
+      $("buybtn").disabled = false;
+    }else{
+      $("buytotal").textContent = "Сумма вне лимитов — измените сумму";
+    }
+  }catch(e){ $("buytotal").textContent = "Не удалось рассчитать цену."; }
+}
 function updateBuyTotal(){
   const k = buyKind();
+  if(k==="steam"){
+    clearTimeout(steamTimer);
+    steamTimer = setTimeout(refreshSteamPrice, 400);
+    return;
+  }
   if(k==="stars"){
     clearTimeout(starsTimer);
     starsTimer = setTimeout(refreshStarsPrice, 400);
@@ -469,6 +522,15 @@ async function doBuy(){
       $("buymsg").textContent = "Пришлите корректную ссылку (например https://t.me/...)."; return;
     }
     fields.link = link;
+  }
+  if(kind==="steam"){
+    const login = $("buysteamlogin").value.trim();
+    const amt = String($("buysteamamt").value||"").trim();
+    if(!login){ $("buymsg").textContent = "Укажите логин Steam."; return; }
+    if(!amt || parseFloat(amt) <= 0){ $("buymsg").textContent = "Укажите сумму пополнения."; return; }
+    fields.steam_login = login;
+    fields.currency = $("buysteamcur").value || "RUB";
+    fields.amount = amt;
   }
   $("buybtn").disabled = true; $("buymsg").textContent = ""; $("buymsg").className = "mmsg";
   try{

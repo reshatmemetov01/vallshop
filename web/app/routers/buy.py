@@ -42,3 +42,26 @@ async def stars_quote(
 ) -> dict:
     """Границы и цена для Telegram Звёзд (цена по живой котировке FazerCard)."""
     return await checkout_service.stars_quote(session, quantity)
+
+
+@router.get("/steam-config")
+async def steam_config(session: AsyncSession = Depends(get_session)) -> dict:
+    """Валюты и лимиты (₽) для пополнения Steam."""
+    return await checkout_service.steam_config(session)
+
+
+@router.get("/steam-quote")
+async def steam_quote(
+    amount: str | None = None,
+    currency: str = "RUB",
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Цена пополнения Steam для суммы в валюте (по курсам FazerCard)."""
+    from decimal import Decimal, InvalidOperation
+    amt = None
+    if amount:
+        try:
+            amt = Decimal(amount.replace(",", ".").strip())
+        except (InvalidOperation, AttributeError):
+            amt = None
+    return await checkout_service.steam_quote(session, amt, currency.upper())

@@ -72,8 +72,9 @@ def test_web_buyable():
     assert checkout_service.web_buyable(mk(source="fazercard", fzr_a="telegram_stars")) is True
     assert checkout_service.web_buyable(mk(source="fazercard", fzr_a="telegram_premium")) is True
     assert checkout_service.web_buyable(mk(source="socproof")) is True   # SMM
-    # ещё не на сайте:
-    assert checkout_service.web_buyable(mk(source="fazercard", fzr_kind="steam")) is False
+    assert checkout_service.web_buyable(mk(source="fazercard", fzr_kind="steam")) is True
+    # ещё не на сайте (прочий topup по данным игрока):
+    assert checkout_service.web_buyable(mk(source="fazercard", fzr_kind="topup")) is False
 
 
 # ── Покупка из стока: мгновенная выдача кодов ────────────────────────────────
@@ -128,11 +129,11 @@ async def test_buy_out_of_stock(db):
 
 @pytest.mark.asyncio
 async def test_buy_unsupported_type_rejected(db):
-    # Steam (topup по логину) пока не на сайте.
+    # Прочий topup по данным игрока (не Steam/Звёзды/Премиум) пока не на сайте.
     async with db.session() as s:
-        p = Product(game="St", title="Steam"); s.add(p); await s.flush()
-        v = Variant(product_id=p.id, title="Steam", liog_product_id=0, liog_variation_id=-1,
-                    source="fazercard", fzr_kind="steam", fzr_a="steam_topup",
+        p = Product(game="Pb", title="PUBG topup"); s.add(p); await s.flush()
+        v = Variant(product_id=p.id, title="UC по ID", liog_product_id=0, liog_variation_id=-1,
+                    source="fazercard", fzr_kind="topup", fzr_a="pubg_topup",
                     price_rub=Decimal("100"))
         s.add(v); await s.flush()
         acc = await _account_with_balance(s, "d@d.com", "500")

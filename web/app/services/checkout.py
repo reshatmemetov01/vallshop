@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from decimal import Decimal
@@ -27,6 +28,7 @@ from bot.services import rates as rates_service
 from bot.services import settings as settings_service
 from bot.services import smm as smm_service
 from bot.services import stars as stars_service
+from bot.services import steam as steam_service
 from bot.services.pricing import owner_price_rub
 
 from ..config import settings
@@ -88,9 +90,11 @@ def buy_kind(variant: Variant) -> Optional[str]:
             return "stars"
         if variant.fzr_a == "telegram_premium":
             return "premium"
+        if variant.fzr_kind == "steam":
+            return "steam"
         if variant.fzr_kind in _FZR_KINDS:
             return "simple"
-    return None  # Steam/topup — позже
+    return None  # прочие topup — позже
 
 
 def web_buyable(variant: Variant) -> bool:
@@ -118,6 +122,54 @@ async def _db_rate(session: AsyncSession) -> Decimal:
         return Decimal(raw) if raw else rates_service.DEFAULT_RATE
     except Exception:  # noqa: BLE001
         return rates_service.DEFAULT_RATE
+
+
+def _fmt_amount(amount: Decimal) -> str:
+    s = format(Decimal(amount).normalize(), "f")
+    return s
+
+
+async def steam_config(session: AsyncSession) -> dict:
+    """Валюты и лимиты (₽) для пополнения Steam."""
+    lo, hi = await steam_service.get_limits(session)
+    return {
+        "currencies": [
+            {"code": c, "label": steam_service.CURRENCY_LABELS.get(c, c)}
+            for c in steam_service.CURRENCIES
+        ],
+        "min": int(lo),
+        "max": int(hi),
+    }
+
+
+async def steam_quote(
+    session: AsyncSession, amount: Optional[Decimal], currency: str
+) -> dict:
+    """Цена пополнения Steam для суммы в валюте (None, если вне лимитов)."""
+    out: dict = {"price_rub": None}
+    if amount is None or amount <= 0 or currency not in steam_service.CURRENCIES:
+        return out
+    fzr = _sup()["fazercard"]
+    fzr_rates = await steam_service.get_fzr_rates(fzr)
+    markup = await steam_service.get_markup(session)
+    rate = await _db_rate(session)
+    price = steam_service.price_rub(amount, currency, fzr_rates, markup=markup, our_rate=rate)
+    lo, hi = await steam_service.get_limits(session)
+    if lo <= price <= hi:
+        out["price_rub"] = float(price)
+    return out
+
+
+def steam_check_login(login: str) -> bool:
+    """Проверка логина Steam у поставщика. Если проверка недоступна — не блокируем."""
+    fzr = _sup()["fazercard"]
+    try:
+        res = fzr.steam_check_login(login)
+        if isinstance(res, dict) and "valid" in res:
+            return bool(res.get("valid"))
+    except Exception:  # noqa: BLE001
+        return True
+    return True
 
 
 async def stars_quote(session: AsyncSession, quantity: Optional[int] = None) -> dict:
@@ -201,6 +253,46 @@ async def purchase(
         unit_price = await _unit_price(session, variant)
         topup_fields = {"telegram_username": uname}
         display_fields = [{"label": "Получатель", "value": "@" + uname}]
+    elif kind == "steam":
+        fzr = sup["fazercard"]
+        login = ((fields or {}).get("steam_login") or "").strip()
+        if not login:
+            raise CheckoutError("Укажите логин Steam")
+        currency = ((fields or {}).get("currency") or "RUB").upper()
+        if currency not in steam_service.CURRENCIES:
+            raise CheckoutError("Неизвестная валюта")
+        try:
+            amount = Decimal(str((fields or {}).get("amount") or "").replace(",", ".").strip())
+        except Exception as e:  # noqa: BLE001
+            raise CheckoutError("Неверная сумма") from e
+        if amount <= 0:
+            raise CheckoutError("Неверная сумма")
+        if not await asyncio.to_thread(steam_check_login, login):
+            raise CheckoutError("Steam-логин не найден. Проверьте правильность.")
+        fzr_rates = await steam_service.get_fzr_rates(fzr)
+        markup = await steam_service.get_markup(session)
+        rate = await _db_rate(session)
+        owner_unit_price = steam_service.price_rub(
+            amount, currency, fzr_rates, markup=markup, our_rate=rate
+        )
+        lo, hi = await steam_service.get_limits(session)
+        if not (lo <= owner_unit_price <= hi):
+            raise CheckoutError(
+                f"Сумма вне лимитов (итог {int(owner_unit_price)} ₽; допустимо {int(lo)}–{int(hi)} ₽)"
+            )
+        unit_price = owner_unit_price
+        call_quantity = 1
+        amt_str = _fmt_amount(amount)
+        topup_fields = {
+            "steam_login": login,
+            "amount": amt_str,
+            "currency": currency,
+            "_cost_usd": str(steam_service.cost_usd(amount, currency, fzr_rates)),
+        }
+        display_fields = [
+            {"label": "Steam-логин", "value": login},
+            {"label": "Сумма", "value": f"{amt_str} {currency}"},
+        ]
     elif kind == "smm":
         link = _smm_link(fields)
         smm_n = quantity
@@ -279,6 +371,12 @@ def _result(variant: Variant, order, items: list, kind: str) -> dict:
         out["message"] = (
             "Заказ оформлен и отправлен поставщику. Зачисление придёт на "
             "указанный Telegram-аккаунт. Статус — в разделе «Мои заказы»."
+        )
+    elif kind == "steam":
+        out["kind"] = "pending"
+        out["message"] = (
+            "Заказ оформлен. Пополнение придёт на указанный Steam-аккаунт. "
+            "Статус — в разделе «Мои заказы»."
         )
     elif kind == "smm":
         out["kind"] = "pending"
