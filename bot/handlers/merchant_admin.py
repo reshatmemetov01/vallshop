@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+
+from sqlalchemy import select
 
 from aiogram import F, Router
 from aiogram.filters import BaseFilter
@@ -25,7 +28,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import BotConfig
 from ..db import Database
-from ..db.models import HEAD_MERCHANT_ID, Merchant
+from ..db.models import HEAD_MERCHANT_ID, Merchant, Order, OrderStatus, User, Variant
 from . import broadcast_flow
 from ..services import catalog as catalog_service
 from ..services import mcatalog as mcatalog_service
@@ -153,7 +156,7 @@ async def _show_home(call: CallbackQuery, db: Database, merchant_id: int) -> Non
     kb.row(_b("📈 Наценка по умолчанию", "ma_setdef"))
     kb.row(_b("🏷 Наценка по номиналам", "ma_price"))
     kb.row(_b("🎨 Оформление", "mo_home"))
-    kb.row(_b("⭐ Отзывы", "arv_home"))
+    kb.row(_b("🧾 Заказы", "mord_home"), _b("⭐ Отзывы", "arv_home"))
     kb.row(_b("📣 Рассылка", "mb:home"), _b("🎁 Бонусы", "mbn:home"))
     kb.row(_b("📢 Канал", "mch:home"))
     kb.row(_b("⬅️ В меню", "menu"))
@@ -1452,3 +1455,129 @@ channel_flow.register(router, prefix="mch", home_cb="ma_home", states=FranchiseC
                       post_prefix="fpost")
 channel_post.register(router, prefix="fpost", home_cb="mch:home",
                       sections=broadcast_flow.FRANCHISE_SECTIONS, states=FranchiseChannelPost)
+
+
+# ── Заказы франшизы (только просмотр: что купил клиент, когда, статус) ─────────
+_ORD_STATUS = {
+    "completed": "✅ выполнен",
+    "fulfilling": "⏳ выдаётся",
+    "created": "🕒 создаётся",
+    "needs_action": "⚠️ в обработке",
+    "failed": "⚠️ ошибка",
+    "refunded": "↩️ возврат",
+    "awaiting_payment": "⏳ ожидает оплату",
+    "paid": "💳 оплачен",
+    "expired": "❌ просрочен",
+}
+
+
+def _ord_status(status) -> str:
+    key = status.value if hasattr(status, "value") else str(status)
+    return _ORD_STATUS.get(key, key)
+
+
+def _ord_emoji(status) -> str:
+    key = status.value if hasattr(status, "value") else str(status)
+    if key == "completed":
+        return "✅"
+    if key == "refunded":
+        return "↩️"
+    if key in ("failed", "needs_action", "expired"):
+        return "⚠️"
+    if key in ("fulfilling", "created", "awaiting_payment", "paid"):
+        return "⏳"
+    return "🕒"
+
+
+async def _ord_buyer(session, order: Order) -> str:
+    u = await session.get(User, {"id": order.user_id, "merchant_id": order.merchant_id})
+    if u and u.username:
+        return "@" + u.username
+    if u and u.full_name:
+        return u.full_name
+    return f"id {order.user_id}"
+
+
+def _ord_fields(order: Order) -> str:
+    """Доп. данные заказа: получатель (Звёзды/Премиум) или прогресс SMM."""
+    if not order.fields_json:
+        return ""
+    try:
+        data = json.loads(order.fields_json)
+    except Exception:  # noqa: BLE001
+        return ""
+    lines = []
+    if isinstance(data, list):            # Звёзды/Премиум: [{label, value}]
+        for item in data:
+            lines.append(f"• {item.get('label','')}: <code>{item.get('value','')}</code>")
+    elif isinstance(data, dict):          # SMM: {link, quantity, progress, remains}
+        if data.get("link"):
+            lines.append(f"• Ссылка: {data['link']}")
+        if data.get("quantity") is not None:
+            lines.append(f"• Количество: <b>{data['quantity']}</b>")
+        prog = data.get("progress")
+        if isinstance(prog, int):
+            rem, q = data.get("remains"), data.get("quantity")
+            done = (q - rem) if isinstance(rem, int) and isinstance(q, int) else None
+            extra = f" ({done} из {q})" if done is not None else ""
+            lines.append(f"• Прогресс: <b>{prog}%</b>{extra}")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "mord_home")
+async def cb_mord_home(call: CallbackQuery, db: Database, state: FSMContext,
+                       merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    await state.clear()
+    async with db.session() as session:
+        orders = list(await session.scalars(
+            select(Order).where(Order.merchant_id == merchant_id)
+            .order_by(Order.id.desc()).limit(20)
+        ))
+        rows = []
+        for o in orders:
+            v = await session.get(Variant, o.variant_id)
+            rows.append((o.id, v.title if v else "—", o.status))
+    kb = InlineKeyboardBuilder()
+    for oid, title, st in rows:
+        kb.row(_b(f"{_ord_emoji(st)} #{oid} · {title}", f"mord:{oid}"))
+    kb.row(_b("⬅️ Назад", "ma_home"))
+    caption = (
+        "🧾 <b>Заказы</b>\nПоследние заказы ваших клиентов:"
+        if rows else "🧾 <b>Заказы</b>\n\nЗаказов пока нет."
+    )
+    await _edit(call, caption, kb)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mord:"))
+async def cb_mord_detail(call: CallbackQuery, db: Database,
+                         merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    oid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        order = await session.get(Order, oid)
+        if not order or order.merchant_id != merchant_id:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        variant = await catalog_service.get_variant(session, order.variant_id)
+        title = variant.title if variant else "—"
+        product = variant.product.title if variant and variant.product else "—"
+        buyer = await _ord_buyer(session, order)
+        fields = _ord_fields(order)
+    when = order.created_at.strftime("%d.%m.%Y %H:%M") if order.created_at else "—"
+    total = texts.rub(Decimal(order.price_usd or 0) * (order.quantity or 1))
+    lines = [
+        f"🧾 <b>Заказ #{order.id}</b>",
+        f"Статус: {_ord_status(order.status)}",
+        f"Покупатель: {buyer}",
+        f"Товар: <b>{product}</b>",
+        f"Номинал: <b>{title}</b>",
+        f"Количество: <b>{order.quantity}</b>",
+        f"Сумма: <b>{total}</b>",
+        f"Оформлен: {when}",
+    ]
+    if fields:
+        lines.append("\n" + fields)
+    kb = InlineKeyboardBuilder()
+    kb.row(_b("⬅️ К заказам", "mord_home"))
+    await _edit(call, "\n".join(lines), kb)
+    await call.answer()
