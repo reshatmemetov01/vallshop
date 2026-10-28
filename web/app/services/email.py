@@ -12,6 +12,7 @@ import re
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formataddr
 
 from ..config import settings
 
@@ -24,7 +25,8 @@ def _text_from_html(html: str) -> str:
 
 def _send_sync(to: str, subject: str, html: str, text: str) -> None:
     msg = EmailMessage()
-    msg["From"] = settings.smtp_from
+    # Отображаемое имя + адрес: «VallShop <noreply@vallshop.ru>».
+    msg["From"] = formataddr((settings.smtp_from_name or None, settings.smtp_from))
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(text)

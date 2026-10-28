@@ -34,6 +34,8 @@ class Settings:
     smtp_user: str = _get("SMTP_USER", "")
     smtp_password: str = _get("SMTP_PASSWORD", "")
     smtp_from: str = _get("SMTP_FROM", "") or _get("SMTP_USER", "")
+    # Отображаемое имя отправителя (как видит получатель): «VallShop».
+    smtp_from_name: str = _get("SMTP_FROM_NAME", "VallShop")
     smtp_ssl: bool = _get("SMTP_SSL", "1").strip().lower() not in ("0", "false", "no")
 
     @property
