@@ -16,7 +16,7 @@ from bot.db.base import Base
 from .config import settings
 from .db import database
 from .migrate import ensure_web_accounts_nullable
-from .routers import auth, buy, catalog, orders, pages, topup
+from .routers import auth, buy, catalog, orders, pages, reviews, topup
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(auth.router)
 app.include_router(topup.router)
 app.include_router(buy.router)
 app.include_router(orders.router)
+app.include_router(reviews.router)
 app.include_router(pages.router)
 
 

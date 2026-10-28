@@ -9,14 +9,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#111318; --bg2:#0d0f13; --panel:#1a1d24; --panel2:#21242d; --panel3:#262a34;
-    --line:#2b2f3a; --line2:#353a47;
-    --text:#f4f6fa; --muted:#a3adbd; --dim:#7a8495;
-    --accent:#ff8a3d; --accent2:#ffb074; --accent-ink:#201306;
-    --grad:linear-gradient(135deg,#ff9a4d 0%,#ff7a2b 100%);
-    --ok:#39d07f; --bad:#ff6b6b; --warn:#ffb454; --ref:#b79bff;
+    --bg:#13100e; --bg2:#0e0c0a; --panel:#1d1813; --panel2:#251f18; --panel3:#2c251d;
+    --line:#352c22; --line2:#43382b;
+    --text:#f7f2ec; --muted:#bcae9e; --dim:#8c7f70;
+    --accent:#ff8a2e; --accent2:#ffc27a; --accent-ink:#2a1505;
+    --grad:linear-gradient(135deg,#ffb24d 0%,#ff6f1e 100%);
+    --ok:#4fd08a; --bad:#ff6b6b; --warn:#ffb454; --ref:#c6a3ff;
     --radius:16px; --radius-sm:12px;
-    --shadow:0 10px 30px rgba(0,0,0,.35); --glow:0 0 0 1px rgba(255,138,61,.35),0 12px 34px rgba(255,122,43,.14);
+    --shadow:0 10px 30px rgba(0,0,0,.4); --glow:0 0 0 1px rgba(255,150,60,.4),0 14px 36px rgba(255,120,30,.18);
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -180,6 +180,62 @@
   .bar2{height:9px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:10px}
   .bar2 i{display:block;height:100%;background:var(--grad)}
 
+  /* ── Эмблема / логотип ── */
+  .emblem{width:34px;height:34px;flex:0 0 auto}
+  .logo .emblem{filter:drop-shadow(0 6px 14px rgba(255,120,30,.45))}
+  .card .ic svg{width:26px;height:26px}
+  .ic svg{stroke:var(--accent);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ── Hero: эмблема + плавающие чипы ── */
+  .hero .hemblem{width:80px;height:80px;margin-bottom:18px;filter:drop-shadow(0 10px 26px rgba(255,120,30,.5))}
+  .hero .chips-float{position:absolute;right:30px;top:36px;display:flex;flex-direction:column;gap:12px;z-index:1}
+  .fchip{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.04);border:1px solid var(--line2);
+    border-radius:12px;padding:9px 14px;font-size:13px;font-weight:600;color:var(--text);backdrop-filter:blur(6px);
+    animation:bob 3.2s ease-in-out infinite}
+  .fchip:nth-child(2){animation-delay:.5s}.fchip:nth-child(3){animation-delay:1s}
+  .fchip .fi{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    background:radial-gradient(circle at 30% 25%,rgba(255,150,60,.3),rgba(255,120,30,.08));border:1px solid rgba(255,150,60,.3)}
+  .fchip .fi svg{width:15px;height:15px;stroke:var(--accent);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+  @media (max-width:860px){.hero .chips-float{display:none}}
+
+  /* ── Пакеты звёзд ── */
+  .pkgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin:4px 0 36px}
+  .pkg{position:relative;background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);
+    border-radius:var(--radius);padding:20px 18px;text-align:center;transition:.18s}
+  .pkg:hover{border-color:rgba(255,150,60,.5);transform:translateY(-3px);box-shadow:var(--glow)}
+  .pkg.hit{border-color:rgba(255,150,60,.55)}
+  .pkg .hit-badge{position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:var(--grad);
+    color:var(--accent-ink);font-size:11px;font-weight:800;padding:3px 12px;border-radius:999px;box-shadow:0 4px 12px rgba(255,120,30,.4)}
+  .pkg .q{font-size:30px;font-weight:900;letter-spacing:-1px}
+  .pkg .q .star{color:var(--accent)}
+  .pkg .inst{color:var(--ok);font-size:12px;font-weight:600;margin:4px 0 12px}
+  .pkg .pp{font-size:20px;font-weight:800;margin-bottom:12px}
+  .pkg .pp .load{color:var(--dim);font-weight:500;font-size:14px}
+  .pkg button{width:100%;background:var(--grad);color:var(--accent-ink);border:none;border-radius:11px;
+    padding:11px;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit;transition:.15s}
+  .pkg button:hover{filter:brightness(1.06)}
+
+  /* ── Отзывы ── */
+  .reviews{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin:4px 0 36px}
+  .rev{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);
+    border-radius:var(--radius);padding:18px}
+  .rev .stars{color:var(--accent);font-size:15px;letter-spacing:2px}
+  .rev .rtitle{font-weight:700;font-size:14px;margin:6px 0 8px;color:var(--muted)}
+  .rev .rtext{font-size:14px;line-height:1.55;color:var(--text);
+    display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+  .rev .rwho{color:var(--dim);font-size:12px;margin-top:12px}
+
+  /* ── FAQ ── */
+  .faq{display:flex;flex-direction:column;gap:10px;margin:4px 0 40px;max-width:800px}
+  .qa{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
+  .qa summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:700;font-size:15px;
+    display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .qa summary::-webkit-details-marker{display:none}
+  .qa summary::after{content:"+";color:var(--accent);font-weight:800;font-size:20px;transition:.2s}
+  .qa[open] summary::after{transform:rotate(45deg)}
+  .qa .ans{padding:0 18px 16px;color:var(--muted);font-size:14px;line-height:1.6}
+
   @media (max-width:640px){
     .hero{padding:28px 20px;border-radius:18px;margin-top:18px}
     .hero h1{font-size:28px}.hero p{font-size:15px}
@@ -190,7 +246,15 @@
 </head>
 <body>
 <header><div class="wrap bar">
-  <div class="logo" onclick="goHome()"><span class="dot">🛍️</span>Vall<span>Shop</span></div>
+  <div class="logo" onclick="goHome()">
+    <svg class="emblem" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#vgh)"/>
+      <path d="M14.5 15.5 L24 33 L33.5 15.5" stroke="#2a1505" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M24 10.5 l1.3 2.7 2.9.4 -2.1 2 .5 2.9 -2.6 -1.4 -2.6 1.4 .5 -2.9 -2.1 -2 2.9 -.4z" fill="#2a1505"/>
+      <defs><linearGradient id="vgh" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#ffb24d"/><stop offset="1" stop-color="#ff6f1e"/></linearGradient></defs>
+    </svg>Vall<span>Shop</span>
+  </div>
   <div id="auth" class="auth"></div>
 </div></header>
 
@@ -198,11 +262,23 @@
   <div id="verifybar" style="display:none"></div>
 
   <section id="hero" class="hero" style="display:none">
+    <div class="chips-float">
+      <div class="fchip"><span class="fi"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9 6.8 19l1-5.8L3.6 9.1l5.8-.8z"/></svg></span>Telegram Stars</div>
+      <div class="fchip"><span class="fi"><svg viewBox="0 0 24 24"><path d="M3 17l3-9 4 5 2-7 2 7 4-5 3 9z"/></svg></span>Premium</div>
+      <div class="fchip"><span class="fi"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span>Пополнение Steam</div>
+    </div>
+    <svg class="hemblem" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#vghero)"/>
+      <path d="M14.5 15.5 L24 33 L33.5 15.5" stroke="#2a1505" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M24 10.5 l1.3 2.7 2.9.4 -2.1 2 .5 2.9 -2.6 -1.4 -2.6 1.4 .5 -2.9 -2.1 -2 2.9 -.4z" fill="#2a1505"/>
+      <defs><linearGradient id="vghero" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#ffb24d"/><stop offset="1" stop-color="#ff6f1e"/></linearGradient></defs>
+    </svg>
     <h1>Цифровые товары и услуги — <em>в один клик</em></h1>
     <p>Звёзды, Premium, пополнение Steam, игровые сервисы, SMM и VPN. Пополнил баланс — купил за секунды.</p>
     <div class="cta-row">
-      <button class="btn primary" onclick="document.getElementById('catalog').scrollIntoView()">🛍️ В каталог</button>
-      <button class="btn ghost" onclick="openTopup()">💳 Пополнить баланс</button>
+      <button class="btn primary" onclick="document.getElementById('catalog').scrollIntoView()">В каталог</button>
+      <button class="btn ghost" onclick="openTopup()">Пополнить баланс</button>
     </div>
     <div class="stats">
       <div class="stat"><b>⚡ Мгновенно</b><span>быстрая выдача заказов</span></div>
@@ -215,12 +291,46 @@
     <div id="crumbs" class="crumbs"></div>
     <div id="content"><div class="state">Загрузка каталога…</div></div>
   </div>
+
+  <div id="homesections" style="display:none">
+    <section id="pkgsec" style="display:none">
+      <h2 class="section">⭐ Популярные пакеты звёзд</h2>
+      <div class="section-sub">Частые суммы с мгновенной выдачей. Нужно другое количество — откройте «Звёзды» в каталоге.</div>
+      <div id="pkgs" class="pkgs"></div>
+    </section>
+
+    <section id="revsec" style="display:none">
+      <h2 class="section">💬 Отзывы покупателей</h2>
+      <div class="section-sub">Реальные отзывы о заказах в нашем магазине.</div>
+      <div id="reviews" class="reviews"></div>
+    </section>
+
+    <section>
+      <h2 class="section">❓ Частые вопросы</h2>
+      <div class="section-sub">Коротко о том, как всё работает.</div>
+      <div class="faq">
+        <details class="qa"><summary>Как сделать заказ?</summary><div class="ans">Зарегистрируйтесь или войдите через Telegram, пополните баланс удобным способом и купите нужный товар — списание происходит с баланса, выдача мгновенная или в течение короткого времени.</div></details>
+        <details class="qa"><summary>Какие способы оплаты?</summary><div class="ans">Банковская карта, СБП и USDT-крипта. Баланс пополняется в рублях, дальше вы просто покупаете товары с баланса.</div></details>
+        <details class="qa"><summary>Как быстро приходит заказ?</summary><div class="ans">Коды из наличия выдаются сразу. Пополнения (Steam, Звёзды, Премиум) и SMM-накрутка оформляются у поставщика и приходят в течение короткого времени — статус виден в разделе «Мои заказы».</div></details>
+        <details class="qa"><summary>Где посмотреть мои заказы?</summary><div class="ans">В разделе «Мои заказы» в шапке сайта — там статусы, выдача (коды/ссылки) и прогресс для SMM. Заказы из Telegram-бота тоже отображаются, если аккаунт привязан.</div></details>
+        <details class="qa"><summary>Это безопасно?</summary><div class="ans">Оплата идёт через проверенных платёжных провайдеров, а покупки совершаются с внутреннего баланса. Пароль защищён, а email можно подтвердить для дополнительной безопасности.</div></details>
+      </div>
+    </section>
+  </div>
 </main>
 
 <footer>
   <div class="wrap foot">
     <div class="brand">
-      <div class="logo"><span class="dot">🛍️</span>Vall<span>Shop</span></div>
+      <div class="logo">
+        <svg class="emblem" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#vgf)"/>
+          <path d="M14.5 15.5 L24 33 L33.5 15.5" stroke="#2a1505" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M24 10.5 l1.3 2.7 2.9.4 -2.1 2 .5 2.9 -2.6 -1.4 -2.6 1.4 .5 -2.9 -2.1 -2 2.9 -.4z" fill="#2a1505"/>
+          <defs><linearGradient id="vgf" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#ffb24d"/><stop offset="1" stop-color="#ff6f1e"/></linearGradient></defs>
+        </svg>Vall<span>Shop</span>
+      </div>
       <p>Магазин цифровых товаров и услуг. Быстрая выдача, оплата с баланса, поддержка 24/7.</p>
     </div>
     <div class="cols">
@@ -312,19 +422,28 @@ let vmap = {};   // id номинала -> данные (для покупки)
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
 $("year").textContent = new Date().getFullYear();
 
-// Иконка и описание категории по названию (для карточек каталога).
+// Иконка (SVG) и описание категории по названию (для карточек каталога).
+const _ICONS = {
+  star: '<path d="M12 3l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9 6.8 19l1-5.8L3.6 9.1l5.8-.8z"/>',
+  crown: '<path d="M4 18h16M5 18l-1.6-9.4 5.1 4.2L12 6l3.5 6.8 5.1-4.2L19 18"/>',
+  steam: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  chart: '<path d="M4 19V5M4 19h16M7 15l3-4 3 2 4-6M17 7h3v3"/>',
+  shield: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9.3 12l1.8 1.8 3.4-3.7"/>',
+  pad: '<rect x="2.5" y="7" width="19" height="10" rx="5"/><path d="M7 10v4M5 12h4M16 11h.01M18 13.5h.01M15.5 13.5h.01M18.5 11h.01"/>',
+  gift: '<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M4 13h16M12 9v11M12 9S9.8 4 7.5 5.5 9.4 9 12 9zM12 9s2.2-5 4.5-3.5S14.6 9 12 9z"/>',
+  bag: '<path d="M6 8h12l1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>'
+};
+function _svg(key){ return `<svg viewBox="0 0 24 24">${_ICONS[key]||_ICONS.bag}</svg>`; }
 function catIcon(title){
   const t = (title||"").toLowerCase();
-  if(/звёзд|звезд|stars/.test(t)) return "⭐";
-  if(/премиум|premium/.test(t)) return "👑";
-  if(/steam/.test(t)) return "🎯";
-  if(/smm|накрут|подписч|лайк|просмотр/.test(t)) return "📈";
-  if(/vpn/.test(t)) return "🛡️";
-  if(/игр|game|сервис/.test(t)) return "🎮";
-  if(/robux|roblox/.test(t)) return "🧊";
-  if(/pubg|uc/.test(t)) return "🔫";
-  if(/подар|gift/.test(t)) return "🎁";
-  return "🛍️";
+  if(/звёзд|звезд|stars/.test(t)) return _svg("star");
+  if(/премиум|premium/.test(t)) return _svg("crown");
+  if(/steam/.test(t)) return _svg("steam");
+  if(/smm|накрут|подписч|лайк|просмотр/.test(t)) return _svg("chart");
+  if(/vpn/.test(t)) return _svg("shield");
+  if(/подар|gift/.test(t)) return _svg("gift");
+  if(/игр|game|сервис|robux|roblox|pubg|uc/.test(t)) return _svg("pad");
+  return _svg("bag");
 }
 function catDesc(title){
   const t = (title||"").toLowerCase();
@@ -395,13 +514,16 @@ async function goHome(){
   stack = [];
   renderCrumbs();
   $("hero").style.display = "";
+  $("homesections").style.display = "";
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
     const data = await api("/api/catalog");
     if(!data.products.length){ content.innerHTML = '<div class="state">Каталог пуст.</div>'; return; }
-    content.innerHTML = `<h2 class="section">Каталог</h2>`
+    content.innerHTML = `<h2 class="section">🛍️ Каталог</h2>`
       + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
       + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
+    loadStarPackages(data.products);
+    loadReviews();
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить каталог.</div>'; }
 }
 
@@ -409,6 +531,7 @@ async function open_(id, title){
   stack.push({id, title});
   renderCrumbs();
   $("hero").style.display = "none";
+  $("homesections").style.display = "none";
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
     const data = await api("/api/catalog/" + id);
@@ -765,6 +888,7 @@ async function showOrders(){
   if(!token){ location.href="/login"; return; }
   stack = [];
   $("hero").style.display = "none";
+  $("homesections").style.display = "none";
   crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
@@ -831,6 +955,67 @@ function renderOrderDetail(o){
   $("ordbody").innerHTML = h;
 }
 document.getElementById("ordovl").addEventListener("click", (e)=>{ if(e.target.id==="ordovl") closeOrder(); });
+
+// ── Пакеты звёзд (секция на главной) ──────────────────────────────────────────
+let starsVid = null;
+async function loadStarPackages(products){
+  const sec = $("pkgsec");
+  try{
+    const prod = (products||[]).find(p => /звёзд|звезд|stars/i.test(p.title||""));
+    if(!prod){ sec.style.display="none"; return; }
+    const det = await api("/api/catalog/" + prod.id);
+    const variants = det.type === "product" ? det.variants : [];
+    const sv = variants.find(v => v.buy_kind === "stars");
+    if(!sv){ sec.style.display="none"; return; }
+    starsVid = sv.id; vmap[sv.id] = sv;
+    const lim = await api("/api/buy/stars-quote");
+    const lo = lim.min||50, hi = lim.max||10000;
+    const presets = [100,250,500,1000,2500].filter(a => a>=lo && a<=hi);
+    if(!presets.length){ sec.style.display="none"; return; }
+    $("pkgs").innerHTML = presets.map(a => `
+      <div class="pkg${a===250?' hit':''}">
+        ${a===250?'<div class="hit-badge">ХИТ</div>':''}
+        <div class="q">${a} <span class="star">★</span></div>
+        <div class="inst">⚡ Мгновенная выдача</div>
+        <div class="pp" id="pp-${a}"><span class="load">расчёт…</span></div>
+        <button onclick="openStars(${a})">Купить</button>
+      </div>`).join("");
+    sec.style.display = "";
+    // Живые цены по каждому пакету.
+    presets.forEach(async a => {
+      try{
+        const q = await api("/api/buy/stars-quote?quantity=" + a);
+        const el = $("pp-"+a);
+        if(el) el.textContent = q.price_rub != null ? rub(q.price_rub) : "—";
+      }catch(e){}
+    });
+  }catch(e){ sec.style.display="none"; }
+}
+function openStars(amount){
+  if(!localStorage.getItem("vs_token")){ location.href="/login"; return; }
+  if(!starsVid){ return; }
+  openBuy(starsVid);
+  const q = $("buyqty"); q.value = amount;
+  refreshStarsPrice();
+}
+
+// ── Отзывы (секция на главной) ────────────────────────────────────────────────
+async function loadReviews(){
+  const sec = $("revsec");
+  try{
+    const data = await api("/api/reviews?limit=9");
+    if(!data.reviews || !data.reviews.length){ sec.style.display="none"; return; }
+    const stars = (n)=>'★'.repeat(Math.max(0,Math.min(5,n)))+'<span style="color:var(--line2)">'+'★'.repeat(5-Math.max(0,Math.min(5,n)))+'</span>';
+    $("reviews").innerHTML = data.reviews.map(r => `
+      <div class="rev">
+        <div class="stars">${stars(r.rating)}</div>
+        ${r.product_title?`<div class="rtitle">${esc(r.product_title)}</div>`:''}
+        <div class="rtext">${esc(r.text||'')}</div>
+        <div class="rwho">${r.username?('@'+esc(r.username)):'Покупатель'}</div>
+      </div>`).join("");
+    sec.style.display = "";
+  }catch(e){ sec.style.display="none"; }
+}
 
 initAuth();
 goHome();
