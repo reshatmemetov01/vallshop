@@ -1,28 +1,33 @@
-# nginx-конфиг для ПУБЛИЧНОЙ ВИТРИНЫ (сайт) на vallshop.com и vallshop.ru.
-# Отдельный server-блок — не затрагивает бота (shop.vallshop.com → :8080).
+# nginx-конфиг ПУБЛИЧНОЙ ВИТРИНЫ. Главный домен — vallshop.com.
+# www.vallshop.com, vallshop.ru, www.vallshop.ru делают 301-редирект на него
+# (у Telegram Login Widget может быть только ОДИН домен бота — vallshop.com).
 # Витрина слушает 127.0.0.1:8090 (docker-compose.web.yml).
 #
-# Предварительно: DNS A-записи vallshop.com, www.vallshop.com, vallshop.ru,
-# www.vallshop.ru должны указывать на IP этого сервера.
-#
-# Установка:
-#   sudo cp deploy/nginx-site.conf.example /etc/nginx/sites-available/vallshop-site.conf
-#   sudo ln -s /etc/nginx/sites-available/vallshop-site.conf /etc/nginx/sites-enabled/
-#   sudo nginx -t && sudo systemctl reload nginx
-# Затем HTTPS-сертификат на все 4 домена (certbot сам пропишет TLS и редирект 80→443):
+# Сертификат общий (SAN) на все 4 домена — он уже выпущен ранее командой
 #   sudo certbot --nginx -d vallshop.com -d www.vallshop.com -d vallshop.ru -d www.vallshop.ru
+# и лежит в /etc/letsencrypt/live/vallshop.com/. Повторно certbot запускать не нужно.
 #
-# На debian/ubuntu с conf.d можно положить файл в /etc/nginx/conf.d/ вместо
-# sites-available/enabled.
+# Применение (сначала ПРОВЕРКА, потом reload — если тест упадёт, сайт не ломается):
+#   sudo cp deploy/nginx-site.conf.example /etc/nginx/sites-available/vallshop-site.conf
+#   sudo nginx -t
+#   sudo systemctl reload nginx     # только если nginx -t прошёл
+#
+# Если nginx -t ругается на отсутствие options-ssl-nginx.conf / ssl-dhparams.pem —
+# закомментируйте две строки include/ssl_dhparam в каждом server-блоке.
 
+# ── Канонический сайт: vallshop.com ───────────────────────────────────────────
 server {
-    listen 80;
-    listen [::]:80;
-    server_name vallshop.com www.vallshop.com vallshop.ru www.vallshop.ru;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name vallshop.com;
+
+    ssl_certificate /etc/letsencrypt/live/vallshop.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/vallshop.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 5m;
 
-    # Витрина + её API (всё на контейнере сайта, localhost:8090).
     location / {
         proxy_pass http://127.0.0.1:8090;
         proxy_set_header Host $host;
@@ -30,4 +35,26 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+}
+
+# ── Редирект www.vallshop.com + vallshop.ru (+www) → vallshop.com ──────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name www.vallshop.com vallshop.ru www.vallshop.ru;
+
+    ssl_certificate /etc/letsencrypt/live/vallshop.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/vallshop.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    return 301 https://vallshop.com$request_uri;
+}
+
+# ── HTTP (80) → HTTPS, всё на канонический домен ──────────────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name vallshop.com www.vallshop.com vallshop.ru www.vallshop.ru;
+    return 301 https://vallshop.com$request_uri;
 }
