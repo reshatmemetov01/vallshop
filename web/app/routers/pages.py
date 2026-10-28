@@ -14,6 +14,7 @@ _INDEX = _STATIC / "index.html"
 _AUTH = _STATIC / "auth.html"
 _VERIFY = _STATIC / "verify.html"
 _RESET = _STATIC / "reset.html"
+_REVIEWS = _STATIC / "reviews.html"
 
 
 @router.api_route("/", methods=["GET", "HEAD"])
@@ -39,3 +40,8 @@ async def verify_page() -> FileResponse:
 @router.get("/reset")
 async def reset_page() -> FileResponse:
     return FileResponse(_RESET)
+
+
+@router.get("/reviews")
+async def reviews_page() -> FileResponse:
+    return FileResponse(_REVIEWS)
