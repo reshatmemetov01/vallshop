@@ -15,6 +15,7 @@ _AUTH = _STATIC / "auth.html"
 _VERIFY = _STATIC / "verify.html"
 _RESET = _STATIC / "reset.html"
 _REVIEWS = _STATIC / "reviews.html"
+_FAVICON = _STATIC / "favicon.svg"
 
 
 @router.api_route("/", methods=["GET", "HEAD"])
@@ -45,3 +46,13 @@ async def reset_page() -> FileResponse:
 @router.get("/reviews")
 async def reviews_page() -> FileResponse:
     return FileResponse(_REVIEWS)
+
+
+@router.api_route("/favicon.svg", methods=["GET", "HEAD"])
+async def favicon_svg() -> FileResponse:
+    return FileResponse(_FAVICON, media_type="image/svg+xml")
+
+
+@router.api_route("/favicon.ico", methods=["GET", "HEAD"])
+async def favicon_ico() -> FileResponse:
+    return FileResponse(_FAVICON, media_type="image/svg+xml")

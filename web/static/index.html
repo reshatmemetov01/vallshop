@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VallShop — цифровые товары и услуги</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#ff8a2e">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kaushan+Script&display=swap" rel="stylesheet">
@@ -69,6 +71,8 @@
   .btn.primary:hover{filter:brightness(1.05);transform:translateY(-1px)}
   .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line2)}
   .btn.ghost:hover{border-color:var(--accent)}
+  .btn.tg{background:linear-gradient(135deg,#34b4f0,#1f98d6);color:#fff;box-shadow:0 8px 22px rgba(34,158,217,.32)}
+  .btn.tg:hover{filter:brightness(1.06);transform:translateY(-1px)}
   /* Карточки преимуществ (как у референса) */
   .statcards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:34px auto 0;max-width:760px}
   .scard{background:rgba(255,255,255,.025);border:1px solid var(--line2);border-radius:16px;
@@ -274,6 +278,10 @@
     <div class="cta-row">
       <button class="btn primary" onclick="document.getElementById('catalog').scrollIntoView()">В каталог</button>
       <button class="btn ghost" onclick="openTopup()">Пополнить баланс</button>
+      <a class="btn tg" href="https://t.me/vallshopbot" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9.8 16.1l-.4 3.9c.5 0 .7-.2 1-.5l2.4-2.3 5 3.6c.9.5 1.6.3 1.8-.8l3.3-15.3c.3-1.3-.5-1.9-1.4-1.6L1.3 9.9C0 10.4 0 11.1 1.1 11.5l5 1.6L17.6 6c.5-.3 1-.2.6.2"/></svg>
+        Telegram-бот
+      </a>
     </div>
     <div class="statcards">
       <div class="scard reveal"><div class="sic">⚡</div><b>Мгновенно</b><span>быстрая выдача заказов</span></div>

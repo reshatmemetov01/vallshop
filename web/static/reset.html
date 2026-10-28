@@ -4,24 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VallShop — новый пароль</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#ff8a2e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kaushan+Script&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#0e1116;--panel:#171b22;--line:#2a303a;--text:#e8edf3;--muted:#8b96a5;
-    --accent:#ff7a2f;--accent2:#2fb4a6;--ok:#36c26b;--bad:#e5484d;--radius:14px}
+  :root{--bg:#13100e;--bg2:#0e0c0a;--panel:#1d1813;--line2:#43382b;--text:#f7f2ec;--muted:#bcae9e;
+    --accent:#ff8a2e;--accent2:#ffc27a;--accent-ink:#2a1505;--grad:linear-gradient(135deg,#ffb24d,#ff6f1e)}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;display:flex;
-    align-items:center;justify-content:center;padding:24px 16px;
-    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
-  .card{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);
-    border-radius:var(--radius);padding:28px}
-  .logo{font-weight:800;font-size:22px;margin-bottom:18px;text-align:center}.logo span{color:var(--accent)}
-  h1{font-size:19px;margin:0 0 16px;text-align:center}
-  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
-  input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
-    padding:11px 13px;color:var(--text);font-size:15px}
-  input:focus{outline:none;border-color:var(--accent)}
-  .btn{width:100%;margin-top:18px;background:var(--accent);color:#1a0f07;border:none;
-    border-radius:10px;padding:12px;font-weight:700;font-size:15px;cursor:pointer}
-  .btn:disabled{opacity:.6;cursor:default}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;color:var(--text);
+    background:radial-gradient(900px 440px at 50% -10%, rgba(255,122,43,.12), transparent 65%),var(--bg);
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
+  .card{width:100%;max-width:420px;background:linear-gradient(180deg,#1c1710,#171310);border:1px solid var(--line2);
+    border-radius:20px;padding:30px;box-shadow:0 14px 40px rgba(0,0,0,.4)}
+  .logo{font-family:"Kaushan Script",cursive;font-size:30px;color:#fff;margin-bottom:16px;text-align:center;line-height:1}.logo span{color:var(--accent)}
+  h1{font-size:20px;margin:0 0 16px;text-align:center;font-weight:800}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px;font-weight:600}
+  input{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:11px;
+    padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,138,61,.14)}
+  .btn{width:100%;margin-top:18px;background:var(--grad);color:var(--accent-ink);border:none;
+    border-radius:12px;padding:13px;font-weight:800;font-size:15px;cursor:pointer;font-family:inherit}
+  .btn:hover{filter:brightness(1.05)}.btn:disabled{opacity:.55;cursor:default;filter:none}
   .msg{margin-top:14px;font-size:14px;min-height:20px}.msg.err{color:#ffb3b5}.msg.ok{color:#9fe8bd}
   .hint{color:var(--muted);font-size:12px;margin-top:6px}
   .foot{text-align:center;margin-top:16px}.foot a{color:var(--accent2);text-decoration:none}
