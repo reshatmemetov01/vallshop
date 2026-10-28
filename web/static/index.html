@@ -3,133 +3,242 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VallShop</title>
+<title>VallShop — цифровые товары и услуги</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0e1116; --panel:#171b22; --panel2:#1f242d; --line:#2a303a;
-    --text:#e8edf3; --muted:#8b96a5; --accent:#ff7a2f; --accent2:#2fb4a6;
-    --ok:#36c26b; --bad:#e5484d; --radius:14px;
+    --bg:#111318; --bg2:#0d0f13; --panel:#1a1d24; --panel2:#21242d; --panel3:#262a34;
+    --line:#2b2f3a; --line2:#353a47;
+    --text:#f4f6fa; --muted:#a3adbd; --dim:#7a8495;
+    --accent:#ff8a3d; --accent2:#ffb074; --accent-ink:#201306;
+    --grad:linear-gradient(135deg,#ff9a4d 0%,#ff7a2b 100%);
+    --ok:#39d07f; --bad:#ff6b6b; --warn:#ffb454; --ref:#b79bff;
+    --radius:16px; --radius-sm:12px;
+    --shadow:0 10px 30px rgba(0,0,0,.35); --glow:0 0 0 1px rgba(255,138,61,.35),0 12px 34px rgba(255,122,43,.14);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);
-    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:
+      radial-gradient(1100px 500px at 78% -8%, rgba(255,122,43,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(255,138,61,.06), transparent 55%),
+      var(--bg);
+    color:var(--text);font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5;min-height:100vh}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:1000px;margin:0 auto;padding:0 16px}
-  header{position:sticky;top:0;z-index:5;background:rgba(14,17,22,.9);
-    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-  .bar{display:flex;align-items:center;gap:12px;padding:14px 0}
-  .logo{font-weight:800;font-size:20px;letter-spacing:.3px}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+
+  /* ── Header ── */
+  header{position:sticky;top:0;z-index:30;background:rgba(14,15,19,.72);
+    backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  .bar{display:flex;align-items:center;gap:14px;padding:14px 0}
+  .logo{font-weight:900;font-size:22px;letter-spacing:.2px;display:flex;align-items:center;gap:8px;cursor:pointer}
+  .logo .dot{width:30px;height:30px;border-radius:9px;background:var(--grad);display:grid;place-items:center;
+    font-size:16px;box-shadow:0 6px 16px rgba(255,122,43,.4)}
   .logo span{color:var(--accent)}
-  .wip{margin-left:auto;font-size:12px;color:#ffd9bf;background:#3a2414;
-    border:1px solid #5a3a22;padding:5px 10px;border-radius:999px}
-  .auth{margin-left:auto;display:flex;gap:10px;align-items:center;font-size:14px}
-  .auth .email{color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .auth .bal{color:var(--ok);font-weight:700;background:#0f2f1e;border:1px solid #1e5a37;
-    padding:5px 11px;border-radius:999px}
-  .auth .topup{background:var(--accent)!important;color:#1a0f07!important;border:none!important;
-    font-weight:700!important}
-  /* модалка пополнения */
-  .ovl{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;
-    justify-content:center;z-index:20;padding:16px}
+  .auth{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:14px;flex-wrap:wrap;justify-content:flex-end}
+  .auth .email{color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+  .auth button,.auth .loginbtn{border:1px solid var(--line2);background:var(--panel2);color:var(--text);
+    padding:8px 14px;border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;transition:.15s}
+  .auth button:hover,.auth .loginbtn:hover{border-color:var(--accent);color:#fff}
+  .auth .bal{color:#bdf5d3;font-weight:800;background:rgba(57,208,127,.12);border:1px solid rgba(57,208,127,.3);
+    padding:7px 13px;border-radius:999px;white-space:nowrap}
+  .auth .topup,.loginbtn.cta{background:var(--grad)!important;color:var(--accent-ink)!important;border:none!important;
+    font-weight:800!important;box-shadow:0 6px 16px rgba(255,122,43,.3)}
+  .auth .topup:hover{color:var(--accent-ink)!important;filter:brightness(1.05)}
+
+  /* ── Hero ── */
+  .hero{position:relative;margin:28px 0 8px;padding:40px 36px;border:1px solid var(--line);
+    border-radius:22px;background:
+      radial-gradient(600px 240px at 88% 0%, rgba(255,122,43,.16), transparent 70%),
+      linear-gradient(180deg,#1c1f27,#14161c);overflow:hidden}
+  .hero::after{content:"";position:absolute;right:-60px;top:-60px;width:260px;height:260px;border-radius:50%;
+    background:var(--grad);filter:blur(80px);opacity:.25}
+  .hero h1{font-size:38px;line-height:1.1;margin:0 0 14px;font-weight:900;letter-spacing:-.5px;max-width:620px}
+  .hero h1 em{font-style:normal;color:var(--accent)}
+  .hero p{color:var(--muted);font-size:17px;margin:0 0 24px;max-width:540px}
+  .hero .cta-row{display:flex;gap:12px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;font-family:inherit;
+    font-weight:800;font-size:15px;padding:13px 24px;border-radius:12px;transition:.15s}
+  .btn.primary{background:var(--grad);color:var(--accent-ink);box-shadow:0 8px 22px rgba(255,122,43,.32)}
+  .btn.primary:hover{filter:brightness(1.05);transform:translateY(-1px)}
+  .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line2)}
+  .btn.ghost:hover{border-color:var(--accent)}
+  .stats{display:flex;gap:26px;flex-wrap:wrap;margin-top:30px;position:relative;z-index:1}
+  .stat{display:flex;flex-direction:column;gap:2px}
+  .stat b{font-size:20px;font-weight:800}
+  .stat span{color:var(--dim);font-size:13px}
+
+  h2.section{font-size:22px;margin:34px 0 4px;font-weight:800;letter-spacing:-.3px}
+  .section-sub{color:var(--muted);font-size:14px;margin:0 0 16px}
+
+  .crumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted);font-size:14px;margin:22px 0 14px}
+  .crumbs b{color:var(--text);font-weight:700}.crumbs .sep{opacity:.4}
+
+  /* ── Category grid ── */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin:4px 0 36px}
+  .card{position:relative;background:linear-gradient(180deg,var(--panel),#171a21);border:1px solid var(--line);
+    border-radius:var(--radius);padding:20px;cursor:pointer;transition:.18s;display:flex;flex-direction:column;
+    gap:6px;overflow:hidden}
+  .card:hover{border-color:rgba(255,138,61,.5);transform:translateY(-3px);box-shadow:var(--glow)}
+  .card .ic{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:26px;margin-bottom:8px;
+    background:radial-gradient(circle at 30% 25%,rgba(255,138,61,.25),rgba(255,122,43,.08));
+    border:1px solid rgba(255,138,61,.28);transition:.25s}
+  .card:hover .ic{transform:translateY(-3px) scale(1.04);animation:float 2.4s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(-3px) scale(1.04)}50%{transform:translateY(-7px) scale(1.04)}}
+  .card .t{font-weight:700;font-size:17px}
+  .card .cdesc{color:var(--muted);font-size:13px;flex:1}
+  .card .arrow{margin-top:8px;color:var(--accent);font-size:13px;font-weight:700}
+
+  /* ── Variant list ── */
+  .vlist{display:flex;flex-direction:column;gap:12px;margin:4px 0 36px}
+  .vrow{background:linear-gradient(180deg,var(--panel),#171a21);border:1px solid var(--line);
+    border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;transition:.15s}
+  .vrow:hover{border-color:var(--line2)}
+  .vrow .vt{font-weight:700;flex:1 1 200px;min-width:0;font-size:15px}
+  .vrow .desc{flex-basis:100%;color:var(--muted);font-size:13px;white-space:pre-wrap;margin-top:2px}
+  .price{font-weight:800;font-size:18px;white-space:nowrap}
+  .price small{color:var(--dim);font-weight:500;font-size:12px}
+  .badge{font-size:12px;padding:4px 10px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .badge.ok{color:#bff3d2;background:rgba(57,208,127,.12);border:1px solid rgba(57,208,127,.3)}
+  .badge.bad{color:#ffd0d2;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3)}
+  .buy{background:var(--panel3);color:var(--muted);border:1px solid var(--line2);border-radius:11px;
+    padding:10px 18px;font-weight:800;cursor:not-allowed;font-family:inherit;font-size:14px;transition:.15s}
+  .buy.active{background:var(--grad);color:var(--accent-ink);border:none;cursor:pointer;
+    box-shadow:0 6px 16px rgba(255,122,43,.28)}
+  .buy.active:hover{filter:brightness(1.06);transform:translateY(-1px)}
+
+  .state{color:var(--muted);padding:48px 0;text-align:center}
+
+  /* ── Verify banner ── */
+  .vbar{margin:16px 0 0;background:rgba(255,138,61,.09);border:1px solid rgba(255,138,61,.3);color:#ffd9bf;
+    border-radius:12px;padding:12px 16px;font-size:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .vbar button{background:var(--grad);color:var(--accent-ink);border:none;border-radius:9px;
+    padding:7px 13px;font-weight:700;cursor:pointer;font-size:13px;font-family:inherit}
+
+  /* ── Footer ── */
+  footer{border-top:1px solid var(--line);margin-top:30px;background:var(--bg2)}
+  .foot{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;padding:34px 0 18px}
+  .foot .brand{max-width:280px}
+  .foot .brand .logo{margin-bottom:10px}
+  .foot .brand p{color:var(--dim);font-size:13px;margin:0}
+  .foot .cols{display:flex;gap:56px;flex-wrap:wrap}
+  .foot .col h4{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:0 0 12px}
+  .foot .col a{display:block;color:var(--muted);font-size:14px;margin-bottom:9px;transition:.15s}
+  .foot .col a:hover{color:var(--accent)}
+  .copy{border-top:1px solid var(--line);color:var(--dim);font-size:13px;padding:16px 0;text-align:center}
+
+  /* ── Modal (общая) ── */
+  .ovl{position:fixed;inset:0;background:rgba(5,6,9,.66);display:none;align-items:center;justify-content:center;
+    z-index:50;padding:16px;backdrop-filter:blur(3px)}
   .ovl.show{display:flex}
-  .modal{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);
-    border-radius:var(--radius);padding:22px}
-  .modal h3{margin:0 0 16px;font-size:18px}
-  .modal label{display:block;font-size:13px;color:var(--muted);margin:10px 0 6px}
-  .modal input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
-    padding:11px 13px;color:var(--text);font-size:16px}
-  .modal input:focus{outline:none;border-color:var(--accent)}
-  .modal select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
-    padding:11px 13px;color:var(--text);font-size:15px;margin-top:6px}
-  .modal select:focus{outline:none;border-color:var(--accent)}
-  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-  .chip{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px 12px;
-    border-radius:999px;cursor:pointer;font-size:14px}
-  .chip:hover{border-color:var(--accent)}
-  .methods{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-  .method{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);
-    border-radius:10px;padding:11px 13px;cursor:pointer;font-weight:600}
-  .method.sel{border-color:var(--accent);background:#2a1a0e}
-  .modal .row{display:flex;gap:10px;margin-top:18px}
-  .modal .pay{flex:1;background:var(--accent);color:#1a0f07;border:none;border-radius:10px;
-    padding:12px;font-weight:700;font-size:15px;cursor:pointer}
-  .modal .pay:disabled{opacity:.6;cursor:default}
-  .modal .cancel{background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:10px;padding:12px 16px;cursor:pointer}
+  .modal{width:100%;max-width:440px;background:linear-gradient(180deg,#1c1f27,#171a20);border:1px solid var(--line2);
+    border-radius:20px;padding:24px;box-shadow:var(--shadow);max-height:90vh;overflow:auto}
+  .modal h3{margin:0 0 16px;font-size:19px;font-weight:800}
+  .modal label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px;font-weight:600}
+  .modal input,.modal select{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:11px;
+    padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit;margin-top:2px}
+  .modal input:focus,.modal select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,138,61,.14)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{background:var(--panel2);border:1px solid var(--line2);color:var(--text);padding:8px 14px;
+    border-radius:999px;cursor:pointer;font-size:14px;font-weight:600;transition:.15s}
+  .chip:hover{border-color:var(--accent);color:#fff}
+  .methods{display:flex;flex-direction:column;gap:9px;margin-top:8px}
+  .method{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line2);
+    border-radius:12px;padding:13px 15px;cursor:pointer;font-weight:700;transition:.15s}
+  .method:hover{border-color:var(--line2)}
+  .method.sel{border-color:var(--accent);background:rgba(255,138,61,.1)}
+  .modal .row{display:flex;gap:10px;margin-top:20px}
+  .modal .pay{flex:1;background:var(--grad);color:var(--accent-ink);border:none;border-radius:12px;
+    padding:13px;font-weight:800;font-size:15px;cursor:pointer;font-family:inherit;transition:.15s}
+  .modal .pay:hover{filter:brightness(1.05)}
+  .modal .pay:disabled{opacity:.5;cursor:default;filter:none}
+  .modal .cancel{background:var(--panel2);border:1px solid var(--line2);color:var(--text);
+    border-radius:12px;padding:13px 18px;cursor:pointer;font-family:inherit;font-weight:700}
   .modal .mmsg{margin-top:12px;font-size:14px;min-height:18px;color:#ffb3b5}
   .modal .hint{color:var(--muted);font-size:12px;margin-top:6px}
-  .codebox{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;
+  .codebox{background:var(--bg2);border:1px solid var(--line2);border-radius:11px;padding:13px;
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;word-break:break-all;
     white-space:pre-wrap;user-select:all}
-  .okmsg{color:#9fe8bd;font-weight:600;margin-bottom:8px}
-  .copybtn{margin-top:8px;background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
-  .orow{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:14px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:.15s}
-  .orow:hover{border-color:var(--accent)}
-  .orow .ot{font-weight:600;flex:1 1 auto;min-width:0}
-  .orow .od{color:var(--muted);font-size:13px}
-  .st{font-size:12px;padding:3px 9px;border-radius:999px;white-space:nowrap;border:1px solid var(--line)}
-  .st.done{color:#bff3d2;background:#0f2f1e;border-color:#1e5a37}
-  .st.work{color:#ffe0bf;background:#2f2314;border-color:#5a3a22}
-  .st.bad{color:#ffd0d2;background:#2f1314;border-color:#5a2122}
-  .st.ref{color:#cdbff3;background:#1e1a2f;border-color:#3a2f5a}
-  .kv{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)}
-  .kv .k{color:var(--muted);font-size:14px}.kv .v{font-weight:600}
-  .bar2{height:8px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:10px}
-  .bar2 i{display:block;height:100%;background:var(--accent)}
-  .loginbtn{background:var(--accent);color:#1a0f07;padding:7px 15px;border-radius:999px;font-weight:700}
-  .auth button{background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
-  h1{font-size:18px;margin:20px 0 6px}
-  .crumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;
-    color:var(--muted);font-size:14px;margin:18px 0 10px}
-  .crumbs b{color:var(--text)}
-  .crumbs .sep{opacity:.5}
-  .back{display:inline-flex;align-items:center;gap:6px;cursor:pointer;
-    color:var(--accent2);font-size:14px;margin:10px 0}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-    gap:12px;margin:12px 0 40px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:16px;cursor:pointer;transition:.15s;display:flex;flex-direction:column;gap:6px}
-  .card:hover{border-color:var(--accent);transform:translateY(-2px)}
-  .card .t{font-weight:600}
-  .card .arrow{margin-top:auto;color:var(--muted);font-size:13px}
-  .vlist{display:flex;flex-direction:column;gap:10px;margin:12px 0 40px}
-  .vrow{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:14px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .vrow .vt{font-weight:600;flex:1 1 180px;min-width:0}
-  .vrow .desc{flex-basis:100%;color:var(--muted);font-size:13px;white-space:pre-wrap}
-  .price{font-weight:700;font-size:17px;white-space:nowrap}
-  .price small{color:var(--muted);font-weight:500;font-size:12px}
-  .badge{font-size:12px;padding:3px 9px;border-radius:999px;white-space:nowrap}
-  .badge.ok{color:#bff3d2;background:#0f2f1e;border:1px solid #1e5a37}
-  .badge.bad{color:#ffd0d2;background:#2f1314;border:1px solid #5a2122}
-  .buy{background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:10px;
-    padding:9px 16px;font-weight:700;cursor:not-allowed}
-  .buy.active{background:var(--accent);color:#1a0f07;border:none;cursor:pointer;opacity:1}
-  .buy.active:hover{filter:brightness(1.05)}
-  .state{color:var(--muted);padding:40px 0;text-align:center}
-  footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);
-    padding:20px 0 40px;text-align:center}
-  .vbar{margin:12px 0 0;background:#2f2314;border:1px solid #5a3a22;color:#ffd9bf;
-    border-radius:10px;padding:10px 14px;font-size:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .vbar button{background:var(--accent);color:#1a0f07;border:none;border-radius:8px;
-    padding:6px 12px;font-weight:700;cursor:pointer;font-size:13px}
+  .okmsg{color:#9fe8bd;font-weight:700;margin-bottom:8px}
+  .copybtn{margin-top:8px;display:inline-block;background:var(--panel2);border:1px solid var(--line2);color:var(--text);
+    border-radius:9px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit}
+  .copybtn:hover{border-color:var(--accent)}
+  .orow{background:linear-gradient(180deg,var(--panel),#171a21);border:1px solid var(--line);
+    border-radius:var(--radius);padding:15px 17px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:.15s}
+  .orow:hover{border-color:rgba(255,138,61,.45);transform:translateY(-2px)}
+  .orow .ot{font-weight:700;flex:1 1 auto;min-width:0}
+  .orow .od{color:var(--dim);font-size:13px;font-weight:500;margin-top:2px}
+  .st{font-size:12px;padding:4px 10px;border-radius:999px;white-space:nowrap;border:1px solid var(--line2);font-weight:600}
+  .st.done{color:#bff3d2;background:rgba(57,208,127,.12);border-color:rgba(57,208,127,.3)}
+  .st.work{color:#ffe0bf;background:rgba(255,180,84,.1);border-color:rgba(255,180,84,.3)}
+  .st.bad{color:#ffd0d2;background:rgba(255,107,107,.1);border-color:rgba(255,107,107,.3)}
+  .st.ref{color:#d8ccff;background:rgba(183,155,255,.1);border-color:rgba(183,155,255,.3)}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .kv .k{color:var(--muted);font-size:14px}.kv .v{font-weight:700;text-align:right}
+  .bar2{height:9px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:10px}
+  .bar2 i{display:block;height:100%;background:var(--grad)}
+
+  @media (max-width:640px){
+    .hero{padding:28px 20px;border-radius:18px;margin-top:18px}
+    .hero h1{font-size:28px}.hero p{font-size:15px}
+    .stats{gap:18px}.stat b{font-size:17px}
+    .foot{gap:24px}.foot .cols{gap:32px}
+  }
 </style>
 </head>
 <body>
 <header><div class="wrap bar">
-  <div class="logo">Vall<span>Shop</span></div>
+  <div class="logo" onclick="goHome()"><span class="dot">🛍️</span>Vall<span>Shop</span></div>
   <div id="auth" class="auth"></div>
 </div></header>
 
-<div id="verifybar" class="wrap" style="display:none"></div>
-
 <main class="wrap">
-  <div id="crumbs" class="crumbs"></div>
-  <div id="content"><div class="state">Загрузка каталога…</div></div>
+  <div id="verifybar" style="display:none"></div>
+
+  <section id="hero" class="hero" style="display:none">
+    <h1>Цифровые товары и услуги — <em>в один клик</em></h1>
+    <p>Звёзды, Premium, пополнение Steam, игровые сервисы, SMM и VPN. Пополнил баланс — купил за секунды.</p>
+    <div class="cta-row">
+      <button class="btn primary" onclick="document.getElementById('catalog').scrollIntoView()">🛍️ В каталог</button>
+      <button class="btn ghost" onclick="openTopup()">💳 Пополнить баланс</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>⚡ Мгновенно</b><span>быстрая выдача заказов</span></div>
+      <div class="stat"><b>💳 Карта · СБП · USDT</b><span>удобные способы оплаты</span></div>
+      <div class="stat"><b>🛡️ Надёжно</b><span>оплата с баланса</span></div>
+    </div>
+  </section>
+
+  <div id="catalog">
+    <div id="crumbs" class="crumbs"></div>
+    <div id="content"><div class="state">Загрузка каталога…</div></div>
+  </div>
 </main>
+
+<footer>
+  <div class="wrap foot">
+    <div class="brand">
+      <div class="logo"><span class="dot">🛍️</span>Vall<span>Shop</span></div>
+      <p>Магазин цифровых товаров и услуг. Быстрая выдача, оплата с баланса, поддержка 24/7.</p>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <h4>Магазин</h4>
+        <a href="#catalog" onclick="goHome()">Каталог</a>
+        <a href="#" onclick="showOrders();return false">Мои заказы</a>
+        <a href="#" onclick="openTopup();return false">Пополнить баланс</a>
+      </div>
+      <div class="col">
+        <h4>Аккаунт</h4>
+        <a href="/login">Вход / регистрация</a>
+        <a href="/login">Вход через Telegram</a>
+      </div>
+    </div>
+  </div>
+  <div class="copy wrap">© VallShop · <span id="year"></span> · цифровые товары и услуги</div>
+</footer>
 
 <div id="ordovl" class="ovl">
   <div class="modal">
@@ -194,8 +303,6 @@
   </div>
 </div>
 
-<footer class="wrap">VallShop · покупка товаров появится на следующем этапе.</footer>
-
 <script>
 const $ = (id) => document.getElementById(id);
 const content = $("content"), crumbs = $("crumbs");
@@ -203,6 +310,32 @@ let stack = [];  // хлебные крошки: [{id, title}]
 let vmap = {};   // id номинала -> данные (для покупки)
 
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
+$("year").textContent = new Date().getFullYear();
+
+// Иконка и описание категории по названию (для карточек каталога).
+function catIcon(title){
+  const t = (title||"").toLowerCase();
+  if(/звёзд|звезд|stars/.test(t)) return "⭐";
+  if(/премиум|premium/.test(t)) return "👑";
+  if(/steam/.test(t)) return "🎯";
+  if(/smm|накрут|подписч|лайк|просмотр/.test(t)) return "📈";
+  if(/vpn/.test(t)) return "🛡️";
+  if(/игр|game|сервис/.test(t)) return "🎮";
+  if(/robux|roblox/.test(t)) return "🧊";
+  if(/pubg|uc/.test(t)) return "🔫";
+  if(/подар|gift/.test(t)) return "🎁";
+  return "🛍️";
+}
+function catDesc(title){
+  const t = (title||"").toLowerCase();
+  if(/звёзд|звезд|stars/.test(t)) return "Telegram Stars на любой аккаунт";
+  if(/премиум|premium/.test(t)) return "Telegram Premium по @username";
+  if(/steam/.test(t)) return "Пополнение кошелька Steam";
+  if(/smm|накрут/.test(t)) return "Подписчики, лайки, просмотры";
+  if(/vpn/.test(t)) return "Доступ к любимым сервисам";
+  if(/игр|сервис/.test(t)) return "Ключи, гифткарты и пополнения";
+  return "Открыть раздел";
+}
 
 async function api(path){
   const r = await fetch(path, {headers:{"Accept":"application/json"}});
@@ -224,10 +357,12 @@ function renderCrumbs(){
 function esc(s){return (s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
 function productCard(p){
-  const sub = p.has_children ? "📂 открыть" : "выбрать номинал";
+  const sub = p.has_children ? "открыть →" : "выбрать →";
   return `<div class="card" onclick="open_(${p.id}, '${esc(p.title).replace(/'/g,"\\'")}')">
+    <div class="ic">${catIcon(p.title)}</div>
     <div class="t">${esc(p.title)}</div>
-    <div class="arrow">${sub} →</div></div>`;
+    <div class="cdesc">${esc(catDesc(p.title))}</div>
+    <div class="arrow">${sub}</div></div>`;
 }
 
 function variantRow(v){
@@ -259,17 +394,21 @@ function variantRow(v){
 async function goHome(){
   stack = [];
   renderCrumbs();
+  $("hero").style.display = "";
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
     const data = await api("/api/catalog");
     if(!data.products.length){ content.innerHTML = '<div class="state">Каталог пуст.</div>'; return; }
-    content.innerHTML = `<div class="grid">${data.products.map(productCard).join("")}</div>`;
+    content.innerHTML = `<h2 class="section">Каталог</h2>`
+      + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
+      + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить каталог.</div>'; }
 }
 
 async function open_(id, title){
   stack.push({id, title});
   renderCrumbs();
+  $("hero").style.display = "none";
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
     const data = await api("/api/catalog/" + id);
@@ -293,7 +432,7 @@ function goTo(i){
 async function initAuth(){
   const el = $("auth");
   const token = localStorage.getItem("vs_token");
-  if(!token){ el.innerHTML = '<a class="loginbtn" href="/login">Войти</a>'; return; }
+  if(!token){ el.innerHTML = '<a class="loginbtn cta" href="/login">Войти</a>'; return; }
   try{
     const r = await fetch("/api/auth/me", {headers:{Authorization:"Bearer "+token}});
     if(!r.ok) throw 0;
@@ -301,7 +440,7 @@ async function initAuth(){
     const name = me.email || "Telegram";
     const bal = `<span class="bal">${rub(me.balance_rub)}</span>`;
     const link = me.telegram_linked ? "" :
-      '<a class="loginbtn" href="/login" style="font-size:13px;padding:6px 12px">+ Telegram</a>';
+      '<a class="loginbtn" href="/login" style="font-size:13px;padding:7px 12px">+ Telegram</a>';
     el.innerHTML = `${bal}<button class="topup" onclick="openTopup()">Пополнить</button>`
       + `<button onclick="showOrders()">Мои заказы</button>`
       + `<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
@@ -314,7 +453,7 @@ async function initAuth(){
     }else{ vb.style.display = "none"; vb.innerHTML = ""; }
   }catch(e){
     localStorage.removeItem("vs_token");
-    el.innerHTML = '<a class="loginbtn" href="/login">Войти</a>';
+    el.innerHTML = '<a class="loginbtn cta" href="/login">Войти</a>';
   }
 }
 function logout(){ localStorage.removeItem("vs_token"); location.reload(); }
@@ -625,6 +764,7 @@ async function showOrders(){
   const token = localStorage.getItem("vs_token");
   if(!token){ location.href="/login"; return; }
   stack = [];
+  $("hero").style.display = "none";
   crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
@@ -632,7 +772,8 @@ async function showOrders(){
     if(!r.ok) throw 0;
     const data = await r.json();
     if(!data.orders.length){ content.innerHTML = '<div class="state">У вас пока нет заказов.</div>'; return; }
-    content.innerHTML = '<div class="vlist">' + data.orders.map(orderRow).join("") + '</div>';
+    content.innerHTML = '<h2 class="section">Мои заказы</h2><div class="section-sub">Нажмите на заказ — откроются детали и выдача.</div>'
+      + '<div class="vlist">' + data.orders.map(orderRow).join("") + '</div>';
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить заказы.</div>'; }
 }
 function orderRow(o){
