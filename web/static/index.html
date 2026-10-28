@@ -112,6 +112,10 @@
   .state{color:var(--muted);padding:40px 0;text-align:center}
   footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);
     padding:20px 0 40px;text-align:center}
+  .vbar{margin:12px 0 0;background:#2f2314;border:1px solid #5a3a22;color:#ffd9bf;
+    border-radius:10px;padding:10px 14px;font-size:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .vbar button{background:var(--accent);color:#1a0f07;border:none;border-radius:8px;
+    padding:6px 12px;font-weight:700;cursor:pointer;font-size:13px}
 </style>
 </head>
 <body>
@@ -119,6 +123,8 @@
   <div class="logo">Vall<span>Shop</span></div>
   <div id="auth" class="auth"></div>
 </div></header>
+
+<div id="verifybar" class="wrap" style="display:none"></div>
 
 <main class="wrap">
   <div id="crumbs" class="crumbs"></div>
@@ -299,12 +305,28 @@ async function initAuth(){
     el.innerHTML = `${bal}<button class="topup" onclick="openTopup()">Пополнить</button>`
       + `<button onclick="showOrders()">Мои заказы</button>`
       + `<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
+    // Баннер «подтвердите email» — для email-аккаунтов без подтверждения.
+    const vb = $("verifybar");
+    if(me.email && !me.email_verified){
+      vb.style.display = "";
+      vb.innerHTML = `<div class="vbar">✉️ Подтвердите email <b>${esc(me.email)}</b> — письмо со ссылкой отправлено.`
+        + ` <button onclick="resendVerify(this)">Отправить ещё раз</button></div>`;
+    }else{ vb.style.display = "none"; vb.innerHTML = ""; }
   }catch(e){
     localStorage.removeItem("vs_token");
     el.innerHTML = '<a class="loginbtn" href="/login">Войти</a>';
   }
 }
 function logout(){ localStorage.removeItem("vs_token"); location.reload(); }
+async function resendVerify(btn){
+  const token = localStorage.getItem("vs_token");
+  if(!token) return;
+  btn.disabled = true; btn.textContent = "Отправляем…";
+  try{
+    await fetch("/api/auth/resend", {method:"POST", headers:{Authorization:"Bearer "+token}});
+    btn.textContent = "Письмо отправлено ✓";
+  }catch(e){ btn.textContent = "Ошибка, повторите"; btn.disabled = false; }
+}
 
 // ── Пополнение баланса ───────────────────────────────────────────────────────
 let topupMethod = null, topupMin = 50, topupMax = 50000;

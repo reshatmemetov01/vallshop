@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VallShop — новый пароль</title>
+<style>
+  :root{--bg:#0e1116;--panel:#171b22;--line:#2a303a;--text:#e8edf3;--muted:#8b96a5;
+    --accent:#ff7a2f;--accent2:#2fb4a6;--ok:#36c26b;--bad:#e5484d;--radius:14px}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;display:flex;
+    align-items:center;justify-content:center;padding:24px 16px;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+  .card{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:28px}
+  .logo{font-weight:800;font-size:22px;margin-bottom:18px;text-align:center}.logo span{color:var(--accent)}
+  h1{font-size:19px;margin:0 0 16px;text-align:center}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
+  input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;color:var(--text);font-size:15px}
+  input:focus{outline:none;border-color:var(--accent)}
+  .btn{width:100%;margin-top:18px;background:var(--accent);color:#1a0f07;border:none;
+    border-radius:10px;padding:12px;font-weight:700;font-size:15px;cursor:pointer}
+  .btn:disabled{opacity:.6;cursor:default}
+  .msg{margin-top:14px;font-size:14px;min-height:20px}.msg.err{color:#ffb3b5}.msg.ok{color:#9fe8bd}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px}
+  .foot{text-align:center;margin-top:16px}.foot a{color:var(--accent2);text-decoration:none}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Vall<span>Shop</span></div>
+    <h1>Новый пароль</h1>
+    <form id="form" onsubmit="return submitForm(event)">
+      <label>Новый пароль</label>
+      <input id="password" type="password" autocomplete="new-password" placeholder="••••••••" required>
+      <div class="hint">Минимум 8 символов</div>
+      <label>Повторите пароль</label>
+      <input id="password2" type="password" autocomplete="new-password" placeholder="••••••••" required>
+      <button id="submit" class="btn" type="submit">Сохранить пароль</button>
+    </form>
+    <div id="msg" class="msg"></div>
+    <div class="foot"><a href="/login">← ко входу</a></div>
+  </div>
+<script>
+const $ = (id)=>document.getElementById(id);
+const token = new URLSearchParams(location.search).get("token");
+function msg(t, ok){ const m=$("msg"); m.textContent=t||""; m.className="msg"+(t?(ok?" ok":" err"):""); }
+if(!token){ msg("Ссылка неполная — нет кода сброса."); $("submit").disabled = true; }
+
+async function submitForm(e){
+  e.preventDefault();
+  const p1 = $("password").value, p2 = $("password2").value;
+  if(p1.length < 8){ msg("Пароль минимум 8 символов."); return false; }
+  if(p1 !== p2){ msg("Пароли не совпадают."); return false; }
+  $("submit").disabled = true; msg("");
+  try{
+    const r = await fetch("/api/auth/reset", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({token, password:p1})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ msg(data.detail || "Не удалось сменить пароль."); $("submit").disabled=false; return false; }
+    localStorage.setItem("vs_token", data.token);
+    msg("Пароль изменён. Входим…", true);
+    setTimeout(()=>{ location.href = "/"; }, 700);
+  }catch(err){ msg("Нет связи с сервером."); $("submit").disabled=false; }
+  return false;
+}
+</script>
+</body>
+</html>

@@ -28,6 +28,17 @@ class Settings:
     # Имя бота (без @) для Telegram Login Widget. Домен сайта должен быть
     # привязан к этому боту через @BotFather → /setdomain.
     telegram_bot_username: str = _get("TELEGRAM_BOT_USERNAME", "")
+    # SMTP для писем (подтверждение email, сброс пароля). Пусто → письма не шлём.
+    smtp_host: str = _get("SMTP_HOST", "")
+    smtp_port: int = int(_get("SMTP_PORT", "465"))
+    smtp_user: str = _get("SMTP_USER", "")
+    smtp_password: str = _get("SMTP_PASSWORD", "")
+    smtp_from: str = _get("SMTP_FROM", "") or _get("SMTP_USER", "")
+    smtp_ssl: bool = _get("SMTP_SSL", "1").strip().lower() not in ("0", "false", "no")
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user and self.smtp_password)
 
 
 settings = Settings()

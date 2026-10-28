@@ -58,6 +58,13 @@ async def register(session: AsyncSession, email: str, password: str) -> WebAccou
     return acc
 
 
+async def set_password(session: AsyncSession, account: WebAccount, password: str) -> None:
+    if len(password or "") < _MIN_PASSWORD:
+        raise AccountError(f"Пароль минимум {_MIN_PASSWORD} символов")
+    account.password_hash = hash_password(password)
+    await session.flush()
+
+
 async def authenticate(session: AsyncSession, email: str, password: str) -> WebAccount:
     acc = await get_by_email(session, email)
     if acc is None or not verify_password(password, acc.password_hash):

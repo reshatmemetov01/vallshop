@@ -68,7 +68,10 @@
     </div>
 
     <div id="msg" class="msg"></div>
-    <div class="foot"><a href="/">← на витрину</a></div>
+    <div class="foot">
+      <a href="#" id="forgot" onclick="return forgotPassword()">Забыли пароль?</a>
+      &nbsp;·&nbsp; <a href="/">← на витрину</a>
+    </div>
   </div>
 </main>
 
@@ -102,6 +105,19 @@ async function submitForm(e){
     msg(tab==="login" ? "Вход выполнен. Перенаправляем…" : "Аккаунт создан. Перенаправляем…", true);
     setTimeout(()=>{ location.href = "/"; }, 600);
   }catch(err){ msg("Нет связи с сервером."); $("submit").disabled=false; }
+  return false;
+}
+
+// сброс пароля: отправить письмо со ссылкой
+async function forgotPassword(){
+  let email = $("email").value.trim();
+  if(!email){ email = (prompt("Укажите email вашего аккаунта:") || "").trim(); }
+  if(!email){ return false; }
+  try{
+    await fetch("/api/auth/forgot", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
+    msg("Если такой email зарегистрирован, мы отправили на него ссылку для сброса пароля.", true);
+  }catch(e){ msg("Нет связи с сервером."); }
   return false;
 }
 

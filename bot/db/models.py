@@ -756,3 +756,17 @@ class WebAccount(Base):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class EmailToken(Base):
+    """Одноразовый токен для писем сайта: подтверждение email / сброс пароля."""
+
+    __tablename__ = "email_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(Integer, index=True)
+    purpose: Mapped[str] = mapped_column(String(16))  # "verify" | "reset"
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
