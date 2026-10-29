@@ -301,6 +301,27 @@
   .qa[open] summary::after{transform:rotate(45deg)}
   .qa .ans{padding:0 18px 16px;color:var(--muted);font-size:14px;line-height:1.6}
 
+  /* ── Тосты ── */
+  #toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:100}
+  .toast{background:linear-gradient(180deg,#241d14,#1a150f);border:1px solid var(--line2);color:var(--text);
+    border-radius:12px;padding:12px 15px;font-size:14px;font-weight:600;box-shadow:0 12px 34px rgba(0,0,0,.45);
+    display:flex;align-items:center;gap:10px;min-width:220px;max-width:340px;
+    transform:translateX(130%);opacity:0;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s}
+  .toast.show{transform:none;opacity:1}
+  .toast.ok{border-color:rgba(79,208,138,.45)}
+  .toast.err{border-color:rgba(255,107,107,.45)}
+  .toast .ti{font-size:16px}
+
+  /* ── Скелетоны загрузки ── */
+  .skel{background:linear-gradient(90deg,#1b1711 25%,#241e16 37%,#1b1711 63%);background-size:400% 100%;
+    animation:shimmer 1.4s ease infinite;border-radius:var(--radius);border:1px solid var(--line)}
+  @keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+  .skelgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin:4px 0}
+  .skelcard{height:150px}
+
+  /* ── Микро-интеракции ── */
+  .btn:active,.buy.active:active,.pkg button:active,.modal .pay:active,.topup:active{transform:translateY(1px)!important}
+
   @media (max-width:640px){
     .hero{padding:32px 18px 28px;border-radius:18px;margin-top:18px}
     .hero h1{font-size:28px}.hero p{font-size:15px}
@@ -422,6 +443,8 @@
   </div>
   <div class="copy wrap">© VallShop · <span id="year"></span> · цифровые товары и услуги</div>
 </footer>
+
+<div id="toasts"></div>
 
 <div id="ordovl" class="ovl">
   <div class="modal">
@@ -553,6 +576,19 @@ function renderCrumbs(){
 
 function esc(s){return (s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
+// Тосты (всплывающие уведомления)
+function toast(msg, type){
+  const c = $("toasts"); if(!c) return;
+  const t = document.createElement("div");
+  t.className = "toast " + (type||"");
+  t.innerHTML = `<span class="ti">${type==="err"?"⚠️":type==="ok"?"✅":"ℹ️"}</span><span>${esc(msg)}</span>`;
+  c.appendChild(t);
+  requestAnimationFrame(()=> t.classList.add("show"));
+  setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=> t.remove(), 400); }, 3200);
+}
+// Скелетон-сетка на время загрузки
+function skeleton(n){ return `<div class="skelgrid">${Array(n||8).fill('<div class="skel skelcard"></div>').join("")}</div>`; }
+
 function productCard(p){
   const sub = p.has_children ? "открыть →" : "выбрать →";
   return `<div class="card reveal" onclick="open_(${p.id}, '${esc(p.title).replace(/'/g,"\\'")}')">
@@ -613,7 +649,7 @@ async function goHome(){
   $("searchbar").style.display = "";
   const sb = $("search"); if(sb) sb.value = "";
   $("homesections").style.display = "";
-  content.innerHTML = '<div class="state">Загрузка…</div>';
+  content.innerHTML = skeleton(6);
   try{
     const data = await api("/api/catalog");
     if(!data.products.length){ content.innerHTML = '<div class="state">Каталог пуст.</div>'; return; }
@@ -632,7 +668,7 @@ async function open_(id, title){
   $("hero").style.display = "none";
   $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
-  content.innerHTML = '<div class="state">Загрузка…</div>';
+  content.innerHTML = skeleton(6);
   try{
     const data = await api("/api/catalog/" + id);
     if(data.type === "category"){
@@ -688,6 +724,7 @@ async function resendVerify(btn){
   try{
     await fetch("/api/auth/resend", {method:"POST", headers:{Authorization:"Bearer "+token}});
     btn.textContent = "Письмо отправлено ✓";
+    toast("Письмо отправлено — проверьте почту", "ok");
   }catch(e){ btn.textContent = "Ошибка, повторите"; btn.disabled = false; }
 }
 
@@ -933,6 +970,7 @@ async function doBuy(){
       return;
     }
     showBuyResult(data);
+    toast(data.kind === "codes" ? "Заказ выполнен — коды выданы" : "Заказ оформлен ✓", "ok");
     initAuth();                      // обновить баланс в шапке
     const cur = stack[stack.length-1];
     if(cur) refreshVariants(cur.id); // обновить остаток в наличии
@@ -954,7 +992,9 @@ function showBuyResult(d){
   }
   $("buyresult").innerHTML = html;
 }
-function copyText(t){ navigator.clipboard && navigator.clipboard.writeText(t); }
+function copyText(t){
+  if(navigator.clipboard){ navigator.clipboard.writeText(t); toast("Скопировано в буфер обмена", "ok"); }
+}
 
 // тихо перезагрузить список номиналов текущего товара (обновить остатки)
 async function refreshVariants(productId){
@@ -992,7 +1032,7 @@ async function showOrders(){
   $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
   crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
-  content.innerHTML = '<div class="state">Загрузка…</div>';
+  content.innerHTML = skeleton(6);
   try{
     const r = await fetch("/api/orders", {headers:{Authorization:"Bearer "+token}});
     if(!r.ok) throw 0;
@@ -1138,7 +1178,7 @@ async function doSearch(){
     return;
   }
   $("homesections").style.display = "none";
-  content.innerHTML = '<div class="state">Поиск…</div>';
+  content.innerHTML = skeleton(6);
   try{
     const d = await api("/api/catalog/search/q?q=" + encodeURIComponent(q));
     if(!d.variants.length){
