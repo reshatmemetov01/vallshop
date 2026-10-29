@@ -118,7 +118,27 @@
   .card .cdesc{color:var(--muted);font-size:13px;flex:1}
   .card .arrow{margin-top:8px;color:var(--accent);font-size:13px;font-weight:700}
 
-  /* ── Variant list ── */
+  /* ── Поиск ── */
+  .searchbar{margin:6px 0 14px}
+  .searchbar input{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:13px;
+    padding:13px 16px;color:var(--text);font-size:15px;font-family:inherit}
+  .searchbar input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,138,61,.14)}
+
+  /* ── Номиналы карточками ── */
+  .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin:4px 0 36px}
+  .vcard{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);
+    border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:8px;transition:.18s;position:relative}
+  .vcard:hover{border-color:rgba(255,150,60,.45);transform:translateY(-3px);box-shadow:var(--glow)}
+  .vcard .vctx{color:var(--dim);font-size:12px;font-weight:600}
+  .vcard .vtitle{font-weight:700;font-size:16px}
+  .vcard .vprice{font-weight:800;font-size:19px}
+  .vcard .vprice small{color:var(--dim);font-weight:500;font-size:12px}
+  .vcard .vdesc{color:var(--muted);font-size:13px;white-space:pre-wrap}
+  .vcard .buy{margin-top:auto}
+  .vcard .buy.active{width:100%}
+  .vcard .badge{align-self:flex-start}
+
+  /* ── Variant list (устар., оставлено для «Мои заказы») ── */
   .vlist{display:flex;flex-direction:column;gap:12px;margin:4px 0 36px}
   .vrow{background:linear-gradient(180deg,var(--panel),#171a21);border:1px solid var(--line);
     border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;transition:.15s}
@@ -336,6 +356,9 @@
 
   <div id="catalog">
     <div id="crumbs" class="crumbs"></div>
+    <div id="searchbar" class="searchbar" style="display:none">
+      <input id="search" type="search" autocomplete="off" placeholder="🔍 Поиск: звёзды, UC, Premium, VPN, Steam…">
+    </div>
     <div id="content"><div class="state">Загрузка каталога…</div></div>
   </div>
 
@@ -565,10 +588,30 @@ function variantRow(v){
   </div>`;
 }
 
+function variantCard(v){
+  vmap[v.id] = v;
+  const price = v.price_rub == null ? "—" :
+    `${rub(v.price_rub)}${v.per_1000 ? ' <small>/ 1000</small>' : ''}`;
+  const badge = v.available
+    ? `<span class="badge ok">${v.source==='stock' && v.stock!=null ? 'в наличии: '+v.stock : 'в наличии'}</span>`
+    : `<span class="badge bad">нет в наличии</span>`;
+  const ctx = v.product_title ? `<div class="vctx">${esc(v.product_title)}</div>` : '';
+  const lim = v.per_1000 && v.smm_min ? `<div class="vdesc">Количество: от ${v.smm_min} до ${v.smm_max||'—'}</div>` : '';
+  const desc = v.description ? `<div class="vdesc">${esc(v.description)}</div>` : '';
+  let btn;
+  if(!v.buyable) btn = `<button class="buy" title="Скоро на сайте" disabled>Скоро</button>`;
+  else if(!v.available) btn = `<button class="buy" disabled>Нет в наличии</button>`;
+  else btn = `<button class="buy active" onclick="openBuy(${v.id})">Купить</button>`;
+  return `<div class="vcard reveal">${ctx}<div class="vtitle">${esc(v.title)}</div>`
+    + `<div class="vprice">${price}</div>${badge}${lim}${desc}${btn}</div>`;
+}
+
 async function goHome(){
   stack = [];
   renderCrumbs();
   $("hero").style.display = "";
+  $("searchbar").style.display = "";
+  const sb = $("search"); if(sb) sb.value = "";
   $("homesections").style.display = "";
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
@@ -587,6 +630,7 @@ async function open_(id, title){
   stack.push({id, title});
   renderCrumbs();
   $("hero").style.display = "none";
+  $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
   content.innerHTML = '<div class="state">Загрузка…</div>';
   try{
@@ -594,9 +638,9 @@ async function open_(id, title){
     if(data.type === "category"){
       content.innerHTML = `<div class="grid">${data.children.map(productCard).join("")}</div>`;
     } else {
-      const rows = data.variants.map(variantRow).join("");
-      content.innerHTML = rows
-        ? `<div class="vlist">${rows}</div>`
+      const cards = data.variants.map(variantCard).join("");
+      content.innerHTML = cards
+        ? `<div class="vgrid">${cards}</div>`
         : '<div class="state">Нет доступных номиналов.</div>';
     }
     revealScan();
@@ -917,9 +961,9 @@ async function refreshVariants(productId){
   try{
     const data = await api("/api/catalog/" + productId);
     if(data.type === "product"){
-      const rows = data.variants.map(variantRow).join("");
+      const cards = data.variants.map(variantCard).join("");
       if(stack.length && stack[stack.length-1].id === productId)
-        content.innerHTML = rows ? `<div class="vlist">${rows}</div>`
+        content.innerHTML = cards ? `<div class="vgrid">${cards}</div>`
           : '<div class="state">Нет доступных номиналов.</div>';
     }
   }catch(e){}
@@ -945,6 +989,7 @@ async function showOrders(){
   if(!token){ location.href="/login"; return; }
   stack = [];
   $("hero").style.display = "none";
+  $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
   crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
   content.innerHTML = '<div class="state">Загрузка…</div>';
@@ -1075,6 +1120,37 @@ function openStars(amount){
   const q = $("buyqty"); q.value = amount;
   refreshStarsPrice();
 }
+
+// ── Поиск по каталогу ─────────────────────────────────────────────────────────
+let searchTimer = null;
+function onSearchInput(){ clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 300); }
+async function doSearch(){
+  const q = ($("search").value || "").trim();
+  if(q.length < 2){
+    $("homesections").style.display = "";
+    try{
+      const data = await api("/api/catalog");
+      content.innerHTML = `<h2 class="section">🛍️ Каталог</h2>`
+        + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
+        + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
+      revealScan();
+    }catch(e){}
+    return;
+  }
+  $("homesections").style.display = "none";
+  content.innerHTML = '<div class="state">Поиск…</div>';
+  try{
+    const d = await api("/api/catalog/search/q?q=" + encodeURIComponent(q));
+    if(!d.variants.length){
+      content.innerHTML = `<div class="state">Ничего не найдено по запросу «${esc(q)}».</div>`; return;
+    }
+    content.innerHTML = `<h2 class="section">Результаты поиска</h2>`
+      + `<div class="section-sub">Найдено: ${d.variants.length}</div>`
+      + `<div class="vgrid">${d.variants.map(variantCard).join("")}</div>`;
+    revealScan();
+  }catch(e){ content.innerHTML = '<div class="state">Ошибка поиска.</div>'; }
+}
+document.getElementById("search").addEventListener("input", onSearchInput);
 
 // ── Reveal-on-scroll (анимация прокрутки) ─────────────────────────────────────
 let _revObs = null;

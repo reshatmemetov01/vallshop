@@ -9,8 +9,11 @@ owner-цена через ``pricing.owner_price_rub`` → клиентская �
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from bot.db.models import Product, Variant
 from bot.services import catalog as catalog_service
 from bot.services import mprice as mprice_service
 from bot.services import stock as stock_service
@@ -72,34 +75,64 @@ async def product_detail(product_id: int,
         }
 
     variants = await catalog_service.list_variants(session, product_id)
+    items = await _variant_items(session, variants)
+    return {"type": "product", "product": _product_dto(product), "variants": items}
+
+
+async def _variant_items(session, variants, *, with_product: bool = False) -> list:
+    """Собрать DTO номиналов: цены, наличие, доступность покупки на сайте."""
     owner_prices = {v.id: owner_price_rub(v, settings.default_markup_percent) for v in variants}
     client = await mprice_service.client_prices(session, settings.merchant_id, owner_prices)
     counts = await stock_service.counts_by_variant(session, [v.id for v in variants])
-
     items = []
     for v in variants:
         src = v.source or "stock"
         if src in _ONDEMAND:
-            available = True          # Phase 2: живая проверка у поставщика
+            available = True
             stock = None
         else:
             stock = int(counts.get(v.id, 0) or 0)
             available = stock > 0
         price = client.get(v.id)
-        items.append({
+        dto = {
             "id": v.id,
             "title": v.title,
             "source": src,
             "price_rub": float(price) if price and price > 0 else None,
-            "per_1000": src == "socproof",   # SMM — цена за 1000
+            "per_1000": src == "socproof",
             "smm_min": v.smm_min,
             "smm_max": v.smm_max,
             "available": available,
             "stock": stock,
             "description": v.description,
-            # Можно ли купить на сайте на этом этапе (иначе кнопка «скоро»).
             "buyable": web_buyable(v),
-            # Как покупать: simple|vpn|premium|stars (форма ввода на фронте).
             "buy_kind": buy_kind(v),
-        })
-    return {"type": "product", "product": _product_dto(product), "variants": items}
+        }
+        if with_product and v.product is not None:
+            dto["product_title"] = v.product.title
+            dto["product_id"] = v.product_id
+        items.append(dto)
+    return items
+
+
+@router.get("/search/q")
+async def search(q: str = "", session: AsyncSession = Depends(get_session)) -> dict:
+    """Поиск номиналов по названию (товара и номинала). Возвращает купибельные."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"query": q, "variants": []}
+    like = f"%{q}%"
+    rows = await session.scalars(
+        select(Variant)
+        .join(Product, Variant.product_id == Product.id)
+        .where(
+            Variant.is_active.is_(True),
+            Product.is_active.is_(True),
+            or_(Variant.title.ilike(like), Product.title.ilike(like)),
+        )
+        .options(selectinload(Variant.product))
+        .limit(40)
+    )
+    variants = list(rows)
+    items = await _variant_items(session, variants, with_product=True)
+    return {"query": q, "variants": items}
