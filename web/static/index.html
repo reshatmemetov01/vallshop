@@ -252,6 +252,25 @@
     display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
   .rev .rwho{color:var(--dim);font-size:12px;margin-top:12px}
 
+  /* ── Как это работает ── */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:4px 0 36px}
+  .step{position:relative;background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);
+    border-radius:var(--radius);padding:24px 20px;transition:.18s;overflow:hidden}
+  .step:hover{border-color:rgba(255,150,60,.5);transform:translateY(-3px);box-shadow:var(--glow)}
+  .step .snum{position:absolute;top:14px;right:18px;font-size:46px;font-weight:900;color:rgba(255,150,60,.14);line-height:1}
+  .step .sic2{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:26px;margin-bottom:12px;
+    background:radial-gradient(circle at 30% 25%,rgba(255,150,60,.28),rgba(255,120,30,.08));border:1px solid rgba(255,150,60,.3)}
+  .step b{display:block;font-size:17px;margin-bottom:6px}
+  .step span{color:var(--muted);font-size:14px}
+
+  /* ── Бренды: пополнение сервисов ── */
+  .brandgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:12px;margin:4px 0 36px}
+  .btile{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:14px;
+    padding:18px 12px;display:flex;flex-direction:column;align-items:center;gap:11px;transition:.18s;min-height:92px;justify-content:center}
+  .btile:hover{border-color:rgba(255,150,60,.45);transform:translateY(-2px)}
+  .btile img{height:30px;opacity:.92}
+  .btile span{font-size:13px;color:var(--muted);font-weight:600}
+
   /* ── FAQ ── */
   .faq{display:flex;flex-direction:column;gap:10px;margin:4px 0 40px;max-width:800px}
   .qa{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
@@ -268,6 +287,7 @@
     .statcards{grid-template-columns:1fr;gap:10px;max-width:420px}
     .scard{padding:16px 14px}
     .scard .sic{width:46px;height:46px;font-size:22px}
+    .steps{grid-template-columns:1fr}
     .foot{gap:24px}.foot .cols{gap:32px}
   }
 </style>
@@ -324,6 +344,22 @@
       <h2 class="section">⭐ Популярные пакеты звёзд</h2>
       <div class="section-sub">Частые суммы с мгновенной выдачей. Нужно другое количество — откройте «Звёзды» в каталоге.</div>
       <div id="pkgs" class="pkgs"></div>
+    </section>
+
+    <section>
+      <h2 class="section">⚡ Как это работает</h2>
+      <div class="section-sub">Три простых шага — и товар у вас.</div>
+      <div class="steps">
+        <div class="step reveal"><div class="snum">1</div><div class="sic2">💳</div><b>Пополните баланс</b><span>Картой, СБП или USDT — в рублях, за пару минут.</span></div>
+        <div class="step reveal"><div class="snum">2</div><div class="sic2">🛍️</div><b>Выберите товар</b><span>Звёзды, Premium, Steam, SMM, VPN и другое.</span></div>
+        <div class="step reveal"><div class="snum">3</div><div class="sic2">⚡</div><b>Получите мгновенно</b><span>Коды, ссылки и выдача — в разделе «Мои заказы».</span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section">🧩 Пополнение сервисов</h2>
+      <div class="section-sub">Работаем с популярными платформами и играми.</div>
+      <div class="brandgrid" id="brandgrid"></div>
     </section>
 
     <section>
@@ -542,6 +578,7 @@ async function goHome(){
       + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
       + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
     loadStarPackages(data.products);
+    renderBrands();
     revealScan();
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить каталог.</div>'; }
 }
@@ -976,6 +1013,24 @@ function renderOrderDetail(o){
   $("ordbody").innerHTML = h;
 }
 document.getElementById("ordovl").addEventListener("click", (e)=>{ if(e.target.id==="ordovl") closeOrder(); });
+
+// ── Бренды «Пополнение сервисов» ──────────────────────────────────────────────
+const _BRANDS = [
+  ["telegram","Telegram"],["steam","Steam"],["roblox","Roblox"],["playstation","PlayStation"],
+  ["discord","Discord"],["epicgames","Epic Games"],["spotify","Spotify"],["youtube","YouTube"],
+  ["twitch","Twitch"],["apple","App Store"],["googleplay","Google Play"],["ea","EA"]
+];
+let _brandsDone = false;
+function renderBrands(){
+  if(_brandsDone) return;
+  const g = $("brandgrid"); if(!g) return;
+  g.innerHTML = _BRANDS.map(([slug,name]) => `
+    <div class="btile reveal">
+      <img src="https://cdn.simpleicons.org/${slug}/ffffff" alt="${esc(name)}" onerror="this.style.visibility='hidden'">
+      <span>${esc(name)}</span>
+    </div>`).join("");
+  _brandsDone = true;
+}
 
 // ── Пакеты звёзд (секция на главной) ──────────────────────────────────────────
 let starsVid = null;
