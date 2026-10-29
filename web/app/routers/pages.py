@@ -17,6 +17,7 @@ _RESET = _STATIC / "reset.html"
 _REVIEWS = _STATIC / "reviews.html"
 _FAVICON = _STATIC / "favicon.svg"
 _OG = _STATIC / "og.png"
+_YANDEX = _STATIC / "yandex_efe8bde404b85b63.html"
 
 
 @router.api_route("/", methods=["GET", "HEAD"])
@@ -67,3 +68,8 @@ async def favicon_ico() -> FileResponse:
 @router.api_route("/og.png", methods=["GET", "HEAD"])
 async def og_image() -> FileResponse:
     return FileResponse(_OG, media_type="image/png")
+
+
+@router.api_route("/yandex_efe8bde404b85b63.html", methods=["GET", "HEAD"])
+async def yandex_verify() -> FileResponse:
+    return FileResponse(_YANDEX, media_type="text/html")
