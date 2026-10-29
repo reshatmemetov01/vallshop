@@ -227,6 +227,31 @@
   .bar2{height:9px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:10px}
   .bar2 i{display:block;height:100%;background:var(--grad)}
 
+  /* ── Кабинет ── */
+  .profile{background:linear-gradient(180deg,#1f1a14,#171310);border:1px solid var(--line2);border-radius:20px;
+    padding:22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:6px 0 16px}
+  .pava{width:60px;height:60px;border-radius:16px;display:grid;place-items:center;font-size:26px;font-weight:900;
+    color:var(--accent-ink);background:var(--grad);box-shadow:0 8px 20px rgba(255,122,43,.35);flex:0 0 auto}
+  .pinfo{flex:1 1 200px;min-width:0}
+  .pname{font-weight:800;font-size:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pstatus{color:var(--muted);font-size:13px;margin-top:3px}
+  .pstatus .okv{color:#9fe8bd}.pstatus .warnv{color:#ffd9bf}
+  .pbal{text-align:right;background:rgba(79,208,138,.1);border:1px solid rgba(79,208,138,.3);border-radius:14px;
+    padding:12px 18px}
+  .pbal .pbl{display:block;color:var(--muted);font-size:12px;margin-bottom:2px}
+  .pbal b{font-size:24px;color:#bff3d2}
+  .pactions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:26px}
+  .pactions .btn{padding:11px 20px;font-size:14px}
+  .acctab{display:flex;gap:8px;margin:8px 0 14px;border-bottom:1px solid var(--line);padding-bottom:0}
+  .acctab button{background:none;border:none;color:var(--muted);font-family:inherit;font-weight:700;font-size:15px;
+    padding:10px 4px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .acctab button.on{color:var(--accent);border-bottom-color:var(--accent)}
+  .trow{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:var(--radius);
+    padding:15px 17px;display:flex;align-items:center;gap:14px}
+  .trow .tt{font-weight:700;flex:1 1 auto}
+  .trow .td{color:var(--dim);font-size:13px;font-weight:500;margin-top:2px}
+  .trow .tamt{font-weight:800;font-size:17px;color:#bff3d2;white-space:nowrap}
+
   /* ── Иконки категорий (SVG или бренд-логотип) ── */
   .card .ic svg{width:26px;height:26px}
   .ic svg{stroke:var(--accent);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
@@ -702,7 +727,7 @@ async function initAuth(){
     const link = me.telegram_linked ? "" :
       '<a class="loginbtn" href="/login" style="font-size:13px;padding:7px 12px">+ Telegram</a>';
     el.innerHTML = `${bal}<button class="topup" onclick="openTopup()">Пополнить</button>`
-      + `<button onclick="showOrders()">Мои заказы</button>`
+      + `<button onclick="showAccount()">Кабинет</button>`
       + `<span class="email">${esc(name)}</span>${link}<button onclick="logout()">Выйти</button>`;
     // Баннер «подтвердите email» — для email-аккаунтов без подтверждения.
     const vb = $("verifybar");
@@ -1051,6 +1076,66 @@ function orderRow(o){
     <span class="st ${_stClass(o.status)}">${esc(o.status_label)}${prog}</span>
   </div>`;
 }
+// ── Кабинет (профиль + заказы + пополнения) ──────────────────────────────────
+let _acc = {me:null, orders:[], topups:[]};
+async function showAccount(){
+  const token = localStorage.getItem("vs_token");
+  if(!token){ location.href="/login"; return; }
+  stack=[]; $("hero").style.display="none"; $("searchbar").style.display="none"; $("homesections").style.display="none";
+  crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Кабинет</b>';
+  content.innerHTML = skeleton(3);
+  const hdr = {Authorization:"Bearer "+token};
+  try{
+    const [me,orders,topups] = await Promise.all([
+      fetch("/api/auth/me",{headers:hdr}).then(r=>r.json()),
+      fetch("/api/orders",{headers:hdr}).then(r=>r.json()).catch(()=>({orders:[]})),
+      fetch("/api/topup/history",{headers:hdr}).then(r=>r.json()).catch(()=>({topups:[]})),
+    ]);
+    _acc = {me, orders:orders.orders||[], topups:topups.topups||[]};
+    renderAccount("orders");
+  }catch(e){ content.innerHTML='<div class="state">Не удалось загрузить кабинет.</div>'; }
+}
+function renderAccount(tab){
+  const me = _acc.me; if(!me) return;
+  const name = me.email || "Telegram";
+  const initial = (me.email ? me.email[0] : "T").toUpperCase();
+  const status = me.email
+    ? (me.email_verified ? '<span class="okv">✓ email подтверждён</span>' : '<span class="warnv">✉️ email не подтверждён</span>')
+    : 'вход через Telegram';
+  const tgLink = me.telegram_linked ? '' : '<a class="btn ghost" href="/login">Привязать Telegram</a>';
+  let h = `<div class="profile reveal">
+      <div class="pava">${esc(initial)}</div>
+      <div class="pinfo"><div class="pname">${esc(name)}</div><div class="pstatus">${status}</div></div>
+      <div class="pbal"><span class="pbl">Баланс</span><b>${rub(me.balance_rub)}</b></div>
+    </div>
+    <div class="pactions">
+      <button class="btn primary" onclick="openTopup()">Пополнить баланс</button>
+      ${tgLink}
+      <button class="btn ghost" onclick="logout()">Выйти</button>
+    </div>
+    <div class="acctab">
+      <button class="${tab==='orders'?'on':''}" onclick="renderAccount('orders')">Заказы (${_acc.orders.length})</button>
+      <button class="${tab==='topups'?'on':''}" onclick="renderAccount('topups')">Пополнения (${_acc.topups.length})</button>
+    </div>`;
+  if(tab==='orders'){
+    h += _acc.orders.length ? `<div class="vlist">${_acc.orders.map(orderRow).join("")}</div>`
+      : '<div class="state">Заказов пока нет.</div>';
+  }else{
+    h += _acc.topups.length ? `<div class="vlist">${_acc.topups.map(topupRow).join("")}</div>`
+      : '<div class="state">Пополнений пока нет.</div>';
+  }
+  content.innerHTML = h;
+  revealScan();
+}
+function topupRow(t){
+  const cls = t.status==="paid" ? "done" : (t.status==="pending" ? "work" : "bad");
+  return `<div class="trow">
+    <div class="tt">Пополнение<div class="td">${esc(t.method)} · ${esc(_fmtDate(t.created_at))}</div></div>
+    <div class="tamt">+${rub(t.amount_rub)}</div>
+    <span class="st ${cls}">${esc(t.status_label)}</span>
+  </div>`;
+}
+
 async function openOrder(id){
   const token = localStorage.getItem("vs_token");
   $("ordtitle").textContent = "Заказ #" + id;
@@ -1212,7 +1297,11 @@ function revealScan(){
 }
 
 initAuth();
-goHome();
+if(location.pathname === "/account" && localStorage.getItem("vs_token")){
+  goHome().then(()=> showAccount());
+}else{
+  goHome();
+}
 </script>
 </body>
 </html>

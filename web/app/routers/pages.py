@@ -34,6 +34,11 @@ async def register_page() -> FileResponse:
     return FileResponse(_AUTH)
 
 
+@router.get("/account")
+async def account_page() -> FileResponse:
+    return FileResponse(_INDEX)
+
+
 @router.get("/verify")
 async def verify_page() -> FileResponse:
     return FileResponse(_VERIFY)

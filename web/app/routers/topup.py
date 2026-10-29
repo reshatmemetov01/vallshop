@@ -23,6 +23,44 @@ class TopupIn(BaseModel):
     method: str          # card | sbp | sbp_ph
 
 
+_TOPUP_STATUS_RU = {
+    "pending": "ожидает оплату",
+    "paid": "зачислено",
+    "expired": "просрочено",
+    "failed": "ошибка",
+}
+_PROVIDER_RU = {"payhot": "Карта", "paydex": "СБП", "boltutil": "USDT", "bolt": "USDT", "mock": "тест"}
+
+
+@router.get("/history")
+async def history(
+    acc: WebAccount = Depends(current_account),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """История пополнений аккаунта."""
+    from bot.db.models import HEAD_MERCHANT_ID
+    from bot.services import balance as balance_service
+
+    if acc.wallet_user_id is None:
+        return {"topups": []}
+    rows = await balance_service.list_topups(
+        session, acc.wallet_user_id, HEAD_MERCHANT_ID, limit=30
+    )
+    out = []
+    for t in rows:
+        status = t.status.value if isinstance(t.status, TopUpStatus) else str(t.status)
+        out.append({
+            "id": t.id,
+            "amount_rub": float(t.amount_usd or 0),
+            "status": status,
+            "status_label": _TOPUP_STATUS_RU.get(status, status),
+            "method": _PROVIDER_RU.get(t.provider, t.provider or "—"),
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "paid": status == "paid",
+        })
+    return {"topups": out}
+
+
 @router.get("/methods")
 async def methods(session: AsyncSession = Depends(get_session)) -> dict:
     return {

@@ -183,3 +183,27 @@ async def test_cannot_see_other_accounts_topup(db):
         t2 = r2.json()["token"]
         rs = await c.get(f"/api/topup/{tid}", headers={"Authorization": f"Bearer {t2}"})
         assert rs.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_topup_history(db):
+    from bot.db.models import TopUp, TopUpStatus
+    async with _client() as c:
+        token = await _register(c)
+        async with db.session() as s:
+            acc = await account_service.get_by_email(s, "u@u.com")
+            wid = await wallet_service.ensure_wallet(s, acc)
+            s.add(TopUp(client_ref="h1", user_id=wid, merchant_id=0,
+                        amount_usd=Decimal("500"), status=TopUpStatus.PAID, provider="payhot"))
+            await s.commit()
+        r = await c.get("/api/topup/history", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        t = r.json()["topups"]
+        assert len(t) == 1 and t[0]["amount_rub"] == 500.0
+        assert t[0]["method"] == "Карта" and t[0]["status_label"] == "зачислено"
+
+
+@pytest.mark.asyncio
+async def test_topup_history_requires_auth(db):
+    async with _client() as c:
+        assert (await c.get("/api/topup/history")).status_code == 401
