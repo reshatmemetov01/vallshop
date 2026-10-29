@@ -1,0 +1,58 @@
+/* Стили серверных (SEO) страниц каталога — в тон витрине. */
+:root{
+  --bg:#13100e;--bg2:#0e0c0a;--panel:#1d1813;--panel2:#251f18;--line:#352c22;--line2:#43382b;
+  --text:#f7f2ec;--muted:#bcae9e;--dim:#8c7f70;--accent:#ff8a2e;--accent2:#ffc27a;--accent-ink:#2a1505;
+  --grad:linear-gradient(135deg,#ffb24d 0%,#ff6f1e 100%);--radius:16px;
+  --glow:0 0 0 1px rgba(255,150,60,.4),0 14px 36px rgba(255,120,30,.18);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased;
+  background:radial-gradient(1000px 460px at 78% -8%, rgba(255,122,43,.10), transparent 60%),var(--bg);
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1000px;margin:0 auto;padding:0 20px}
+header{position:sticky;top:0;z-index:5;background:rgba(14,15,19,.72);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:16px;padding:14px 0}
+.logo{font-family:"Kaushan Script",cursive;font-size:28px;color:#fff;line-height:1;padding-bottom:3px}
+.logo span{color:var(--accent)}
+.nav{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.nav a{color:var(--muted);font-weight:600;font-size:14px;padding:8px 12px;border-radius:9px}
+.nav a:hover{color:var(--accent)}
+.nav a.cta{background:var(--grad);color:var(--accent-ink);font-weight:800}
+.crumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted);font-size:14px;margin:22px 0 10px}
+.crumbs a:hover{color:var(--accent)}.crumbs .sep{opacity:.4}.crumbs b{color:var(--text)}
+h1{font-size:32px;line-height:1.15;margin:10px 0 10px;font-weight:900;letter-spacing:-.5px}
+h1 em{font-style:normal;color:var(--accent)}
+.lead{color:var(--muted);font-size:16px;margin:0 0 24px;max-width:720px}
+h2{font-size:20px;margin:30px 0 14px;font-weight:800}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:4px 0 32px}
+.card{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:var(--radius);
+  padding:20px;transition:.18s;display:flex;flex-direction:column;gap:6px}
+.card:hover{border-color:rgba(255,150,60,.5);transform:translateY(-3px);box-shadow:var(--glow)}
+.card .t{font-weight:700;font-size:17px}
+.card .d{color:var(--muted);font-size:13px;flex:1}
+.card .arr{margin-top:8px;color:var(--accent);font-size:13px;font-weight:700}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin:4px 0 32px}
+.vcard{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px;display:flex;flex-direction:column;gap:8px;transition:.18s}
+.vcard:hover{border-color:rgba(255,150,60,.45);transform:translateY(-3px);box-shadow:var(--glow)}
+.vcard .vt{font-weight:700;font-size:16px}
+.vcard .vp{font-weight:800;font-size:19px}
+.vcard .vp small{color:var(--dim);font-weight:500;font-size:12px}
+.vcard .vd{color:var(--muted);font-size:13px;white-space:pre-wrap}
+.badge{align-self:flex-start;font-size:12px;padding:4px 10px;border-radius:999px;font-weight:600}
+.badge.ok{color:#bff3d2;background:rgba(79,208,138,.12);border:1px solid rgba(79,208,138,.3)}
+.badge.bad{color:#ffd0d2;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3)}
+.buy{margin-top:auto;display:inline-block;text-align:center;background:var(--grad);color:var(--accent-ink);
+  border:none;border-radius:11px;padding:11px 16px;font-weight:800;font-size:14px;cursor:pointer}
+.buy:hover{filter:brightness(1.06)}
+.buy.off{background:var(--panel2);color:var(--muted);border:1px solid var(--line2);cursor:default;pointer-events:none}
+.seo-text{color:var(--muted);font-size:15px;line-height:1.7;margin:10px 0 36px;max-width:780px}
+.seo-text h2{color:var(--text)}
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 26px}
+.chip{background:var(--panel2);border:1px solid var(--line2);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted)}
+footer{border-top:1px solid var(--line);margin-top:30px;background:var(--bg2);color:var(--dim);font-size:13px}
+.foot{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:24px 0}
+.foot a{color:var(--muted)}.foot a:hover{color:var(--accent)}
+@media (max-width:640px){h1{font-size:25px}.bar{gap:10px}}

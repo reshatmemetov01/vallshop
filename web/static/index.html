@@ -614,13 +614,30 @@ function toast(msg, type){
 // Скелетон-сетка на время загрузки
 function skeleton(n){ return `<div class="skelgrid">${Array(n||8).fill('<div class="skel skelcard"></div>').join("")}</div>`; }
 
+// Транслитерация для slug — должна совпадать с web/app/seo.py (канонический URL).
+const _TR={а:"a",б:"b",в:"v",г:"g",д:"d",е:"e",ё:"e",ж:"zh",з:"z",и:"i",й:"y",к:"k",
+  л:"l",м:"m",н:"n",о:"o",п:"p",р:"r",с:"s",т:"t",у:"u",ф:"f",х:"h",ц:"ts",ч:"ch",
+  ш:"sh",щ:"sch",ъ:"",ы:"y",ь:"",э:"e",ю:"yu",я:"ya"};
+function slugify(t){
+  let out="";
+  for(const ch of (t||"").toLowerCase()){
+    if(_TR[ch]!==undefined) out+=_TR[ch];
+    else if(/[a-z0-9]/i.test(ch)) out+=ch;
+    else out+="-";
+  }
+  out=out.replace(/-+/g,"-").replace(/^-|-$/g,"");
+  return out||"tovar";
+}
+function purl(p){ return `/p/${p.id}-${slugify(p.title)}`; }
+
 function productCard(p){
   const sub = p.has_children ? "открыть →" : "выбрать →";
-  return `<div class="card reveal" onclick="open_(${p.id}, '${esc(p.title).replace(/'/g,"\\'")}')">
+  const t = esc(p.title).replace(/'/g,"\\'");
+  return `<a class="card reveal" href="${purl(p)}" onclick="open_(${p.id}, '${t}');return false;">
     <div class="ic">${catIcon(p.title)}</div>
     <div class="t">${esc(p.title)}</div>
     <div class="cdesc">${esc(catDesc(p.title))}</div>
-    <div class="arrow">${sub}</div></div>`;
+    <div class="arrow">${sub}</div></a>`;
 }
 
 function variantRow(v){
@@ -1297,8 +1314,13 @@ function revealScan(){
 }
 
 initAuth();
+const _openId = parseInt(new URLSearchParams(location.search).get("open"), 10);
 if(location.pathname === "/account" && localStorage.getItem("vs_token")){
   goHome().then(()=> showAccount());
+}else if(_openId){
+  // Deep-link с серверной страницы товара (/?open=<id>): открыть товар в витрине.
+  history.replaceState(null, "", "/");
+  goHome().then(()=> open_(_openId, "Товар"));
 }else{
   goHome();
 }

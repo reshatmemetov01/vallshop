@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .. import seo
+from ..db import get_session
 
 router = APIRouter()
 
@@ -18,6 +22,7 @@ _REVIEWS = _STATIC / "reviews.html"
 _FAVICON = _STATIC / "favicon.svg"
 _OG = _STATIC / "og.png"
 _YANDEX = _STATIC / "yandex_efe8bde404b85b63.html"
+_CATALOG_CSS = _STATIC / "catalog.css"
 
 
 @router.api_route("/", methods=["GET", "HEAD"])
@@ -73,3 +78,36 @@ async def og_image() -> FileResponse:
 @router.api_route("/yandex_efe8bde404b85b63.html", methods=["GET", "HEAD"])
 async def yandex_verify() -> FileResponse:
     return FileResponse(_YANDEX, media_type="text/html")
+
+
+@router.api_route("/catalog.css", methods=["GET", "HEAD"])
+async def catalog_css() -> FileResponse:
+    return FileResponse(_CATALOG_CSS, media_type="text/css")
+
+
+# --- SEO: серверные страницы, sitemap, robots -----------------------------
+
+@router.api_route("/robots.txt", methods=["GET", "HEAD"])
+async def robots_txt() -> PlainTextResponse:
+    return PlainTextResponse(seo.robots_txt())
+
+
+@router.api_route("/sitemap.xml", methods=["GET", "HEAD"])
+async def sitemap_xml(session: AsyncSession = Depends(get_session)) -> Response:
+    return Response(await seo.sitemap_xml(session), media_type="application/xml")
+
+
+@router.api_route("/p/{slug}", methods=["GET", "HEAD"])
+async def product_page(slug: str, session: AsyncSession = Depends(get_session)):
+    # slug = "<id>-<транслитерация>"; берём ведущее число.
+    head = slug.split("-", 1)[0]
+    if not head.isdigit():
+        raise HTTPException(status_code=404)
+    result = await seo.product_page(session, int(head))
+    if result is None:
+        raise HTTPException(status_code=404)
+    page_html, canonical_path = result
+    # нормализуем URL: если slug не совпал с каноническим — 301 на правильный.
+    if f"/p/{slug}" != canonical_path:
+        return RedirectResponse(canonical_path, status_code=301)
+    return HTMLResponse(page_html)
