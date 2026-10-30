@@ -1611,6 +1611,7 @@ def _fzr_offers_kb(
             kb.row(_btn(f"✅ Добавить выбранные ({len(sel)})", "a_fzradd"))
         kb.row(_btn("✖️ Выйти из выбора", "a_fzrmx"))
     else:
+        kb.row(_btn(f"✅ Добавить ВСЕ ({len(offers)})", "a_fzrall"))
         kb.row(_btn("☑️ Выбрать несколько", "a_fzrmulti"))
     kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
     return kb.as_markup()
@@ -1934,6 +1935,27 @@ async def cb_fzr_bulk_add(call: CallbackQuery, state: FSMContext) -> None:
         f"➕ Выбрано номиналов: <b>{len(sel)}</b>\n\n"
         "Пришлите <b>общую наценку в %</b> к закупу (например <code>20</code> — "
         "цена = закуп +20%).\nЦена плавает по курсу (пересчитается автоматически).",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.fzr_search, F.data == "a_fzrall")
+async def cb_fzr_add_all(call: CallbackQuery, state: FSMContext) -> None:
+    """Добавить сразу ВСЕ номиналы категории — спросить одну общую наценку."""
+    data = await state.get_data()
+    offers, pid = data.get("offers") or [], data.get("pid")
+    if not offers:
+        await call.answer("Нет номиналов", show_alert=True)
+        return
+    # выбираем все офферы по порядку (порядок задаёт сортировку в каталоге)
+    await state.update_data(fzr_sel=list(range(len(offers))))
+    await state.set_state(AdminUI.fzr_bulk_markup)
+    await call.message.edit_text(
+        f"➕ Будут добавлены <b>ВСЕ</b> номиналы категории: <b>{len(offers)}</b>\n\n"
+        "Пришлите <b>общую наценку в %</b> к закупу (например <code>20</code> — "
+        "цена = закуп +20%).\nЦена плавает по курсу (пересчитается автоматически).\n"
+        "Уже добавленные номиналы будут пропущены.",
         reply_markup=_cancel_kb(f"a_prod:{pid}"),
     )
     await call.answer()
