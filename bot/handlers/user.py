@@ -175,7 +175,8 @@ async def msg_catalog(
             session, merchant_id, mcatalog_service.PRODUCT, [p.id for p in products]
         )
     caption = menu_service.caption("catalog", texts.CHOOSE_PRODUCT, merchant_id) if products else texts.CATALOG_EMPTY
-    await render(message, banner="catalog", caption=caption, reply_markup=kb.products_kb(products, overrides=ov))
+    await render(message, banner="catalog", caption=caption,
+                 reply_markup=kb.products_kb(products, columns=2, overrides=ov))
 
 
 @router.callback_query(F.data == "menu")
@@ -344,7 +345,7 @@ async def cb_product(
             if p_desc:
                 caption += f"\n\n{p_desc}"
             caption += "\n\nВыберите категорию:"
-            markup = kb.products_kb(children, back=back, back_text="Назад", overrides=ch_ov)
+            markup = kb.products_kb(children, back=back, back_text="Назад", columns=2, overrides=ch_ov)
             await render(
                 call, banner="catalog", caption=caption,
                 reply_markup=markup, photo=banner_photo,

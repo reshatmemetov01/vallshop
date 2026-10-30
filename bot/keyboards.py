@@ -227,9 +227,18 @@ def variants_kb(
     product_icon: Optional[str] = None,
     back: str = "catalog",
     overrides: Optional[Mapping[int, dict]] = None,
+    columns: int = 2,
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     overrides = overrides or {}
+    cols = max(1, columns)
+    buf: list = []
+
+    def _flush():
+        if buf:
+            kb.row(*buf)
+            buf.clear()
+
     for v in variants:
         price = prices[v.id]  # уже отформатированная строка (₽ / $)
         src = getattr(v, "source", "stock")
@@ -267,7 +276,10 @@ def variants_kb(
             icon = getattr(v, "icon_emoji_id", None) or product_icon or EMOJI["variant"]
         # Нет в наличии — красная кнопка; иначе обычная.
         style = "danger" if out else None
-        kb.row(_b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon, style=style))
+        buf.append(_b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon, style=style))
+        if len(buf) >= cols:
+            _flush()
+    _flush()
     kb.row(_b("Назад", callback_data=back, icon=EMOJI["back"]))
     return kb.as_markup()
 
