@@ -250,8 +250,9 @@ async def main() -> None:
     paydex = build_paydex(config)
     liog = LioGamesClient.from_env()
     fzr = FazerCardClient.from_env()
-    from socproof import SocProofClient
-    soc = SocProofClient.from_env()
+    from .services import smm_panels
+    panels = smm_panels.build_clients()
+    soc = panels["socproof"]        # back-compat для старого кода/DI
     from vpnresellers import VPNResellersClient
     vpn = VPNResellersClient.from_env()
 
@@ -306,6 +307,7 @@ async def main() -> None:
     dp["liog"] = liog
     dp["fzr"] = fzr
     dp["soc"] = soc
+    dp["panels"] = panels
     dp["vpn"] = vpn
     dp["bots_by_merchant"] = bots_by_merchant
 
@@ -343,13 +345,13 @@ async def main() -> None:
 
     tasks = [
         asyncio.create_task(
-            run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant, soc=soc)
+            run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant, panels=panels)
         ),
         asyncio.create_task(
             run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex,
                              bots=bots_by_merchant, config=config)
         ),
-        asyncio.create_task(run_smartprice_poller(bot, db, fzr, config, soc=soc)),
+        asyncio.create_task(run_smartprice_poller(bot, db, fzr, config, panels=panels)),
         asyncio.create_task(run_broadcast_scheduler(db, bots_by_merchant)),
         asyncio.create_task(run_bonus_cleaner(db, bots_by_merchant)),
     ]

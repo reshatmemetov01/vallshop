@@ -21,6 +21,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .db.models import Product, Variant
+from .services import smm_panels as _smm_panels
 from .texts import OUT_OF_STOCK_NOTE, money, rub
 
 
@@ -246,7 +247,7 @@ def variants_kb(
         if src == "vpnresellers":
             # VPN: выдача мгновенная от провайдера, своего стока нет — «под заказ» не показываем.
             note = " · ✅ в наличии"
-        elif src == "socproof":
+        elif _smm_panels.is_smm(src):
             # SMM: показываем просто название + цену, без «в наличии».
             # «❌ нет в наличии» — только если услуга пропала у поставщика.
             st = stock.get(v.id, 1)

@@ -31,7 +31,9 @@ async def db(monkeypatch):
     old = web_db.database
     web_db.database = database
     checkout_service._sup()
-    checkout_service._suppliers["soc"] = _FakeSoc()
+    fake = _FakeSoc()
+    checkout_service._suppliers["soc"] = fake
+    checkout_service._suppliers["panels"]["socproof"] = fake   # покупка берёт панель по source
     yield database
     web_db.database = old
     checkout_service._config = None

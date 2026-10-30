@@ -27,6 +27,7 @@ from bot.services import orders as order_service
 from bot.services import rates as rates_service
 from bot.services import settings as settings_service
 from bot.services import smm as smm_service
+from bot.services import smm_panels
 from bot.services import stars as stars_service
 from bot.services import steam as steam_service
 from bot.services.pricing import owner_price_rub
@@ -59,13 +60,15 @@ def _sup() -> dict:
     global _suppliers
     if _suppliers is None:
         from fazercard import FazerCardClient
-        from socproof import SocProofClient
         from vpnresellers import VPNResellersClient
+        from bot.services import smm_panels
 
+        panels = smm_panels.build_clients()
         _suppliers = {
             "fazercard": FazerCardClient.from_env(),
             "vpn": VPNResellersClient.from_env(),
-            "soc": SocProofClient.from_env(),
+            "soc": panels["socproof"],   # back-compat
+            "panels": panels,
         }
     return _suppliers
 
@@ -83,7 +86,7 @@ def buy_kind(variant: Variant) -> Optional[str]:
         return "vpn"
     if src in ("stock", "liogames"):
         return "simple"
-    if src == "socproof":
+    if smm_panels.is_smm(src):
         return "smm"
     if src == "fazercard":
         if variant.fzr_a == "telegram_stars":
@@ -330,6 +333,7 @@ async def purchase(
             fzr=sup["fazercard"],
             vpn=sup["vpn"],
             soc=sup["soc"],
+            panels=sup["panels"],
             smm_link=smm_link,
             smm_quantity=smm_quantity,
             topup_fields=topup_fields,

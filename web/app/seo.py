@@ -19,12 +19,13 @@ from bot.db.models import Product
 from bot.services import catalog as catalog_service
 from bot.services import mprice as mprice_service
 from bot.services import stock as stock_service
+from bot.services import smm_panels
 from bot.services.pricing import owner_price_rub
 
 from .config import settings
 from .textfmt import clean_text
 
-_ONDEMAND = {"fazercard", "socproof", "vpnresellers"}
+_ONDEMAND = {"fazercard", "vpnresellers"} | set(smm_panels.SMM_SOURCES)
 
 # Транслитерация для slug (кириллица → латиница).
 _TRANSLIT = {
@@ -186,7 +187,7 @@ async def product_page(session: AsyncSession, product_id: int):
         src = v.source or "stock"
         available = True if src in _ONDEMAND else int(counts.get(v.id, 0) or 0) > 0
         price = client.get(v.id)
-        price_txt = (_rub(price) + (" / 1000" if src == "socproof" else "")) if price and price > 0 else "—"
+        price_txt = (_rub(price) + (" / 1000" if smm_panels.is_smm(src) else "")) if price and price > 0 else "—"
         if price and price > 0:
             prices_num.append(Decimal(price))
         badge = ('<span class="badge ok">в наличии</span>' if available

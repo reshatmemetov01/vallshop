@@ -89,8 +89,9 @@ def owner_price_rub(variant: Variant, default_markup_percent: Decimal = Decimal(
     Единый источник правды для бота и сайта. Для SMM (soc-proof) — цена за 1000
     = закуп × (1 + наценка/100); для остальных — ``price_rub_value``.
     """
-    if getattr(variant, "source", None) == "socproof":
-        from . import smm as smm_service  # ленивый импорт (без циклов)
+    from . import smm_panels  # ленивый импорт (без циклов)
+    if smm_panels.is_smm(getattr(variant, "source", None)):
+        from . import smm as smm_service
         mk = variant.markup_percent if variant.markup_percent is not None \
             else default_markup_percent
         return smm_service.sell_per_1000_rub(variant.smm_rate, mk)

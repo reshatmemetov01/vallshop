@@ -30,6 +30,7 @@ from . import mprice as mprice_service
 from . import referral as referral_service
 from . import settings as settings_service
 from . import smm as smm_service
+from . import smm_panels
 from . import stock as stock_service
 
 log = logging.getLogger("vallshop.orders")
@@ -120,6 +121,7 @@ async def purchase_from_balance(
     vpn=None,
     public_base_url: Optional[str] = None,
     soc: Optional[SocProofClient] = None,
+    panels: Optional[dict] = None,
     smm_link: Optional[str] = None,
     smm_quantity: Optional[int] = None,
 ) -> tuple[Order, list[str]]:
@@ -176,8 +178,9 @@ async def purchase_from_balance(
     if variant.source == "fazercard":
         return await _fulfill_fazercard(session, order, variant, quantity, fzr, topup_fields)
 
-    if variant.source == "socproof":
-        return await _fulfill_socproof(session, order, variant, soc, smm_link, smm_quantity)
+    if smm_panels.is_smm(variant.source):
+        panel = smm_panels.client_for(panels, variant.source, soc)
+        return await _fulfill_socproof(session, order, variant, panel, smm_link, smm_quantity)
 
     if variant.source == "vpnresellers":
         from . import vpn as vpn_service  # ленивый импорт (избегаем цикла)
@@ -399,7 +402,7 @@ async def _fulfill_socproof(
     if not variant.smm_service or not link or qty <= 0:
         raise SupplierError("Не указана услуга, ссылка или количество")
 
-    order.supplier = "socproof"
+    order.supplier = variant.source        # имя панели: socproof | onexpanel
     order.status = OrderStatus.FULFILLING
     order.fields_json = json.dumps(
         {"service": int(variant.smm_service), "link": link, "quantity": qty,

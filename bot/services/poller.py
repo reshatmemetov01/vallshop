@@ -29,6 +29,7 @@ from ..services import notify as notify_service
 from ..services import orders as order_service
 from ..services import referral as referral_service
 from ..services import settings as settings_service
+from ..services import smm_panels
 from .. import keyboards as kb
 from .. import texts
 
@@ -48,15 +49,16 @@ def _pick_bot(bots, merchant_id, default):
     return default
 
 
-async def _settle_smm(bot, db, soc, config, bots, order_id) -> None:
+async def _settle_smm(bot, db, panels, config, bots, order_id) -> None:
     """Опросить один SMM-заказ и уведомить клиента при изменении терминала."""
-    if soc is None:
-        return
     async with db.session() as session:
         fresh = await session.get(Order, order_id)
         if not fresh or fresh.status != OrderStatus.FULFILLING:
             return
-        res = await order_service.settle_socproof(session, fresh, soc)
+        client = (panels or {}).get(fresh.supplier)   # панель этого заказа
+        if client is None:
+            return  # панель не настроена — попробуем позже
+        res = await order_service.settle_socproof(session, fresh, client)
         user_id = fresh.user_id
         merchant_id = fresh.merchant_id
         oid = fresh.id
@@ -105,11 +107,14 @@ async def run_fulfillment_poller(
     interval: float = 20.0,
     bots: dict | None = None,
     soc: SocProofClient | None = None,
+    panels: dict | None = None,
 ) -> None:
     """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard + SMM)."""
+    if panels is None and soc is not None:
+        panels = {"socproof": soc}
     while True:
         try:
-            await _tick(bot, db, liog, fzr, config, bots, soc)
+            await _tick(bot, db, liog, fzr, config, bots, panels)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — поллер не должен падать
@@ -124,7 +129,7 @@ async def _tick(
     fzr: FazerCardClient | None,
     config: BotConfig | None = None,
     bots: dict | None = None,
-    soc: SocProofClient | None = None,
+    panels: dict | None = None,
 ) -> None:
     async with db.session() as session:
         orders = list(
@@ -134,9 +139,9 @@ async def _tick(
         )
 
     for order in orders:
-        # SMM (soc-proof) — своя логика опроса/возврата и уведомлений.
-        if order.supplier == "socproof":
-            await _settle_smm(bot, db, soc, config, bots, order.id)
+        # SMM (панели soc-proof / 1xpanel) — своя логика опроса/возврата.
+        if smm_panels.is_smm(order.supplier):
+            await _settle_smm(bot, db, panels, config, bots, order.id)
             continue
         async with db.session() as session:
             fresh = await session.get(Order, order.id)
@@ -263,9 +268,12 @@ async def run_smartprice_poller(
     config: BotConfig | None = None,
     interval: float = 600.0,
     soc: SocProofClient | None = None,
+    panels: dict | None = None,
 ) -> None:
     """Фоновый пересчёт умных цен по живому закупу (порог 1%) + алерты о росте."""
     from ..services import smartprice as smartprice_service
+    if panels is None and soc is not None:
+        panels = {"socproof": soc}
     while True:
         try:
             admin_ids = config.admin_ids if config else None
@@ -273,10 +281,11 @@ async def run_smartprice_poller(
                 await smartprice_service.recompute_all(
                     db, fzr, bot=bot, admin_ids=admin_ids
                 )
-            if soc is not None and getattr(soc, "configured", False):
-                await smartprice_service.recompute_socproof(
-                    db, soc, bot=bot, admin_ids=admin_ids
-                )
+            for name, client in (panels or {}).items():
+                if client is not None and getattr(client, "configured", False):
+                    await smartprice_service.recompute_smm(
+                        db, client, name, bot=bot, admin_ids=admin_ids
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

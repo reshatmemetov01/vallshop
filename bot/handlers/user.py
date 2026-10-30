@@ -35,6 +35,7 @@ from ..services import notify as notify_service
 from ..services import referral as referral_service
 from ..services import orders as order_service
 from ..services import smm as smm_service
+from ..services import smm_panels
 from ..services import stars as stars_service
 from ..services import steam as steam_service
 from ..services import stock as stock_service
@@ -296,6 +297,7 @@ async def cb_catalog(
 async def cb_product(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
+    panels: dict = None,
 ) -> None:
     product_id = int(call.data.split(":", 1)[1])
     is_franchise = merchant_id != HEAD_MERCHANT_ID
@@ -356,7 +358,7 @@ async def cb_product(
         variants = await catalog_service.list_variants(session, product_id)
         owner_prices = {v.id: _owner_price(v, config) for v in variants}
         client_prices = await mprice_service.client_prices(session, merchant_id, owner_prices)
-        _smm_ids = {v.id for v in variants if v.source == "socproof"}
+        _smm_ids = {v.id for v in variants if smm_panels.is_smm(v.source)}
         prices = {}
         for vid, p in client_prices.items():
             if p <= 0:
@@ -378,7 +380,7 @@ async def cb_product(
     stock = dict(stock)
     stock.update(await catalog_service.fazercard_stock(fzr, variants))
     # SMM soc-proof: 1 — услуга есть у поставщика (под заказ), 0 — пропала.
-    for vid, ok in (await catalog_service.socproof_available(soc, variants)).items():
+    for vid, ok in (await catalog_service.smm_available(panels or {"socproof": soc}, variants)).items():
         stock[vid] = 1 if ok else 0
 
     caption = f"{prod_emoji} <b>{p_title}</b>"
@@ -402,6 +404,7 @@ async def cb_product(
 async def cb_variant(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
+    panels: dict = None,
 ) -> None:
     await state.clear()  # сбросить незавершённый сбор данных топапа (в т.ч. отмену)
     variant_id = int(call.data.split(":", 1)[1])
@@ -429,7 +432,7 @@ async def cb_variant(
         in_stock = await stock_service.available_count(session, variant_id)
         ondemand = variant.source == "fazercard"
         is_vpn = variant.source == "vpnresellers"
-        is_smm = variant.source == "socproof"
+        is_smm = smm_panels.is_smm(variant.source)
         smm_min = int(variant.smm_min or 1)
         smm_max = int(variant.smm_max or 0)
         back = f"prod:{variant.product_id}"
@@ -441,7 +444,7 @@ async def cb_variant(
     # SMM: просто название + цена за 1000, без «в наличии». «Нет в наличии» —
     # только если услуга пропала у поставщика.
     if is_smm:
-        av = await catalog_service.socproof_available(soc, [variant])
+        av = await catalog_service.smm_available(panels or {"socproof": soc}, [variant])
         if av.get(variant_id, True):
             price_str = f"{texts.rub(client_price)} за 1000" if client_price > 0 else "—"
             hi = smm_max or "—"
@@ -548,6 +551,7 @@ async def _render_quantity(
 async def cb_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
+    panels: dict = None,
 ) -> None:
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -555,7 +559,7 @@ async def cb_buy(
         needs_fields = bool(variant and variant.is_active and _needs_fields(variant))
         is_steam = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "steam")
         is_stars = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "stars")
-        is_smm = bool(variant and variant.is_active and variant.source == "socproof")
+        is_smm = bool(variant and variant.is_active and smm_panels.is_smm(variant.source))
     if is_steam:
         await _start_steam(call, db, state)
         return
@@ -1255,7 +1259,7 @@ async def _start_smm(
 ) -> None:
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
-        if not variant or not variant.is_active or variant.source != "socproof":
+        if not variant or not variant.is_active or not smm_panels.is_smm(variant.source):
             await call.answer("Недоступно", show_alert=True)
             return
         _owner, client_1000 = await _smm_prices(session, merchant_id, variant, config)
@@ -1330,6 +1334,7 @@ async def msg_smm_link(
 async def cb_smm_buy(
     call: CallbackQuery, db: Database, config: BotConfig,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
+    panels: dict = None,
 ) -> None:
     data = await state.get_data()
     vid = data.get("vid")
@@ -1337,7 +1342,7 @@ async def cb_smm_buy(
     link = data.get("link", "")
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, vid, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
-        if not variant or not variant.is_active or variant.source != "socproof":
+        if not variant or not variant.is_active or not smm_panels.is_smm(variant.source):
             await state.clear()
             await call.answer("Недоступно", show_alert=True)
             return
@@ -1352,7 +1357,7 @@ async def cb_smm_buy(
             order, _codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
                 unit_price=client_total, quantity=1, merchant_id=merchant_id,
-                owner_unit_price=owner_total, soc=soc,
+                owner_unit_price=owner_total, soc=soc, panels=panels,
                 smm_link=link, smm_quantity=qty,
             )
         except InsufficientBalance:

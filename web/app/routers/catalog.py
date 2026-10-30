@@ -19,6 +19,8 @@ from bot.services import mprice as mprice_service
 from bot.services import stock as stock_service
 from bot.services.pricing import owner_price_rub
 
+from bot.services import smm_panels
+
 from ..config import settings
 from ..db import get_session
 from ..services.checkout import buy_kind, web_buyable
@@ -26,7 +28,7 @@ from ..textfmt import clean_text
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
-_ONDEMAND = {"fazercard", "socproof", "vpnresellers"}
+_ONDEMAND = {"fazercard", "vpnresellers"} | set(smm_panels.SMM_SOURCES)
 
 
 def _product_dto(p) -> dict:
@@ -100,7 +102,7 @@ async def _variant_items(session, variants, *, with_product: bool = False) -> li
             "title": clean_text(v.title),
             "source": src,
             "price_rub": float(price) if price and price > 0 else None,
-            "per_1000": src == "socproof",
+            "per_1000": smm_panels.is_smm(src),
             "smm_min": v.smm_min,
             "smm_max": v.smm_max,
             "available": available,

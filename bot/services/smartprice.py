@@ -134,21 +134,23 @@ async def recompute_all(db: Database, fzr, *, bot=None, admin_ids=None) -> list:
     return changes
 
 
-async def recompute_socproof(db: Database, soc, *, bot=None, admin_ids=None) -> list:
-    """SMM soc-proof: сверить закуп (₽/1000) каждой услуги с живым и обновить.
+async def recompute_smm(db: Database, client, source: str = "socproof", *,
+                        bot=None, admin_ids=None) -> list:
+    """SMM-панель ``source``: сверить закуп (₽/1000) каждой услуги с живым и обновить.
 
     Цена SMM = ``закуп × (1+наценка/100)``, поэтому достаточно обновить ``smm_rate``
     — цена пересчитается автоматически везде. Порог 1%: при изменении закупа > 1%
     обновляем закуп и шлём админу алерт (рост/падение). Работает для всех
-    SMM-номиналов без ручного включения.
+    SMM-номиналов этой панели без ручного включения.
     """
     from . import smm as smm_service
-    if soc is None or not getattr(soc, "configured", False):
+    from . import smm_panels
+    if client is None or not getattr(client, "configured", False):
         return []
     try:
-        services = await asyncio.to_thread(soc.services, force=True)
+        services = await asyncio.to_thread(client.services, force=True)
     except Exception:  # noqa: BLE001
-        log.warning("soc-proof: не удалось получить услуги для пересчёта цен")
+        log.warning("%s: не удалось получить услуги для пересчёта цен", smm_panels.label(source))
         return []
     rate_map = {}
     for s in services:
@@ -162,7 +164,7 @@ async def recompute_socproof(db: Database, soc, *, bot=None, admin_ids=None) -> 
     downs: list = []
     async with db.session() as session:
         variants = list(
-            await session.scalars(select(Variant).where(Variant.source == "socproof"))
+            await session.scalars(select(Variant).where(Variant.source == source))
         )
         if not variants:
             return []
@@ -212,6 +214,11 @@ async def recompute_socproof(db: Database, soc, *, bot=None, admin_ids=None) -> 
             except Exception:  # noqa: BLE001
                 log.warning("Не удалось отправить SMM-алерт о падении цен")
     return changes
+
+
+async def recompute_socproof(db: Database, soc, *, bot=None, admin_ids=None) -> list:
+    """Совместимость: пересчёт цен для панели soc-proof."""
+    return await recompute_smm(db, soc, "socproof", bot=bot, admin_ids=admin_ids)
 
 
 async def migrate_supplier_to_smart(db: Database, fzr, default_markup) -> tuple:

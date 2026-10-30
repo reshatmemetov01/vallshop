@@ -24,6 +24,7 @@ from bot.db.models import (
     WebAccount,
 )
 from bot.services import smm as smm_service
+from bot.services import smm_panels
 
 # Человекочитаемый статус (данные, без HTML — оформление на фронте).
 _STATUS_RU = {
@@ -96,7 +97,7 @@ def _base_dto(order: Order, title: str) -> dict:
         "created_at": order.created_at.isoformat() if order.created_at else None,
     }
     # Прогресс SMM для списка.
-    if order.supplier == "socproof" and status == OrderStatus.FULFILLING.value:
+    if smm_panels.is_smm(order.supplier) and status == OrderStatus.FULFILLING.value:
         prog = _fields(order).get("progress")
         if isinstance(prog, int):
             dto["progress"] = prog
@@ -139,7 +140,7 @@ async def order_detail(
     dto = _base_dto(order, variant.title if variant else "")
     status = dto["status"]
 
-    if source == "socproof":
+    if smm_panels.is_smm(source):
         f = _fields(order)
         qty = f.get("quantity") or order.quantity
         dto["smm"] = {

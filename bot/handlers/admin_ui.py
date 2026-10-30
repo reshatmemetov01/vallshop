@@ -31,6 +31,7 @@ from ..db.models import Order, Product, StockItem, StockStatus, User, Variant
 from ..services import catalog as catalog_service
 from ..services import smartprice as smartprice_service
 from ..services import smm as smm_service
+from ..services import smm_panels
 from ..services import stock as stock_service
 from ..services.pricing import (
     _fmt_rub, margin, price_label, price_rub_value, round_price_rub, sale_price, usd_to_rub,
@@ -874,7 +875,7 @@ def _smm_variant_card(v: Variant, config: BotConfig):
     lo, hi = int(v.smm_min or 1), int(v.smm_max or 0)
     caption = (
         f"🧩 <b>{v.title}</b> ({vflag})\n"
-        f"Поставщик: SMM soc-proof · услуга #{v.smm_service}\n"
+        f"Поставщик: SMM {smm_panels.label(v.source)} · услуга #{v.smm_service}\n"
         f"Закуп: <b>{texts.rub(rate)}</b> за 1000\n"
         f"💰 Цена клиенту: <b>{texts.rub(sell)}</b> за 1000\n"
         f"Наценка: {_fmt_rub(markup)}%\n"
@@ -903,8 +904,8 @@ async def _variant_card(session, config: BotConfig, variant_id: int):
     if not v:
         return None, None, None
 
-    # SMM (soc-proof): своя карточка — цена за 1000, закуп ₽/1000, лимиты.
-    if v.source == "socproof":
+    # SMM (soc-proof / 1xpanel): своя карточка — цена за 1000, закуп ₽/1000, лимиты.
+    if smm_panels.is_smm(v.source):
         return _smm_variant_card(v, config)
 
     in_stock = await stock_service.available_count(session, variant_id)
@@ -2144,44 +2145,83 @@ def _smm_services_kb(services: list, pid, *, multi: bool, sel: list) -> InlineKe
     return kb.as_markup()
 
 
-@router.callback_query(F.data.startswith("a_addvarsmm:"))
-async def cb_add_variant_smm(call: CallbackQuery, state: FSMContext, soc: SocProofClient = None) -> None:
-    pid = int(call.data.split(":", 1)[1])
-    if soc is None or not getattr(soc, "configured", False):
-        await call.answer("SMM-поставщик не настроен (нет ключа)", show_alert=True)
-        return
-    await state.update_data(pid=pid)
-    await state.set_state(AdminUI.smm_search)
-    await call.message.edit_text(
-        "🔎 <b>Услуга SMM (soc-proof)</b>\n\n"
+async def _smm_search_prompt(target, pid, panel_label: str) -> None:
+    """Экран ввода запроса поиска услуги у выбранной панели."""
+    text = (
+        f"🔎 <b>Услуга SMM ({panel_label})</b>\n\n"
         "Пришлите <b>ID услуги</b> (число, напр. <code>707</code>) — ищу по ID, "
         "или <b>название</b> (<code>telegram подписчики</code>, <code>просмотры</code>) "
         "— ищу по названию.\n"
-        "Показываются только обычные услуги (ссылка + количество).",
-        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+        "Показываются только обычные услуги (ссылка + количество)."
     )
+    await target.edit_text(text, reply_markup=_cancel_kb(f"a_prod:{pid}"))
+
+
+@router.callback_query(F.data.startswith("a_addvarsmm:"))
+async def cb_add_variant_smm(call: CallbackQuery, state: FSMContext,
+                             soc: SocProofClient = None, panels: dict = None) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    panels = panels or {"socproof": soc}
+    ready = smm_panels.configured_panels(panels)
+    if not ready:
+        await call.answer("SMM-поставщик не настроен (нет ключа)", show_alert=True)
+        return
+    # одна панель — сразу к поиску; несколько — спросить, какую
+    if len(ready) == 1:
+        name = next(iter(ready))
+        await state.update_data(pid=pid, smmp=name)
+        await state.set_state(AdminUI.smm_search)
+        await _smm_search_prompt(call.message, pid, smm_panels.label(name))
+        await call.answer()
+        return
+    await state.update_data(pid=pid)
+    kb = InlineKeyboardBuilder()
+    for name in ready:
+        kb.row(_btn(f"🧩 {smm_panels.label(name)}", f"a_smmp:{name}:{pid}"))
+    kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
+    await call.message.edit_text(
+        "🧩 <b>Выберите SMM-панель</b>\n\nОткуда брать услугу:",
+        reply_markup=kb.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("a_smmp:"))
+async def cb_smm_panel(call: CallbackQuery, state: FSMContext) -> None:
+    """Выбрана SMM-панель — переходим к поиску услуги в ней."""
+    _, name, raw_pid = call.data.split(":", 2)
+    if name not in smm_panels.SMM_SOURCES:
+        await call.answer("Неизвестная панель", show_alert=True)
+        return
+    pid = int(raw_pid)
+    await state.update_data(pid=pid, smmp=name)
+    await state.set_state(AdminUI.smm_search)
+    await _smm_search_prompt(call.message, pid, smm_panels.label(name))
     await call.answer()
 
 
 @router.message(AdminUI.smm_search)
 async def msg_smm_search(
-    message: Message, db: Database, state: FSMContext, soc: SocProofClient = None
+    message: Message, db: Database, state: FSMContext,
+    soc: SocProofClient = None, panels: dict = None,
 ) -> None:
     data = await state.get_data()
     pid = data.get("pid")
+    panels = panels or {"socproof": soc}
+    client = panels.get(data.get("smmp") or "socproof")
     query = (message.text or "").strip()
     if not query:
         await message.answer("Пришлите слово для поиска.")
         return
-    if soc is None:
+    if client is None or not getattr(client, "configured", False):
         await message.answer("SMM-поставщик не настроен.")
         return
     try:
         found = await asyncio.to_thread(
-            lambda: soc.search(query, only_default=True, limit=_SMM_RESULTS)
+            lambda: client.search(query, only_default=True, limit=_SMM_RESULTS)
         )
     except SocProofError as e:
-        await message.answer(f"Ошибка каталога soc-proof: {e}")
+        await message.answer(f"Ошибка каталога {smm_panels.label(data.get('smmp'))}: {e}")
         return
     if not found:
         await message.answer("Ничего не найдено. Попробуйте другое слово.")
@@ -2289,14 +2329,15 @@ async def _smm_create(message, db, state, services: list) -> None:
     if markup < 0:
         await message.answer("Наценка не может быть отрицательной.")
         return
+    source = data.get("smmp") or "socproof"
     async with db.session() as session:
         added, skipped = await catalog_service.bulk_create_smm_variants(
-            session, pid, services, markup
+            session, pid, services, markup, source=source
         )
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
-    parts = [f"✅ Добавлено услуг SMM: <b>{added}</b> (наценка +{markup}%)"]
+    parts = [f"✅ Добавлено услуг SMM ({smm_panels.label(source)}): <b>{added}</b> (наценка +{markup}%)"]
     if skipped:
         parts.append(f"⏭ Пропущено (уже были): <b>{skipped}</b>")
     parts.append("\nℹ️ При покупке клиент укажет количество и ссылку; статус — в «Мои заказы».")

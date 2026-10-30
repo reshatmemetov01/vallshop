@@ -28,6 +28,7 @@ from ..services import orders as order_service
 from ..services import paymethods as paymethods_service
 from ..services import rates as rates_service
 from ..services import smm as smm_service
+from ..services import smm_panels
 from ..services.balance import TOPUP_MAX, TOPUP_MIN
 from ..ui import render
 from .. import keyboards as kb
@@ -491,7 +492,7 @@ def _order_status_emoji(order) -> str:
     if s == OrderStatus.COMPLETED:
         return "✅"
     if s == OrderStatus.FULFILLING:
-        return "🚀" if order.supplier == "socproof" else "⏳"
+        return "🚀" if smm_panels.is_smm(order.supplier) else "⏳"
     if s == OrderStatus.REFUNDED:
         return "↩️"
     if s in (OrderStatus.FAILED, OrderStatus.NEEDS_ACTION):
@@ -504,7 +505,7 @@ def _order_button_label(order, vtitle: str) -> str:
     total = Decimal(order.price_usd or 0) * (order.quantity or 1)
     name = vtitle if len(vtitle) <= 26 else vtitle[:25] + "…"
     extra = ""
-    if order.supplier == "socproof" and order.status == OrderStatus.FULFILLING:
+    if smm_panels.is_smm(order.supplier) and order.status == OrderStatus.FULFILLING:
         prog = _order_fields(order).get("progress")
         if isinstance(prog, int):
             extra = f" · {prog}%"
@@ -516,7 +517,7 @@ def _order_detail_caption(order, vtitle: str) -> str:
     total = Decimal(order.price_usd or 0) * (order.quantity or 1)
     name = _esc(vtitle)
     lines = [f"🧾 <b>{name}</b>", f"Заказ: <code>#{order.id}</code>"]
-    if order.supplier == "socproof":
+    if smm_panels.is_smm(order.supplier):
         f = _order_fields(order)
         qty = f.get("quantity") or order.quantity or "?"
         lines.append(f"Количество: <b>{qty}</b>")
@@ -560,7 +561,7 @@ async def _show_order_detail(call, db, order_id, merchant_id) -> bool:
         variant = await session.get(Variant, order.variant_id)
         vtitle = variant.title if variant else "Товар"
         caption = _order_detail_caption(order, vtitle)
-        is_smm_active = order.supplier == "socproof" and order.status == OrderStatus.FULFILLING
+        is_smm_active = smm_panels.is_smm(order.supplier) and order.status == OrderStatus.FULFILLING
     b = InlineKeyboardBuilder()
     if is_smm_active:
         b.row(InlineKeyboardButton(text="🔄 Обновить статус", callback_data=f"ordref:{order_id}"))
@@ -585,20 +586,21 @@ async def cb_order_detail(
 async def cb_order_refresh(
     call: CallbackQuery, db: Database, config: BotConfig,
     merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
+    panels: dict = None,
 ) -> None:
     """Обновить статус одного SMM-заказа по запросу клиента."""
     order_id = int(call.data.split(":", 1)[1])
-    if soc is None or not getattr(soc, "configured", False):
-        await call.answer("Обновление сейчас недоступно", show_alert=True)
-        return
+    panels = panels or {"socproof": soc}
     async with db.session() as session:
         order = await session.get(Order, order_id)
+        client = (panels or {}).get(order.supplier) if order else None
         if (order and order.user_id == call.from_user.id
                 and order.merchant_id == merchant_id
-                and order.supplier == "socproof"
-                and order.status == OrderStatus.FULFILLING):
+                and smm_panels.is_smm(order.supplier)
+                and order.status == OrderStatus.FULFILLING
+                and client is not None and getattr(client, "configured", False)):
             try:
-                await order_service.settle_socproof(session, order, soc)
+                await order_service.settle_socproof(session, order, client)
                 await session.commit()
             except Exception:  # noqa: BLE001
                 await session.rollback()

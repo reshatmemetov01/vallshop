@@ -104,24 +104,42 @@ async def fazercard_cost(fzr, variants: List[Variant]) -> Dict[int, "object"]:
     return result
 
 
-async def socproof_available(soc, variants: List[Variant]) -> Dict[int, bool]:
-    """Доступность SMM-услуг у soc-proof: ``{variant_id: есть ли услуга у поставщика}``.
+async def smm_available(panels, variants: List[Variant]) -> Dict[int, bool]:
+    """Доступность SMM-услуг у панелей: ``{variant_id: есть ли услуга у поставщика}``.
 
-    Сверяет ``smm_service`` каждого SMM-номинала с живым списком услуг. При сбое
-    API возвращает пусто (fail-open) — продажи не блокируем из-за недоступности API.
+    ``panels`` — словарь ``{имя_панели: client}``. Сверяет ``smm_service`` каждого
+    SMM-номинала с живым списком услуг ЕГО панели (по ``variant.source``). При сбое
+    API по панели её номиналы пропускаются (fail-open) — продажи не блокируем.
     """
-    smm_vs = [
-        v for v in variants
-        if getattr(v, "source", None) == "socproof" and v.smm_service
-    ]
-    if not smm_vs or soc is None or not getattr(soc, "configured", False):
+    from . import smm_panels as _p
+
+    # группируем SMM-номиналы по панели
+    by_panel: Dict[str, List[Variant]] = {}
+    for v in variants:
+        src = getattr(v, "source", None)
+        if _p.is_smm(src) and v.smm_service:
+            by_panel.setdefault(src, []).append(v)
+    if not by_panel:
         return {}
-    try:
-        services = await asyncio.to_thread(soc.services)
-        ids = {int(s.get("id")) for s in services if s.get("id") is not None}
-    except Exception:  # noqa: BLE001 — сбой API не должен ломать каталог
-        return {}
-    return {v.id: (int(v.smm_service) in ids) for v in smm_vs}
+
+    out: Dict[int, bool] = {}
+    for src, vs in by_panel.items():
+        client = (panels or {}).get(src) if isinstance(panels, dict) else None
+        if client is None or not getattr(client, "configured", False):
+            continue
+        try:
+            services = await asyncio.to_thread(client.services)
+            ids = {int(s.get("id")) for s in services if s.get("id") is not None}
+        except Exception:  # noqa: BLE001 — сбой API не должен ломать каталог
+            continue
+        for v in vs:
+            out[v.id] = int(v.smm_service) in ids
+    return out
+
+
+async def socproof_available(soc, variants: List[Variant]) -> Dict[int, bool]:
+    """Совместимость: доступность для одной панели soc-proof."""
+    return await smm_available({"socproof": soc}, variants)
 
 
 async def list_products(
@@ -300,14 +318,16 @@ async def bulk_create_smm_variants(
     product_id: int,
     services: list,
     markup_pct: Decimal,
+    *,
+    source: str = "socproof",
 ) -> tuple[int, int]:
-    """Пакетно создать SMM-услуги (source="socproof") из ``services``.
+    """Пакетно создать SMM-услуги панели ``source`` из ``services``.
 
-    Каждая услуга — нормализованный dict soc-proof
-    ``{id, name, rate, min, max, ...}``. Наценка (``markup_pct``) — общая для всех
-    и хранится в ``markup_percent``; закуп ₽/1000 — в ``smm_rate``. Услуги, уже
-    добавленные к товару (по ``smm_service``), пропускаются. ``sort_order`` —
-    по порядку списка (после существующих номиналов).
+    ``source`` — имя панели (``"socproof"`` | ``"onexpanel"``). Каждая услуга —
+    нормализованный dict ``{id, name, rate, min, max, ...}``. Наценка
+    (``markup_pct``) — общая для всех и хранится в ``markup_percent``; закуп ₽/1000
+    — в ``smm_rate``. Услуги, уже добавленные к товару этой же панели (по
+    ``smm_service`` + ``source``), пропускаются. ``sort_order`` — по порядку списка.
 
     Возвращает ``(добавлено, пропущено)``.
     """
@@ -315,7 +335,9 @@ async def bulk_create_smm_variants(
         int(x)
         for x in await session.scalars(
             select(Variant.smm_service).where(
-                Variant.product_id == product_id, Variant.smm_service.is_not(None)
+                Variant.product_id == product_id,
+                Variant.smm_service.is_not(None),
+                Variant.source == source,
             )
         )
     }
@@ -348,7 +370,7 @@ async def bulk_create_smm_variants(
                 product_id=product_id, title=(s.get("name") or str(sid))[:255],
                 liog_product_id=0, liog_variation_id=next_vid,
                 cost_usd=Decimal("0"), price_usd=None,
-                source="socproof", markup_percent=markup,
+                source=source, markup_percent=markup,
                 smm_service=sid, smm_min=int(s.get("min") or 0),
                 smm_max=int(s.get("max") or 0), smm_rate=rate,
                 sort_order=base_sort,
