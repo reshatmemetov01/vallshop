@@ -13,7 +13,7 @@ from fazercard import FazerCardClient
 
 from ..config import BotConfig
 from ..db import Database
-from ..db.models import Product
+from ..db.models import Product, Variant
 from ..services import catalog as catalog_service
 from ..services import menu as menu_service
 from ..services import paymethods as paymethods_service
@@ -293,11 +293,15 @@ async def _show_catalog_btn(call: CallbackQuery, db: Database, pid: int) -> None
         children = await catalog_service.list_products(
             session, only_active=False, parent_id=pid
         )
+        variants = [] if children else await catalog_service.list_variants(
+            session, pid, only_active=False
+        )
         parent_id = p.parent_id
         title = p.title
         style = p.button_style
         full_width = bool(p.full_width)
         has_children = bool(children)
+        has_variants = bool(variants)
     fw_state = "↔️ во всю строку" if full_width else "▭ половина строки"
     color_name = _cat_color_name(style)
     caption = (
@@ -313,6 +317,8 @@ async def _show_catalog_btn(call: CallbackQuery, db: Database, pid: int) -> None
     kb.row(_btn("🔼 Вверх", f"apc_up:{pid}"), _btn("🔽 Вниз", f"apc_dn:{pid}"))
     if has_children:
         kb.row(_btn("📂 Кнопки внутри", f"apc_cat:{pid}"))
+    elif has_variants:
+        kb.row(_btn("📂 Номиналы (ширина/порядок)", f"apc_vars:{pid}"))
     back = f"apc_cat:{parent_id}" if parent_id else "apc_home"
     kb.row(_btn("⬅️ Назад", back))
     await call.message.edit_text(caption, reply_markup=kb.as_markup())
@@ -364,6 +370,91 @@ async def cb_cat_fw(call: CallbackQuery, db: Database) -> None:
             await session.commit()
     await _show_catalog_btn(call, db, pid)
     await call.answer("Ширина изменена")
+
+
+# ── Оформление номиналов (ширина/порядок) ───────────────────────────────────
+async def _show_variants_list(call: CallbackQuery, db: Database, pid: int) -> None:
+    async with db.session() as session:
+        p = await session.get(Product, pid)
+        variants = await catalog_service.list_variants(session, pid, only_active=False)
+    if not p:
+        await call.answer("Не найдено", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    for v in variants:
+        width = "↔️" if v.full_width else "▭"
+        hidden = "" if v.is_active else " 🚫"
+        kb.row(_btn(f"{width} {v.title}{hidden}", f"apc_vbtn:{v.id}"))
+    kb.row(_btn("⬅️ Назад", f"apc_btn:{pid}"))
+    await call.message.edit_text(
+        f"🧩 <b>Номиналы «{p.title}»</b>\n\n"
+        "Порядок сверху вниз = порядок в каталоге. "
+        "↔️ — во всю строку, ▭ — половина (сетка по 2), 🚫 — выключен.\n\n"
+        "Выберите номинал:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _show_variant_btn(call: CallbackQuery, db: Database, vid: int) -> None:
+    async with db.session() as session:
+        v = await session.get(Variant, vid)
+        if not v:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        pid, title, fw = v.product_id, v.title, bool(v.full_width)
+    fw_state = "↔️ во всю строку" if fw else "▭ половина строки"
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("▭ Сделать половину" if fw else "↔️ Во всю строку", f"apc_vfw:{vid}"))
+    kb.row(_btn("🔼 Вверх", f"apc_vup:{vid}"), _btn("🔽 Вниз", f"apc_vdn:{vid}"))
+    kb.row(_btn("⬅️ Назад", f"apc_vars:{pid}"))
+    await call.message.edit_text(
+        f"🧩 <b>Номинал</b>\nНоминал: <b>{title}</b>\nШирина: {fw_state}",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("apc_vars:"))
+async def cb_var_list(call: CallbackQuery, db: Database) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    await _show_variants_list(call, db, pid)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("apc_vbtn:"))
+async def cb_var_btn(call: CallbackQuery, db: Database) -> None:
+    vid = int(call.data.split(":", 1)[1])
+    await _show_variant_btn(call, db, vid)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("apc_vfw:"))
+async def cb_var_fw(call: CallbackQuery, db: Database) -> None:
+    vid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        v = await session.get(Variant, vid)
+        if v:
+            v.full_width = not bool(v.full_width)
+            await session.commit()
+    await _show_variant_btn(call, db, vid)
+    await call.answer("Ширина изменена")
+
+
+@router.callback_query(F.data.startswith("apc_vup:"))
+async def cb_var_up(call: CallbackQuery, db: Database) -> None:
+    vid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        await catalog_service.move_variant(session, vid, -1)
+    await _show_variant_btn(call, db, vid)
+    await call.answer("Перемещено вверх")
+
+
+@router.callback_query(F.data.startswith("apc_vdn:"))
+async def cb_var_dn(call: CallbackQuery, db: Database) -> None:
+    vid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        await catalog_service.move_variant(session, vid, 1)
+    await _show_variant_btn(call, db, vid)
+    await call.answer("Перемещено вниз")
 
 
 @router.callback_query(F.data.startswith("apc_up:"))

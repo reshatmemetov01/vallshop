@@ -1,8 +1,11 @@
-"""Перестановка порядка кнопок каталога (move_product)."""
+"""Перестановка порядка кнопок каталога (move_product) и номиналов (move_variant)."""
+
+from decimal import Decimal
 
 import pytest
 
 from bot.db import Database, Product
+from bot.db.models import Variant
 from bot.services import catalog as catalog_service
 
 
@@ -70,3 +73,29 @@ async def test_move_only_within_level(db):
         assert await catalog_service.move_product(s, xy["X"], +1) is True
     assert await _titles(db, parent_id=cid) == ["Y", "X"]
     assert await _titles(db) == ["Категория", "Верхний"]
+
+
+async def _vtitles(db, pid):
+    async with db.session() as s:
+        vs = await catalog_service.list_variants(s, pid, only_active=False)
+    return [v.title for v in vs]
+
+
+@pytest.mark.asyncio
+async def test_move_variant(db):
+    async with db.session() as s:
+        p = Product(game="g", title="P")
+        s.add(p)
+        await s.flush()
+        for t in ("N1", "N2", "N3"):
+            s.add(Variant(product_id=p.id, title=t, liog_product_id=0,
+                          liog_variation_id=-hash(t) % 1000 - 1, price_rub=Decimal("1")))
+        await s.commit()
+        pid = p.id
+        ids = {v.title: v.id for v in await catalog_service.list_variants(s, pid, only_active=False)}
+    assert await _vtitles(db, pid) == ["N1", "N2", "N3"]
+    async with db.session() as s:
+        assert await catalog_service.move_variant(s, ids["N1"], +1) is True
+    assert await _vtitles(db, pid) == ["N2", "N1", "N3"]
+    async with db.session() as s:
+        assert await catalog_service.move_variant(s, ids["N2"], -1) is False  # уже вверху

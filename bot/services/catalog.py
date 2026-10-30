@@ -313,6 +313,34 @@ async def move_product(
     return True
 
 
+async def move_variant(
+    session: AsyncSession, variant_id: int, direction: int
+) -> bool:
+    """Переместить номинал на одну позицию вверх (-1) / вниз (+1).
+
+    Переставляет ``sort_order`` среди номиналов того же товара. Нормализует
+    порядок соседей — корректно даже когда у всех ``sort_order == 0``.
+    Возвращает ``True``, если перестановка произошла.
+    """
+    v = await session.get(Variant, variant_id)
+    if v is None:
+        return False
+    siblings = await list_variants(session, v.product_id, only_active=False)
+    for i, s in enumerate(siblings):
+        if s.sort_order != i:
+            s.sort_order = i
+    idx = next((i for i, s in enumerate(siblings) if s.id == variant_id), None)
+    if idx is None:
+        return False
+    swap = idx + direction
+    if swap < 0 or swap >= len(siblings):
+        return False
+    a, b = siblings[idx], siblings[swap]
+    a.sort_order, b.sort_order = b.sort_order, a.sort_order
+    await session.commit()
+    return True
+
+
 async def bulk_create_smm_variants(
     session: AsyncSession,
     product_id: int,
