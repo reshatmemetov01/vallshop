@@ -277,9 +277,14 @@ def variants_kb(
             icon = getattr(v, "icon_emoji_id", None) or product_icon or EMOJI["variant"]
         # Нет в наличии — красная кнопка; иначе обычная.
         style = "danger" if out else None
-        buf.append(_b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon, style=style))
-        if len(buf) >= cols:
+        btn = _b(f"{title} — {price}{note}", callback_data=f"var:{v.id}", icon=icon, style=style)
+        if getattr(v, "full_width", False) or cols <= 1:
             _flush()
+            kb.row(btn)
+        else:
+            buf.append(btn)
+            if len(buf) >= cols:
+                _flush()
     _flush()
     kb.row(_b("Назад", callback_data=back, icon=EMOJI["back"]))
     return kb.as_markup()

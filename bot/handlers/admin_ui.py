@@ -890,6 +890,7 @@ def _smm_variant_card(v: Variant, config: BotConfig):
         _btn("🙂 Эмодзи", f"a_vemoji:{v.id}"),
         _btn("🔁 Вкл/выкл", f"a_tvar:{v.id}"),
     )
+    kb.row(_btn(_vfw_label(v), f"a_vfw:{v.id}"))
     kb.row(
         _btn("⏳ Текст ожидания", f"a_txt:v:pend:{v.id}"),
         _btn("✅ Текст выдачи", f"a_txt:v:deliv:{v.id}"),
@@ -960,6 +961,7 @@ async def _variant_card(session, config: BotConfig, variant_id: int):
         _btn("🙂 Эмодзи", f"a_vemoji:{variant_id}"),
         _btn("🔁 Вкл/выкл", f"a_tvar:{variant_id}"),
     )
+    kb.row(_btn(_vfw_label(v), f"a_vfw:{variant_id}"))
     kb.row(
         _btn("⏳ Текст ожидания", f"a_txt:v:pend:{variant_id}"),
         _btn("✅ Текст выдачи", f"a_txt:v:deliv:{variant_id}"),
@@ -968,6 +970,28 @@ async def _variant_card(session, config: BotConfig, variant_id: int):
     kb.row(_btn("🗑 Удалить номинал", f"a_vdel:{variant_id}"))
     kb.row(_btn("⬅️ Назад", f"a_prod:{v.product_id}"))
     return caption, kb.as_markup(), v.product_id
+
+
+def _vfw_label(v) -> str:
+    """Подпись кнопки ширины номинала по текущему состоянию."""
+    return "▭ Сделать половину" if getattr(v, "full_width", False) else "↔️ Во всю строку"
+
+
+@router.callback_query(F.data.startswith("a_vfw:"))
+async def cb_variant_fw(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    """Переключить ширину кнопки номинала (во всю строку / половина)."""
+    vid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        v = await session.get(Variant, vid)
+        if v:
+            v.full_width = not bool(v.full_width)
+            await session.commit()
+        caption, markup, _ = await _variant_card(session, config, vid)
+    if not caption:
+        await call.answer("Не найдено", show_alert=True)
+        return
+    await call.message.edit_text(caption, reply_markup=markup)
+    await call.answer("Ширина: во всю строку" if v and v.full_width else "Ширина: половина")
 
 
 @router.callback_query(F.data.startswith("a_var:"))

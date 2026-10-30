@@ -254,6 +254,8 @@ class Variant(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     # Кастом-эмодзи (custom_emoji_id) для иконки кнопки номинала.
     icon_emoji_id: Mapped[Optional[str]] = mapped_column(String(32))
+    # Кнопка номинала на всю строку (True) или в общую сетку по 2 (False).
+    full_width: Mapped[bool] = mapped_column(Boolean, default=False)
     # Тексты уровня номинала (приоритетнее товара). None = наследовать, "" = скрыть.
     pending_text: Mapped[Optional[str]] = mapped_column(Text)
     delivered_text: Mapped[Optional[str]] = mapped_column(Text)

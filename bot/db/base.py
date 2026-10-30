@@ -74,6 +74,7 @@ class Database:
             ("users", "ref_earned_rub", "NUMERIC(12,2) NOT NULL DEFAULT 0"),
             ("products", "button_style", "VARCHAR(16)"),
             ("products", "full_width", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("variants", "full_width", "BOOLEAN NOT NULL DEFAULT 0"),
             # Франшиза (Фаза 1): принадлежность записи магазину (0 = головной).
             ("users", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("orders", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
