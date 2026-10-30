@@ -385,6 +385,11 @@ async def _show_variants_list(call: CallbackQuery, db: Database, pid: int) -> No
         width = "↔️" if v.full_width else "▭"
         hidden = "" if v.is_active else " 🚫"
         kb.row(_btn(f"{width} {v.title}{hidden}", f"apc_vbtn:{v.id}"))
+    if variants:
+        kb.row(
+            _btn("↔️ Все во всю строку", f"apc_vallfw:{pid}:1"),
+            _btn("▭ Все по половине", f"apc_vallfw:{pid}:0"),
+        )
     kb.row(_btn("⬅️ Назад", f"apc_btn:{pid}"))
     await call.message.edit_text(
         f"🧩 <b>Номиналы «{p.title}»</b>\n\n"
@@ -425,6 +430,20 @@ async def cb_var_btn(call: CallbackQuery, db: Database) -> None:
     vid = int(call.data.split(":", 1)[1])
     await _show_variant_btn(call, db, vid)
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("apc_vallfw:"))
+async def cb_var_all_fw(call: CallbackQuery, db: Database) -> None:
+    """Задать ширину сразу всем номиналам товара (во всю строку / половина)."""
+    _, raw_pid, raw_val = call.data.split(":", 2)
+    pid, value = int(raw_pid), raw_val == "1"
+    async with db.session() as session:
+        variants = await catalog_service.list_variants(session, pid, only_active=False)
+        for v in variants:
+            v.full_width = value
+        await session.commit()
+    await _show_variants_list(call, db, pid)
+    await call.answer("Все во всю строку" if value else "Все по половине")
 
 
 @router.callback_query(F.data.startswith("apc_vfw:"))
