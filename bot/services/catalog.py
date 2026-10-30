@@ -197,12 +197,17 @@ async def bulk_create_fzr_variants(
     cat: dict,
     offers: list,
     markup_pct: Decimal,
+    *,
+    name_only: bool = False,
 ) -> tuple[int, int]:
     """Пакетно создать номиналы FazerCard из ``offers`` (в порядке списка).
 
     Цена каждого = закуп × (1 + markup_pct/100), хранится в USD (плавает по
     курсу). Номиналы, уже добавленные к товару (по ``fzr_b``), пропускаются.
     ``sort_order`` назначается по порядку списка — после существующих номиналов.
+
+    ``name_only=True`` — название номинала = только имя оффера (напр. «25 USD»),
+    без префикса категории (по умолчанию «<категория> · <оффер>»).
 
     Возвращает ``(добавлено, пропущено)``.
     """
@@ -238,7 +243,10 @@ async def bulk_create_fzr_variants(
         price = (cost * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         next_vid -= 1
         base_sort += 1
-        title = f"{cat.get('name')} · {o.get('name')}".strip(" ·")
+        if name_only:
+            title = str(o.get("name") or "").strip() or str(offer_id)
+        else:
+            title = f"{cat.get('name')} · {o.get('name')}".strip(" ·")
         session.add(
             Variant(
                 product_id=product_id, title=title[:255],
