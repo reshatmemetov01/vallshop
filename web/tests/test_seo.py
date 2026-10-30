@@ -21,7 +21,10 @@ async def seeded():
         cat = Product(game="Steam", title="Пополнение Steam", sort_order=1)
         s.add(cat)
         await s.flush()
-        leaf = Product(game="Steam", title="Steam Казахстан", parent_id=cat.id, sort_order=1)
+        leaf = Product(
+            game="Steam", title="Steam Казахстан", parent_id=cat.id, sort_order=1,
+            description='<tg-emoji emoji-id="6034923938486684992">⭐</tg-emoji> Курс {курс:1.38}₽ - 1 Звезда',
+        )
         s.add(leaf)
         await s.flush()
         # номинал с фикс-ценой и остатком (в наличии)
@@ -42,6 +45,14 @@ async def seeded():
 
 def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def test_clean_text_strips_tg_emoji_and_rate():
+    from web.app.textfmt import clean_text
+    src = '<tg-emoji emoji-id="6034923938486684992">⭐</tg-emoji> Курс {курс:1.38}₽'
+    assert clean_text(src) == "⭐ Курс 1.38₽"
+    assert clean_text(None) is None
+    assert clean_text("обычный текст") == "обычный текст"
 
 
 def test_slugify_cyrillic():
@@ -99,6 +110,10 @@ async def test_leaf_page_shows_price_and_jsonld(seeded):
         assert "в наличии" in r.text
         assert "AggregateOffer" in r.text      # микроразметка товара
         assert f"/?open={seeded['leaf']}" in r.text  # кнопка «Купить» → витрина
+        # Telegram-разметка вычищена: тег убран, эмодзи и подставленный курс остались
+        assert "tg-emoji" not in r.text
+        assert "{курс" not in r.text
+        assert "⭐ Курс 1.38₽" in r.text
 
 
 @pytest.mark.asyncio

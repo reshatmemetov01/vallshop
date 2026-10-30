@@ -22,6 +22,7 @@ from bot.services.pricing import owner_price_rub
 from ..config import settings
 from ..db import get_session
 from ..services.checkout import buy_kind, web_buyable
+from ..textfmt import clean_text
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
@@ -31,7 +32,7 @@ _ONDEMAND = {"fazercard", "socproof", "vpnresellers"}
 def _product_dto(p) -> dict:
     return {
         "id": p.id,
-        "title": p.title,
+        "title": clean_text(p.title),
         "icon_emoji_id": p.icon_emoji_id,
         "banner_file_id": p.banner_file_id,
         "button_style": p.button_style,
@@ -96,7 +97,7 @@ async def _variant_items(session, variants, *, with_product: bool = False) -> li
         price = client.get(v.id)
         dto = {
             "id": v.id,
-            "title": v.title,
+            "title": clean_text(v.title),
             "source": src,
             "price_rub": float(price) if price and price > 0 else None,
             "per_1000": src == "socproof",
@@ -104,12 +105,12 @@ async def _variant_items(session, variants, *, with_product: bool = False) -> li
             "smm_max": v.smm_max,
             "available": available,
             "stock": stock,
-            "description": v.description,
+            "description": clean_text(v.description),
             "buyable": web_buyable(v),
             "buy_kind": buy_kind(v),
         }
         if with_product and v.product is not None:
-            dto["product_title"] = v.product.title
+            dto["product_title"] = clean_text(v.product.title)
             dto["product_id"] = v.product_id
         items.append(dto)
     return items

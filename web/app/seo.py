@@ -22,6 +22,7 @@ from bot.services import stock as stock_service
 from bot.services.pricing import owner_price_rub
 
 from .config import settings
+from .textfmt import clean_text
 
 _ONDEMAND = {"fazercard", "socproof", "vpnresellers"}
 
@@ -54,7 +55,7 @@ def _base() -> str:
 
 
 def product_url(p: Product) -> str:
-    return f"/p/{p.id}-{slugify(p.title)}"
+    return f"/p/{p.id}-{slugify(clean_text(p.title) or p.title)}"
 
 
 def _e(s) -> str:
@@ -132,6 +133,7 @@ async def product_page(session: AsyncSession, product_id: int):
     if not product or not product.is_active:
         return None
 
+    ptitle = clean_text(product.title) or product.title
     canonical_path = product_url(product)
     canonical = _base() + canonical_path
     parents = await _parents(session, product)
@@ -139,36 +141,37 @@ async def product_page(session: AsyncSession, product_id: int):
     # Хлебные крошки (видимые + микроразметка).
     crumb_items = [("Главная", _base() + "/")]
     for pr in parents:
-        crumb_items.append((pr.title, _base() + product_url(pr)))
+        crumb_items.append((clean_text(pr.title) or pr.title, _base() + product_url(pr)))
     crumb_html = '<nav class="crumbs"><a href="/">🏠 Главная</a>'
     for pr in parents:
-        crumb_html += f' <span class="sep">›</span> <a href="{_e(product_url(pr))}">{_e(pr.title)}</a>'
-    crumb_html += f' <span class="sep">›</span> <b>{_e(product.title)}</b></nav>'
+        crumb_html += (f' <span class="sep">›</span> '
+                       f'<a href="{_e(product_url(pr))}">{_e(clean_text(pr.title) or pr.title)}</a>')
+    crumb_html += f' <span class="sep">›</span> <b>{_e(ptitle)}</b></nav>'
 
     children = await catalog_service.list_children(session, product_id)
-    jsonld_breadcrumb = _breadcrumb_jsonld(crumb_items + [(product.title, canonical)])
+    jsonld_breadcrumb = _breadcrumb_jsonld(crumb_items + [(ptitle, canonical)])
 
     if children:
         cards = ""
         for c in children:
             cards += (
                 f'<a class="card" href="{_e(product_url(c))}">'
-                f'<div class="t">{_e(c.title)}</div>'
-                f'<div class="d">{_e(c.description or "Открыть раздел и выбрать номинал")}</div>'
+                f'<div class="t">{_e(clean_text(c.title) or c.title)}</div>'
+                f'<div class="d">{_e(clean_text(c.description) or "Открыть раздел и выбрать номинал")}</div>'
                 f'<div class="arr">Открыть →</div></a>'
             )
-        desc = product.description or (
-            f"{product.title} в VallShop — выберите раздел, оплатите с баланса "
+        desc = clean_text(product.description) or (
+            f"{ptitle} в VallShop — выберите раздел, оплатите с баланса "
             f"(карта, СБП, USDT) и получите заказ мгновенно."
         )
         body = (
             f"{crumb_html}"
-            f"<h1>{_e(product.title)}</h1>"
+            f"<h1>{_e(ptitle)}</h1>"
             f'<p class="lead">{_e(desc)}</p>'
             f'<div class="grid">{cards}</div>'
-            f"{_seo_block(product.title)}"
+            f"{_seo_block(ptitle)}"
         )
-        title = f"{product.title} — купить в VallShop | цифровые товары"
+        title = f"{ptitle} — купить в VallShop | цифровые товары"
         return _layout(title, desc, canonical, body, jsonld_breadcrumb), canonical_path
 
     # Листовой товар с номиналами.
@@ -188,11 +191,12 @@ async def product_page(session: AsyncSession, product_id: int):
             prices_num.append(Decimal(price))
         badge = ('<span class="badge ok">в наличии</span>' if available
                  else '<span class="badge bad">нет в наличии</span>')
-        desc = f'<div class="vd">{_e(v.description)}</div>' if v.description else ""
+        vdesc = clean_text(v.description)
+        desc = f'<div class="vd">{_e(vdesc)}</div>' if vdesc else ""
         btn = (f'<a class="buy" href="/?open={product.id}" rel="nofollow">Купить</a>' if available
                else '<span class="buy off">Нет в наличии</span>')
         rows += (
-            f'<div class="vcard"><div class="vt">{_e(v.title)}</div>'
+            f'<div class="vcard"><div class="vt">{_e(clean_text(v.title) or v.title)}</div>'
             f'<div class="vp">{price_txt.replace(" / 1000", " <small>/ 1000</small>")}</div>'
             f'{badge}{desc}{btn}</div>'
         )
@@ -200,22 +204,22 @@ async def product_page(session: AsyncSession, product_id: int):
     lo = min(prices_num) if prices_num else None
     hi = max(prices_num) if prices_num else None
     price_hint = (f" Цены от {_rub(lo)}." if lo else "")
-    desc = product.description or (
-        f"Купить {product.title} в VallShop: быстрая выдача, оплата картой, СБП или USDT.{price_hint}"
+    desc = clean_text(product.description) or (
+        f"Купить {ptitle} в VallShop: быстрая выдача, оплата картой, СБП или USDT.{price_hint}"
     )
-    title = f"{product.title} — купить, цены | VallShop"
+    title = f"{ptitle} — купить, цены | VallShop"
     body = (
         f"{crumb_html}"
-        f"<h1>Купить {_e(product.title)}</h1>"
+        f"<h1>Купить {_e(ptitle)}</h1>"
         f'<p class="lead">{_e(desc)}</p>'
         f'<div class="chips"><span class="chip">⚡ Мгновенная выдача</span>'
         f'<span class="chip">💳 Карта · СБП · USDT</span><span class="chip">🛡️ Оплата с баланса</span></div>'
         f'<div class="vgrid">{rows}</div>'
-        f"{_seo_block(product.title)}"
+        f"{_seo_block(ptitle)}"
     )
     jsonld = jsonld_breadcrumb
     if lo:
-        jsonld += _product_jsonld(product.title, desc, lo, hi, canonical)
+        jsonld += _product_jsonld(ptitle, desc, lo, hi, canonical)
     return _layout(title, desc, canonical, body, jsonld), canonical_path
 
 
