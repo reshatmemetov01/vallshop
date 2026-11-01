@@ -1,8 +1,9 @@
-"""TON-кошелёк для оплаты Fragment: подпись перевода и отправка через tonapi.
+"""TON-кошелёк для оплаты Fragment: подпись перевода (W5/v5r1) и отправка.
 
-Подпись делается офлайн (tonsdk), отправка готового BOC и чтение seqno/баланса —
-через tonapi (tonconsole). tonsdk импортируется лениво, чтобы mock-режим и тесты
-работали без установленного пакета.
+Кошелёк — Tonkeeper W5 (v5r1), поддерживает батчи (несколько сообщений в одной
+транзакции). Подпись офлайн через tonutils, чтение seqno/баланса и отправка
+готового BOC — через tonapi (tonconsole). tonutils импортируется лениво, чтобы
+mock-режим и тесты работали без установленного пакета.
 
 Статус оплаты определяем по seqno кошелька: внешнее сообщение принимается сетью
 только когда seqno увеличивается, поэтому «seqno вырос с момента отправки» =
@@ -11,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import base64
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -56,7 +58,6 @@ class TonApi:
             data = self._get(f"/v2/blockchain/accounts/{address}/methods/seqno")
         except TonError:
             return 0
-        # tonapi: {"success":true,"stack":[{"type":"num","num":"0x5"}], "decoded":{"state":5}}
         dec = data.get("decoded") or {}
         for k in ("state", "seqno"):
             if isinstance(dec.get(k), int):
@@ -87,24 +88,35 @@ class TonApi:
             raise TonError(f"tonapi отправка BOC → HTTP {r.status_code}: {r.text[:200]}")
 
 
-def load_wallet(mnemonic: str, version: str = "v4r2", workchain: int = 0) -> Dict[str, Any]:
-    """Кошелёк из seed-фразы (офлайн). Возвращает объект + адреса + state_init."""
-    from tonsdk.contract.wallet import Wallets, WalletVersionEnum
-    from tonsdk.utils import bytes_to_b64str
+def _wallet_class(version: str):
+    from tonutils.contracts.wallet import WalletV5R1, WalletV4R2
+    v = (version or "v5r1").lower()
+    if v in ("v5r1", "v5", "w5"):
+        return WalletV5R1
+    if v in ("v4r2", "v4"):
+        return WalletV4R2
+    raise TonError(f"Неподдерживаемая версия кошелька: {version} (нужна v5r1/W5)")
 
-    ver = {
-        "v3r2": WalletVersionEnum.v3r2, "v4r1": WalletVersionEnum.v4r1,
-        "v4r2": WalletVersionEnum.v4r2,
-    }.get(version.lower(), WalletVersionEnum.v4r2)
+
+def load_wallet(mnemonic: str, version: str = "v5r1") -> Dict[str, Any]:
+    """Кошелёк из seed-фразы (офлайн). Адреса + state_init + объект для подписи."""
+    from tonutils.clients import TonapiClient
+    from ton_core import NetworkGlobalID
+
+    cls = _wallet_class(version)
     words = [w for w in (mnemonic or "").replace(",", " ").split() if w]
-    _m, pub, _priv, wallet = Wallets.from_mnemonics(words, ver, workchain)
-    state_init = wallet.create_init_external_message()["state_init"]
+    client = TonapiClient(NetworkGlobalID.MAINNET, api_key="offline")  # конструктор без сети
+    wallet, pub, _priv, _m = cls.from_mnemonic(client, words)
+    si = wallet.state_init
+    si_boc = (si.serialize() if hasattr(si, "serialize") else si.to_cell()).to_boc()
+    pub_hex = pub.as_hex() if callable(getattr(pub, "as_hex", None)) else getattr(pub, "as_hex", "")
     return {
         "wallet": wallet,
-        "address_raw": wallet.address.to_string(False, False, False),
-        "address": wallet.address.to_string(True, True, True),
-        "public_key": pub.hex(),
-        "state_init_b64": bytes_to_b64str(state_init.to_boc(False)),
+        "version": version,
+        "address": wallet.address.to_str(is_user_friendly=True, is_bounceable=True),
+        "address_raw": wallet.address.to_str(is_user_friendly=False),
+        "public_key": pub_hex,
+        "state_init_b64": base64.b64encode(si_boc).decode(),
     }
 
 
@@ -119,30 +131,41 @@ def account_payload(wi: Dict[str, Any], chain: str = "-239") -> Dict[str, str]:
 
 
 def send_payment(wi: Dict[str, Any], messages: List[dict], tonapi: TonApi) -> Dict[str, Any]:
-    """Подписать и отправить оплату Fragment. Возвращает {ext_hash, seqno_at_send}.
+    """Подписать и отправить оплату Fragment (батч W5). {ext_hash, seqno_at_send}.
 
     ``messages`` — из ответа getBuyStarsLink: ``[{address, amount, payload}]``
-    (amount — строка нанотонов, payload — base64 BOC тела сообщения). Fragment
-    для звёзд отдаёт одно сообщение.
+    (amount — строка нанотонов, payload — base64 BOC тела). W5 поддерживает
+    несколько сообщений в одной транзакции.
     """
-    from tonsdk.boc import Cell
-    from tonsdk.utils import bytes_to_b64str
+    from tonutils.contracts.wallet import TONTransferBuilder
+    from tonutils.contracts.wallet.versions.v5 import WalletV5Params
+    from ton_core import Address, Cell
 
     if not messages:
         raise TonError("Fragment не вернул платёжное сообщение")
-    msg = messages[0]
-    to_addr = msg.get("address")
-    amount = int(str(msg.get("amount") or "0"))
-    payload_b64 = msg.get("payload")
-    if not to_addr or amount <= 0:
-        raise TonError("Некорректное платёжное сообщение Fragment")
-    payload_cell = Cell.one_from_boc(base64.b64decode(payload_b64)) if payload_b64 else None
+    builders = []
+    for m in messages:
+        to_addr = m.get("address")
+        amount = int(str(m.get("amount") or "0"))
+        if not to_addr or amount <= 0:
+            raise TonError("Некорректное платёжное сообщение Fragment")
+        payload_b64 = m.get("payload")
+        body = Cell.one_from_boc(base64.b64decode(payload_b64)) if payload_b64 else None
+        builders.append(TONTransferBuilder(destination=Address(to_addr), amount=amount, body=body))
 
     seqno = tonapi.seqno(wi["address"])
     wallet = wi["wallet"]
-    query = wallet.create_transfer_message(
-        to_addr=to_addr, amount=amount, seqno=seqno, payload=payload_cell,
-    )
-    signed = query["message"]
-    tonapi.send_boc(bytes_to_b64str(signed.to_boc(False)))
-    return {"ext_hash": signed.bytes_hash().hex(), "seqno_at_send": seqno}
+    built = wallet.build_external_message(builders, WalletV5Params(seqno=seqno))
+    if _asyncio.iscoroutine(built):            # tonutils: сборка сообщения — корутина
+        built = _asyncio.run(built)
+    boc_b64 = _attr(built, "as_b64")
+    nh = _attr(built, "normalized_hash")
+    ext_hash = nh.hex() if hasattr(nh, "hex") else str(nh)
+    tonapi.send_boc(boc_b64)
+    return {"ext_hash": ext_hash, "seqno_at_send": seqno}
+
+
+def _attr(obj, name):
+    """Значение атрибута независимо от того, метод это или свойство."""
+    v = getattr(obj, name)
+    return v() if callable(v) else v

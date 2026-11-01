@@ -55,7 +55,7 @@ class FragmentConfigError(FragmentError):
 class FragmentClient:
     def __init__(self, *, cookies: Optional[str] = None, mnemonic: Optional[str] = None,
                  tonapi_key: Optional[str] = None, tonapi_base: str = ton_mod.DEFAULT_TONAPI,
-                 wallet_version: str = "v4r2", mock: bool = False, timeout: float = 30.0):
+                 wallet_version: str = "v5r1", mock: bool = False, timeout: float = 30.0):
         self.cookies = cookies
         self.mnemonic = mnemonic
         self.wallet_version = wallet_version
@@ -79,7 +79,7 @@ class FragmentClient:
             "mnemonic": env.get("TON_WALLET_MNEMONIC") or env.get("FRAGMENT_TON_MNEMONIC") or None,
             "tonapi_key": env.get("TONAPI_KEY") or env.get("TON_API_KEY") or None,
             "tonapi_base": env.get("TONAPI_BASE_URL", ton_mod.DEFAULT_TONAPI),
-            "wallet_version": env.get("TON_WALLET_VERSION", "v4r2"),
+            "wallet_version": env.get("TON_WALLET_VERSION", "v5r1"),
             "mock": truthy(env.get("FRAGMENT_MOCK")),
         }
         kwargs.update(overrides)
