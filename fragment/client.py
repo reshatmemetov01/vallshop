@@ -207,8 +207,10 @@ class FragmentClient:
         recipient = (rec.get("found") or {}).get("recipient") or rec.get("recipient")
         if not recipient:
             raise FragmentError(f"Получатель @{uname} не найден на Fragment")
-        # 2) инициализация запроса
-        init = self._api("initBuyStarsRequest", {"recipient": recipient, "quantity": qty})  # CALIBRATE
+        # 2) инициализация запроса (обязателен payment_method=ton — иначе Access denied)
+        init = self._api("initBuyStarsRequest", {
+            "recipient": recipient, "quantity": qty, "payment_method": "ton",
+        })
         req_id = init.get("req_id") or init.get("id")
         if not req_id:
             raise FragmentError("Fragment не вернул req_id")

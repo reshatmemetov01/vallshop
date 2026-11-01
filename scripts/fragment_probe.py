@@ -66,7 +66,8 @@ def main() -> None:
         recipient = (rec.get("found") or {}).get("recipient") or rec.get("recipient")
         if not recipient:
             print("⚠ recipient не найден — сверь ключи ответа"); return
-        init = c._api("initBuyStarsRequest", {"recipient": recipient, "quantity": quantity})
+        init = c._api("initBuyStarsRequest", {
+            "recipient": recipient, "quantity": quantity, "payment_method": "ton"})
         _show("initBuyStarsRequest", init)
         req_id = init.get("req_id") or init.get("id")
         if not req_id:
