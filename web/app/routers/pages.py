@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -12,6 +14,15 @@ from .. import seo
 from ..db import get_session
 
 router = APIRouter()
+
+
+# Правовые документы (оферта/соглашение/политика) генерируются из bot.legal.
+# Контакт поддержки и юрлицо берём из тех же переменных окружения, что и бот.
+def _legal_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        support_contact=os.getenv("SUPPORT_CONTACT", ""),
+        legal_entity=os.getenv("LEGAL_ENTITY", ""),
+    )
 
 _STATIC = Path(__file__).resolve().parents[2] / "static"
 _INDEX = _STATIC / "index.html"
@@ -58,6 +69,27 @@ async def reset_page() -> FileResponse:
 @router.get("/reviews")
 async def reviews_page() -> FileResponse:
     return FileResponse(_REVIEWS)
+
+
+# --- Правовые документы --------------------------------------------------
+
+@router.api_route("/offer", methods=["GET", "HEAD"])
+@router.api_route("/terms", methods=["GET", "HEAD"])
+async def offer_page() -> HTMLResponse:
+    from bot import legal
+    return HTMLResponse(legal.offer_html(_legal_config()))
+
+
+@router.api_route("/agreement", methods=["GET", "HEAD"])
+async def agreement_page() -> HTMLResponse:
+    from bot import legal
+    return HTMLResponse(legal.agreement_html(_legal_config()))
+
+
+@router.api_route("/privacy", methods=["GET", "HEAD"])
+async def privacy_page() -> HTMLResponse:
+    from bot import legal
+    return HTMLResponse(legal.privacy_html(_legal_config()))
 
 
 @router.api_route("/favicon.svg", methods=["GET", "HEAD"])
