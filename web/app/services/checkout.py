@@ -184,6 +184,18 @@ def steam_check_login(login: str) -> bool:
 _STAR_PACKAGES = [50, 75, 100, 150, 250, 350, 500, 750, 1000, 1500]
 
 
+async def _stars_variant(session: AsyncSession):
+    """Найти активный номинал звёзд (fzr_a=telegram_stars), независимо от каталога."""
+    from sqlalchemy import select
+    from bot.db.models import Variant
+    return await session.scalar(
+        select(Variant)
+        .where(Variant.fzr_a == "telegram_stars", Variant.is_active.is_(True))
+        .order_by(Variant.sort_order, Variant.id)
+        .limit(1)
+    )
+
+
 async def stars_quote(session: AsyncSession, quantity: Optional[int] = None) -> dict:
     """Границы, курс за 1 звезду, пакеты и (если задано) цена для Telegram Звёзд."""
     fzr = _sup()["fazercard"]
@@ -198,9 +210,12 @@ async def stars_quote(session: AsyncSession, quantity: Optional[int] = None) -> 
 
     # эффективный курс за 1 звезду
     rps = per_star if per_star is not None else (_price(1000) / Decimal(1000))
+    sv = await _stars_variant(session)
     out = {
         "min": lo, "max": hi, "price_rub": None,
         "rate_per_star": float(rps),
+        "variant_id": sv.id if sv else None,
+        "variant_title": sv.title if sv else "Telegram Звёзды",
         "packages": [{"qty": q, "price_rub": float(_price(q))}
                      for q in _STAR_PACKAGES if lo <= q <= hi],
     }

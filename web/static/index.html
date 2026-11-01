@@ -1238,25 +1238,12 @@ let starsVid = null;
 async function loadStarPackages(products){
   const sec = $("pkgsec");
   try{
-    const prod = (products||[]).find(p => /звёзд|звезд|stars/i.test(p.title||""));
-    if(!prod){ sec.style.display="none"; return; }
-    let det = await api("/api/catalog/" + prod.id);
-    // «Звёзды» может быть категорией с дочерним товаром — заходим внутрь.
-    if(det.type !== "product" && Array.isArray(det.children)){
-      for(const ch of det.children){
-        const d2 = await api("/api/catalog/" + ch.id);
-        if(d2.type === "product" && (d2.variants||[]).some(v => v.buy_kind === "stars")){
-          det = d2; break;
-        }
-      }
-    }
-    const variants = det.type === "product" ? (det.variants||[]) : [];
-    const sv = variants.find(v => v.buy_kind === "stars");
-    if(!sv){ sec.style.display="none"; return; }
-    starsVid = sv.id; vmap[sv.id] = sv;
     const lim = await api("/api/buy/stars-quote");
     const pkgs = lim.packages || [];
-    if(!pkgs.length){ sec.style.display="none"; return; }
+    if(!lim.variant_id || !pkgs.length){ sec.style.display="none"; return; }
+    starsVid = lim.variant_id;
+    vmap[starsVid] = {id: starsVid, title: lim.variant_title || "Telegram Звёзды",
+                      buy_kind: "stars", source: "fazercard"};
     // Курс за 1 звезду.
     if(lim.rate_per_star != null){
       $("starsrate").textContent = "Курс — " + rub(lim.rate_per_star) + " за 1 звезду";
