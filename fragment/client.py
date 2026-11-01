@@ -60,7 +60,8 @@ class FragmentClient:
         self.cookies = cookies
         self.mnemonic = mnemonic
         self.wallet_version = wallet_version
-        self.api_hash = api_hash           # можно задать вручную (из /api?hash=...)
+        # можно задать вручную (из /api?hash=...); терпим лишний префикс «api?hash=»/«hash=»
+        self.api_hash = re.sub(r"^.*?hash=", "", api_hash.strip()) if api_hash else None
         self.mock = mock
         self.timeout = timeout
         self.tonapi = ton_mod.TonApi(api_key=tonapi_key, base_url=tonapi_base, timeout=timeout)
