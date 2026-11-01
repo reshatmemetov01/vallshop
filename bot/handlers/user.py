@@ -1082,7 +1082,8 @@ async def _stars_price(session, fzr, qty: int, merchant_id: int, stvid):
     """(цена_клиента, цена_владельца, себестоимость_usd) для qty звёзд."""
     pps, _amin, _amax = await stars_service.get_quote(fzr)
     markup = await stars_service.get_markup(session)
-    owner = stars_service.price_rub(qty, pps, markup=markup)
+    per_star = await stars_service.get_price_per_star(session)
+    owner = stars_service.owner_price(qty, per_star=per_star, pps=pps, markup=markup)
     c_usd = stars_service.cost_usd(qty, pps)
     client = await mprice_service.markup_price(session, merchant_id, stvid, owner)
     return client, owner, c_usd
@@ -1101,10 +1102,11 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
         pps, api_min, api_max = await stars_service.get_quote(fzr)
         lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
         markup = await stars_service.get_markup(session)
+        per_star = await stars_service.get_price_per_star(session)
         pkgs = [q for q in _STAR_PACKAGES if lo <= q <= hi]
         prices = {}
         for q in pkgs:
-            owner = stars_service.price_rub(q, pps, markup=markup)
+            owner = stars_service.owner_price(q, per_star=per_star, pps=pps, markup=markup)
             prices[q] = await mprice_service.markup_price(session, merchant_id, stvid, owner)
         _dm = await mprice_service.default_markup(session, merchant_id)
     rate_line = ratetext_service.apply_markup((product.description if product else "") or "", _dm).strip()

@@ -33,6 +33,7 @@ STEAM_MAX_RUB = "steam_max_rub"         # макс. сумма заказа кл
 STARS_MARKUP = "stars_markup_percent"   # наценка %, напр. "10"
 STARS_MIN_QTY = "stars_min_qty"         # мин. кол-во звёзд (переопределение API)
 STARS_MAX_QTY = "stars_max_qty"         # макс. кол-во звёзд (переопределение API)
+STARS_PRICE_PER_STAR = "stars_price_per_star"  # ₽ за 1 звезду; задано → цена = кол-во × это
 
 # Реферальная программа
 REF_ENABLED = "ref_enabled"              # "1"/"0"

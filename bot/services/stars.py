@@ -98,6 +98,25 @@ async def get_markup(session: AsyncSession) -> Decimal:
     return _dec(await settings_service.get(session, settings_service.STARS_MARKUP), DEFAULT_MARKUP)
 
 
+async def get_price_per_star(session: AsyncSession):
+    """₽ за 1 звезду, заданная владельцем (или None → считать по котировке+наценке)."""
+    raw = await settings_service.get(session, settings_service.STARS_PRICE_PER_STAR)
+    if not raw:
+        return None
+    try:
+        v = Decimal(str(raw))
+    except Exception:  # noqa: BLE001
+        return None
+    return v if v > 0 else None
+
+
+def owner_price(qty: int, *, per_star=None, pps=None, markup=Decimal(0), our_rate=None) -> Decimal:
+    """Цена владельца (₽). Если задана цена за звезду — кол-во × цена; иначе по котировке."""
+    if per_star is not None:
+        return round_price_rub(Decimal(qty) * Decimal(per_star))
+    return price_rub(qty, pps, markup=markup, our_rate=our_rate)
+
+
 async def get_limits(session: AsyncSession, *, api_min: int, api_max: int) -> Tuple[int, int]:
     """Границы количества: переопределение из админки, иначе — из котировки API."""
     lo_raw = await settings_service.get(session, settings_service.STARS_MIN_QTY)

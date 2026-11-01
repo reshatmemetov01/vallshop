@@ -87,6 +87,7 @@ class AdminUI(StatesGroup):
     stars_markup = State()
     stars_min = State()
     stars_max = State()
+    stars_pps = State()
     fzr_search = State()
     fzr_price = State()
     fzr_bulk_markup = State()
@@ -573,8 +574,10 @@ async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext,
         markup = await stars_service.get_markup(session)
         lo_raw = await settings_service.get(session, settings_service.STARS_MIN_QTY)
         hi_raw = await settings_service.get(session, settings_service.STARS_MAX_QTY)
+        pps_raw = await settings_service.get(session, settings_service.STARS_PRICE_PER_STAR)
     lo_lbl = f"{lo_raw} ⭐️" if lo_raw else "авто"
     hi_lbl = f"{hi_raw} ⭐️" if hi_raw else "авто"
+    pps_lbl = f"{pps_raw}₽" if pps_raw else "авто (по наценке)"
 
     # Источник выдачи: Fragment (если настроен) → иначе FazerCards.
     if fragment is not None and getattr(fragment, "configured", False):
@@ -588,6 +591,7 @@ async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext,
         src_line = "Источник: <b>FazerCards</b> (Fragment не настроен)"
 
     kb = InlineKeyboardBuilder()
+    kb.row(_btn(f"💰 Цена за звезду: {pps_lbl}", "stars_pps"))
     kb.row(_btn(f"📈 Наценка: {_fmt_rub(markup)}%", "stars_markup"))
     kb.row(
         _btn(f"⬇️ Мин: {lo_lbl}", "stars_min"),
@@ -596,11 +600,13 @@ async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext,
     kb.row(_btn("⬅️ Назад", "a_home"))
     await call.message.edit_text(
         "⭐️ <b>Telegram Звёзды</b>\n\n"
+        f"Цена за звезду: <b>{pps_lbl}</b>\n"
         f"Наценка: <b>{_fmt_rub(markup)}%</b>\n"
         f"Лимит количества: <b>{lo_lbl} — {hi_lbl}</b>\n"
         f"{src_line}\n\n"
-        "Клиент сам вводит количество звёзд; цена в ₽ считается от себестоимости "
-        "+ наценка. «авто» — брать лимиты из котировки (50–10000).",
+        "Если задана «цена за звезду» — пакеты и «своё количество» считаются как "
+        "<b>количество × цена</b>. Иначе — по котировке + наценка. «авто» для лимитов — "
+        "брать из котировки (50–10000).",
         reply_markup=kb.as_markup(),
     )
     await call.answer()
@@ -639,6 +645,42 @@ async def msg_stars_markup(message: Message, db: Database, state: FSMContext) ->
     kb = InlineKeyboardBuilder()
     kb.row(_btn("⬅️ К Звёздам", "stars_home"))
     await message.answer(f"✅ Наценка звёзд: {_fmt_rub(val)}%", reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data == "stars_pps")
+async def cb_stars_pps(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminUI.stars_pps)
+    await call.message.edit_text(
+        "💰 Пришлите <b>цену за 1 звезду в ₽</b> (например <code>1.38</code>).\n"
+        "Все пакеты и «своё количество» будут считаться как <b>количество × цена</b>.\n"
+        "Пришлите <code>-</code>, чтобы вернуть авто-расчёт (по котировке + наценка).",
+        reply_markup=_cancel_kb("stars_home"),
+    )
+    await call.answer()
+
+
+@router.message(AdminUI.stars_pps)
+async def msg_stars_pps(message: Message, db: Database, state: FSMContext) -> None:
+    from ..services import settings as settings_service
+    raw = (message.text or "").strip()
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("⬅️ К Звёздам", "stars_home"))
+    if raw in ("-", "авто", "auto", "0"):
+        async with db.session() as session:
+            await settings_service.set(session, settings_service.STARS_PRICE_PER_STAR, "")
+            await session.commit()
+        await state.clear()
+        await message.answer("✅ Цена за звезду: авто (по котировке + наценка)", reply_markup=kb.as_markup())
+        return
+    val = _parse_pos_decimal(raw, allow_zero=False)
+    if val is None:
+        await message.answer("Введите число > 0 (например 1.38) или «-» для авто")
+        return
+    async with db.session() as session:
+        await settings_service.set(session, settings_service.STARS_PRICE_PER_STAR, str(val))
+        await session.commit()
+    await state.clear()
+    await message.answer(f"✅ Цена за звезду: {_fmt_rub(val)}₽", reply_markup=kb.as_markup())
 
 
 @router.callback_query(F.data == "stars_min")
