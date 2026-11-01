@@ -44,6 +44,18 @@ async def stars_quote(
     return await checkout_service.stars_quote(session, quantity)
 
 
+@router.get("/topup-meta")
+async def topup_meta(
+    variant_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Поля игрока (ID и т.п.) и цена для пополнения игр (PUBG Mobile Auto)."""
+    try:
+        return await checkout_service.topup_meta(session, variant_id)
+    except checkout_service.CheckoutError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/steam-config")
 async def steam_config(session: AsyncSession = Depends(get_session)) -> dict:
     """Валюты и лимиты (₽) для пополнения Steam."""

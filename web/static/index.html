@@ -513,6 +513,7 @@
       <label>Сумма в валюте</label>
       <input id="buysteamamt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="например, 500">
     </div>
+    <div id="buytopupwrap" style="display:none"></div>
     <div id="buyqtywrap">
       <label id="buyqtylabel">Количество</label>
       <input id="buyqty" type="number" inputmode="numeric" min="1" step="1" value="1">
@@ -883,8 +884,35 @@ document.getElementById("ovl").addEventListener("click", (e)=>{ if(e.target.id==
 
 // ── Покупка товара ───────────────────────────────────────────────────────────
 let buyVar = null;
+let topupFields = [];   // поля игрока для пополнения игр (PUBG Mobile Auto)
 
 let starsPrice = null, starsMin = 1, starsMax = 10000, starsTimer = null;
+
+async function loadTopupMeta(variantId){
+  const wrap = $("buytopupwrap");
+  wrap.innerHTML = '<div class="hint">Загрузка полей…</div>';
+  try{
+    const d = await api("/api/buy/topup-meta?variant_id=" + variantId);
+    topupFields = d.fields || [];
+    if(d.price_rub != null){ $("buyprice").textContent = "Цена: " + rub(d.price_rub); }
+    let html = "";
+    if(d.note){ html += `<div class="hint" style="margin-bottom:8px">ℹ️ ${esc(d.note)}</div>`; }
+    topupFields.forEach((f, i) => {
+      html += `<label>${esc(f.label)}</label>`;
+      if(f.type === "select" && f.options && f.options.length){
+        html += `<select id="tf_${i}">` +
+          f.options.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("") +
+          `</select>`;
+      }else{
+        html += `<input id="tf_${i}" type="text" autocomplete="off" placeholder="${esc(f.placeholder||f.label)}">`;
+      }
+    });
+    if(!topupFields.length){ html += '<div class="hint">Дополнительные данные не требуются.</div>'; }
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = '<div class="hint" style="color:#e66">Не удалось загрузить поля. Попробуйте позже.</div>';
+  }
+}
 
 function openBuy(id){
   const token = localStorage.getItem("vs_token");
@@ -908,7 +936,12 @@ function openBuy(id){
   // Steam — логин + валюта + сумма
   $("buysteamwrap").style.display = (kind==="steam") ? "" : "none";
   if(kind==="steam"){ $("buysteamlogin").value = ""; $("buysteamamt").value = ""; loadSteamConfig(); }
-  // количество — для simple, stars, smm (у vpn/premium/steam скрыто)
+  // Пополнение игр (PUBG Mobile Auto) — поля игрока (ID и т.п.)
+  $("buytopupwrap").style.display = (kind==="topup") ? "" : "none";
+  $("buytopupwrap").innerHTML = "";
+  topupFields = [];
+  if(kind==="topup"){ loadTopupMeta(v.id); }
+  // количество — для simple, stars, smm (у vpn/premium/steam/topup скрыто)
   const showQty = (kind==="simple"||kind==="stars"||kind==="smm");
   $("buyqtywrap").style.display = showQty ? "" : "none";
   const q = $("buyqty");
@@ -1059,6 +1092,15 @@ async function doBuy(){
     fields.steam_login = login;
     fields.currency = $("buysteamcur").value || "RUB";
     fields.amount = amt;
+  }
+  if(kind==="topup"){
+    for(let i=0;i<topupFields.length;i++){
+      const f = topupFields[i];
+      const el = $("tf_" + i);
+      const val = el ? String(el.value||"").trim() : "";
+      if(!val){ $("buymsg").textContent = `Заполните поле «${f.label}».`; return; }
+      fields[f.key] = val;
+    }
   }
   $("buybtn").disabled = true; $("buymsg").textContent = ""; $("buymsg").className = "mmsg";
   try{

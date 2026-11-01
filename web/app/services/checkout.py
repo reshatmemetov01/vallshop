@@ -97,9 +97,11 @@ def buy_kind(variant: Variant) -> Optional[str]:
             return "premium"
         if variant.fzr_kind == "steam":
             return "steam"
+        if variant.fzr_kind == "topup":
+            return "topup"      # пополнение игр по ID игрока (PUBG Mobile и т.п.)
         if variant.fzr_kind in _FZR_KINDS:
             return "simple"
-    return None  # прочие topup — позже
+    return None
 
 
 def web_buyable(variant: Variant) -> bool:
@@ -226,6 +228,45 @@ async def stars_quote(session: AsyncSession, quantity: Optional[int] = None) -> 
     return out
 
 
+def _topup_fields_dto(meta_fields: list) -> list:
+    """Нормализовать поля игрока FazerCard для фронта: key/label/type/options."""
+    out = []
+    for f in meta_fields or []:
+        if not isinstance(f, dict):
+            continue
+        key = f.get("key")
+        if not key:
+            continue
+        out.append({
+            "key": key,
+            "label": f.get("label") or key,
+            "type": (f.get("type") or "text").lower(),
+            "options": [str(o) for o in (f.get("options") or [])],
+            "placeholder": f.get("placeholder") or "",
+        })
+    return out
+
+
+async def topup_meta(session: AsyncSession, variant_id: int) -> dict:
+    """Поля игрока + цена для пополнения игр (PUBG Mobile Auto и т.п.)."""
+    variant = await catalog_service.get_variant(session, variant_id)
+    if variant is None or buy_kind(variant) != "topup":
+        raise CheckoutError("Этот товар сейчас нельзя купить на сайте")
+    fzr = _sup()["fazercard"]
+    try:
+        meta = await asyncio.to_thread(fzr.topup_meta, variant.fzr_a)
+    except Exception as e:  # noqa: BLE001
+        raise CheckoutError("Поставщик недоступен, попробуйте позже") from e
+    price = await _unit_price(session, variant)
+    return {
+        "variant_id": variant.id,
+        "title": variant.title,
+        "price_rub": float(price),
+        "note": meta.get("note") or "",
+        "fields": _topup_fields_dto(meta.get("fields") or []),
+    }
+
+
 async def _unit_price(session: AsyncSession, variant: Variant) -> Decimal:
     owner = owner_price_rub(variant, settings.default_markup_percent)
     prices = await mprice_service.client_prices(
@@ -332,6 +373,26 @@ async def purchase(
             {"label": "Steam-логин", "value": login},
             {"label": "Сумма", "value": f"{amt_str} {currency}"},
         ]
+    elif kind == "topup":
+        fzr = sup["fazercard"]
+        try:
+            meta = await asyncio.to_thread(fzr.topup_meta, variant.fzr_a)
+        except Exception as e:  # noqa: BLE001
+            raise CheckoutError("Поставщик недоступен, попробуйте позже") from e
+        answers: dict = {}
+        display_fields = []
+        for f in _topup_fields_dto(meta.get("fields") or []):
+            key, label = f["key"], f["label"]
+            raw = str((fields or {}).get(key) or "").strip()
+            if not raw:
+                raise CheckoutError(f"Заполните поле «{label}»")
+            if f["type"] == "select" and f["options"] and raw not in f["options"]:
+                raise CheckoutError(f"Выберите корректное значение «{label}»")
+            answers[key] = raw
+            display_fields.append({"label": label, "value": raw})
+        call_quantity = 1
+        unit_price = await _unit_price(session, variant)
+        topup_fields = answers
     elif kind == "smm":
         link = _smm_link(fields)
         smm_n = quantity
@@ -424,6 +485,12 @@ def _result(variant: Variant, order, items: list, kind: str) -> dict:
         out["message"] = (
             "Заказ оформлен. Накрутка запущена — прогресс виден в разделе "
             "«Мои заказы»."
+        )
+    elif kind == "topup":
+        out["kind"] = "pending"
+        out["message"] = (
+            "Заказ оформлен и отправлен поставщику. Пополнение придёт на "
+            "указанный аккаунт. Статус — в разделе «Мои заказы»."
         )
     elif status == OrderStatus.COMPLETED.value and items:
         out["kind"] = "codes"
