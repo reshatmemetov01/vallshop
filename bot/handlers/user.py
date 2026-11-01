@@ -1091,14 +1091,12 @@ async def _stars_price(session, fzr, qty: int, merchant_id: int, stvid):
 
 async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
                        fzr: FazerCardClient = None, merchant_id: int = HEAD_MERCHANT_ID) -> None:
-    from ..db.models import Product
     async with db.session() as session:
         variant = await _stars_variant(session)
         if not variant:
             await call.answer("Telegram Звёзды сейчас недоступны", show_alert=True)
             return
         stvid = variant.id
-        product = await session.get(Product, variant.product_id)
         pps, api_min, api_max = await stars_service.get_quote(fzr)
         lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
         markup = await stars_service.get_markup(session)
@@ -1108,8 +1106,13 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
         for q in pkgs:
             owner = stars_service.owner_price(q, per_star=per_star, pps=pps, markup=markup)
             prices[q] = await mprice_service.markup_price(session, merchant_id, stvid, owner)
-        _dm = await mprice_service.default_markup(session, merchant_id)
-    rate_line = ratetext_service.apply_markup((product.description if product else "") or "", _dm).strip()
+    # Курс за 1 звезду: заданная цена, иначе из расчёта (цена 1000 звёзд / 1000).
+    if per_star is not None:
+        pstar = per_star
+    else:
+        pstar = stars_service.price_rub(1000, pps, markup=markup) / Decimal(1000)
+    pstar_s = f"{pstar:.2f}".rstrip("0").rstrip(".")
+    rate_line = f'{texts.ce("5890883384057533697", "⭐")} Курс — {pstar_s} ₽ за 1 звезду'
 
     await state.set_state(StarsFlow.menu)
     await state.update_data(stvid=stvid)
