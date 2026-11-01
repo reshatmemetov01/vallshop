@@ -15,6 +15,7 @@ COPY fazercard /app/fazercard
 COPY socproof /app/socproof
 COPY vpnresellers /app/vpnresellers
 COPY liogames /app/liogames
+COPY fragment /app/fragment
 
 ENV PYTHONPATH=/app
 EXPOSE 8090
