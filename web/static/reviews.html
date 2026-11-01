@@ -5,19 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VallShop — отзывы покупателей</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<meta name="theme-color" content="#ff8a2e">
+<meta name="theme-color" content="#3ba3f0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kaushan+Script&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#13100e; --bg2:#0e0c0a; --panel:#1d1813; --panel2:#251f18;
-    --line:#352c22; --line2:#43382b; --text:#f7f2ec; --muted:#bcae9e; --dim:#8c7f70;
-    --accent:#ff8a2e; --accent2:#ffc27a; --radius:16px;
+    --bg:#17212b; --bg2:#0e1621; --panel:#1d2733; --panel2:#232e3c;
+    --line:#2a3a4a; --line2:#394b5e; --text:#eef4f8; --muted:#a3b4c2; --dim:#78889a;
+    --accent:#3ba3f0; --accent2:#7cc6f7; --radius:16px;
   }
   *{box-sizing:border-box}
   body{margin:0;background:
-      radial-gradient(1100px 500px at 78% -8%, rgba(255,122,43,.10), transparent 60%),var(--bg);
+      radial-gradient(1100px 500px at 78% -8%, rgba(51,144,236,.10), transparent 60%),var(--bg);
     color:var(--text);font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;line-height:1.5;min-height:100vh}
   a{color:inherit;text-decoration:none}
@@ -32,7 +32,7 @@
   h1{font-size:30px;margin:28px 0 4px;font-weight:900;letter-spacing:-.5px}
   .sub{color:var(--muted);margin:0 0 22px}
   .reviews{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:40px}
-  .rev{background:linear-gradient(180deg,var(--panel),#171310);border:1px solid var(--line);border-radius:var(--radius);padding:20px;
+  .rev{background:linear-gradient(180deg,var(--panel),#16202b);border:1px solid var(--line);border-radius:var(--radius);padding:20px;
     opacity:0;transform:translateY(22px);transition:opacity .6s cubic-bezier(.2,.7,.2,1),transform .6s cubic-bezier(.2,.7,.2,1)}
   .rev.in{opacity:1;transform:none}
   .rev .stars{color:var(--accent);font-size:16px;letter-spacing:2px}
