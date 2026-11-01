@@ -133,6 +133,9 @@
   .vcard .vtitle{font-weight:700;font-size:16px}
   .vcard .vprice{font-weight:800;font-size:19px}
   .vcard .vprice small{color:var(--dim);font-weight:500;font-size:12px}
+  .vcard .vprice .steamrates{display:flex;flex-wrap:wrap;gap:6px 10px}
+  .vcard .vprice .steamrates .srate{font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
+  .vcard .vprice .steamrates .srate b{font-weight:700;color:var(--fg,#fff)}
   .vcard .vdesc{color:var(--muted);font-size:13px;white-space:pre-wrap}
   .vcard .buy{margin-top:auto}
   .vcard .buy.active{width:100%}
@@ -670,8 +673,10 @@ function variantRow(v){
 
 function variantCard(v){
   vmap[v.id] = v;
-  const price = v.price_rub == null ? "—" :
-    `${rub(v.price_rub)}${v.per_1000 ? ' <small>/ 1000</small>' : ''}`;
+  const price = v.buy_kind === "steam"
+    ? `<div class="steamrates" data-steamrate="1">…</div>`
+    : v.price_rub == null ? "—"
+    : `${rub(v.price_rub)}${v.per_1000 ? ' <small>/ 1000</small>' : ''}`;
   const badge = v.available
     ? `<span class="badge ok">${v.source==='stock' && v.stock!=null ? 'в наличии: '+v.stock : 'в наличии'}</span>`
     : `<span class="badge bad">нет в наличии</span>`;
@@ -724,6 +729,7 @@ async function open_(id, title){
         : '<div class="state">Нет доступных номиналов.</div>';
     }
     revealScan();
+    fillSteamRates();
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить товар.</div>'; }
 }
 
@@ -1061,6 +1067,7 @@ async function refreshVariants(productId){
       if(stack.length && stack[stack.length-1].id === productId)
         content.innerHTML = cards ? `<div class="vgrid">${cards}</div>`
           : '<div class="state">Нет доступных номиналов.</div>';
+      fillSteamRates();
     }
   }catch(e){}
 }
@@ -1261,6 +1268,19 @@ async function loadStarPackages(products){
     revealScan();
   }catch(e){ sec.style.display="none"; }
 }
+// Курсы Steam на карточке каталога (вместо «—»): по валюте — ₽ за 1 единицу.
+let _steamCfg = null;
+async function fillSteamRates(){
+  const nodes = document.querySelectorAll('[data-steamrate]');
+  if(!nodes.length) return;
+  try{
+    if(!_steamCfg) _steamCfg = await api("/api/buy/steam-config");
+    const rows = (_steamCfg.currencies || [])
+      .map(c => `<span class="srate"><b>${esc(c.label)}</b> ~${fmtRate(c.rate_per_unit)} ₽</span>`)
+      .join("");
+    nodes.forEach(n => { n.innerHTML = rows || "—"; n.removeAttribute("data-steamrate"); });
+  }catch(e){ nodes.forEach(n => { n.textContent = "—"; }); }
+}
 function openStars(amount){
   if(!localStorage.getItem("vs_token")){ location.href="/login"; return; }
   if(!starsVid){ return; }
@@ -1296,6 +1316,7 @@ async function doSearch(){
       + `<div class="section-sub">Найдено: ${d.variants.length}</div>`
       + `<div class="vgrid">${d.variants.map(variantCard).join("")}</div>`;
     revealScan();
+    fillSteamRates();
   }catch(e){ content.innerHTML = '<div class="state">Ошибка поиска.</div>'; }
 }
 document.getElementById("search").addEventListener("input", onSearchInput);
