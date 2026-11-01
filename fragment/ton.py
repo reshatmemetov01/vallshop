@@ -88,6 +88,15 @@ class TonApi:
             raise TonError(f"tonapi отправка BOC → HTTP {r.status_code}: {r.text[:200]}")
 
 
+def _b64_to_bytes(s: str) -> bytes:
+    """Декодировать base64/base64url, добивая отсутствующий паддинг (Fragment его опускает)."""
+    s = (s or "").strip()
+    if "-" in s or "_" in s:                 # url-safe → стандартный алфавит
+        s = s.replace("-", "+").replace("_", "/")
+    s += "=" * (-len(s) % 4)                 # добить паддинг до кратности 4
+    return base64.b64decode(s)
+
+
 def _wallet_class(version: str):
     from tonutils.contracts.wallet import WalletV5R1, WalletV4R2
     v = (version or "v5r1").lower()
@@ -150,7 +159,7 @@ def send_payment(wi: Dict[str, Any], messages: List[dict], tonapi: TonApi) -> Di
         if not to_addr or amount <= 0:
             raise TonError("Некорректное платёжное сообщение Fragment")
         payload_b64 = m.get("payload")
-        body = Cell.one_from_boc(base64.b64decode(payload_b64)) if payload_b64 else None
+        body = Cell.one_from_boc(_b64_to_bytes(payload_b64)) if payload_b64 else None
         builders.append(TONTransferBuilder(destination=Address(to_addr), amount=amount, body=body))
 
     seqno = tonapi.seqno(wi["address"])
