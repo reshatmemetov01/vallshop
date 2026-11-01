@@ -1138,7 +1138,8 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
             b.row(*buf); buf = []
     if buf:
         b.row(*buf)
-    b.row(InlineKeyboardButton(text="✏️ Своё количество", callback_data="stcust"))
+    b.row(kb._b("Своё количество", callback_data="stcust", style="primary",
+                icon="6039614175917903752"))
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="catalog"))
     await call.message.answer(texts.STARS_INTRO.format(rate_line=rate_line), reply_markup=b.as_markup())
     await call.answer()
