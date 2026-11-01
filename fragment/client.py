@@ -55,10 +55,12 @@ class FragmentConfigError(FragmentError):
 class FragmentClient:
     def __init__(self, *, cookies: Optional[str] = None, mnemonic: Optional[str] = None,
                  tonapi_key: Optional[str] = None, tonapi_base: str = ton_mod.DEFAULT_TONAPI,
-                 wallet_version: str = "v5r1", mock: bool = False, timeout: float = 30.0):
+                 wallet_version: str = "v5r1", api_hash: Optional[str] = None,
+                 mock: bool = False, timeout: float = 30.0):
         self.cookies = cookies
         self.mnemonic = mnemonic
         self.wallet_version = wallet_version
+        self.api_hash = api_hash           # можно задать вручную (из /api?hash=...)
         self.mock = mock
         self.timeout = timeout
         self.tonapi = ton_mod.TonApi(api_key=tonapi_key, base_url=tonapi_base, timeout=timeout)
@@ -80,6 +82,7 @@ class FragmentClient:
             "tonapi_key": env.get("TONAPI_KEY") or env.get("TON_API_KEY") or None,
             "tonapi_base": env.get("TONAPI_BASE_URL", ton_mod.DEFAULT_TONAPI),
             "wallet_version": env.get("TON_WALLET_VERSION", "v5r1"),
+            "api_hash": env.get("FRAGMENT_API_HASH") or None,
             "mock": truthy(env.get("FRAGMENT_MOCK")),
         }
         kwargs.update(overrides)
@@ -112,7 +115,9 @@ class FragmentClient:
         return requests
 
     def _api_hash(self) -> str:
-        """Достать hash для /api со страницы Fragment (кэш ~10 минут). CALIBRATE."""
+        """hash для /api: сначала заданный вручную (FRAGMENT_API_HASH), иначе со страницы."""
+        if self.api_hash:
+            return self.api_hash
         now = time.time()
         if self._hash and (now - self._hash_ts) < 600:
             return self._hash
