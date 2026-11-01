@@ -12,14 +12,16 @@
 Статус определяем по seqno кошелька (см. ton.send_payment/poll). Включается
 mock-режим (FRAGMENT_MOCK=1) — без сети, для тестов и разработки.
 
-ВНИМАНИЕ: точные имена методов/полей/кук у Fragment меняются и не
-документированы. Места, которые стоит сверить с рабочим примером/куками,
-помечены комментарием «CALIBRATE».
+Флоу сверен с живыми запросами Fragment (ноябрь 2025):
+    searchStarsRecipient(query, quantity)
+    initBuyStarsRequest(recipient, quantity, payment_method=ton)  -> req_id
+    getBuyStarsLink(id=req_id, show_sender=1, transaction=1)       -> messages
+    подпись TON (W5) + отправка -> confirm_method(confirm_params)
+Если Fragment поменяет формат — свериться можно скриптом scripts/fragment_probe.
 """
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from decimal import Decimal
@@ -33,15 +35,6 @@ except ImportError:  # pragma: no cover
 from . import ton as ton_mod
 
 FRAGMENT_URL = "https://fragment.com"
-
-# Дескриптор устройства для getBuyStarsLink (как у TON Connect кошелька). CALIBRATE
-_DEVICE = {
-    "platform": "iphone",
-    "appName": "Tonkeeper",
-    "appVersion": "4.10.0",
-    "maxProtocolVersion": 2,
-    "features": ["SendTransaction", {"name": "SendTransaction", "maxMessages": 4}],
-}
 
 
 def _find_messages(obj) -> list:
@@ -203,7 +196,7 @@ class FragmentClient:
                     "status": "completed", "seqno_at_send": 0, "ton_amount": "0"}
 
         # 1) получатель
-        rec = self._api("searchStarsRecipient", {"query": uname, "quantity": qty})  # CALIBRATE
+        rec = self._api("searchStarsRecipient", {"query": uname, "quantity": qty})
         recipient = (rec.get("found") or {}).get("recipient") or rec.get("recipient")
         if not recipient:
             raise FragmentError(f"Получатель @{uname} не найден на Fragment")
