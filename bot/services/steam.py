@@ -93,6 +93,13 @@ def price_rub(amount, currency, fzr_rates, *, markup, our_rate=None) -> Decimal:
     return rub.quantize(_ONE, rounding=ROUND_CEILING)
 
 
+def rate_per_unit(currency, fzr_rates, *, markup, our_rate=None) -> Decimal:
+    """Эффективный курс: сколько ₽ клиент платит за 1 единицу валюты пополнения."""
+    r = our_rate if our_rate is not None else rates_service.get_rate()
+    c = cost_usd(1, currency, fzr_rates)   # 1 / курс_FazerCard
+    return c * Decimal(r) * (Decimal(1) + Decimal(markup) / Decimal(100))
+
+
 def _dec(raw, default: Decimal) -> Decimal:
     try:
         return Decimal(str(raw)) if raw is not None else default

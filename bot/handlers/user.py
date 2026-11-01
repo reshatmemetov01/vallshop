@@ -890,7 +890,9 @@ async def msg_steam_login(
 
 
 @router.callback_query(SteamFlow.currency, F.data.startswith("scur:"))
-async def cb_steam_currency(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_steam_currency(
+    call: CallbackQuery, db: Database, fzr: FazerCardClient, state: FSMContext
+) -> None:
     cur = call.data.split(":", 1)[1].upper()
     if cur not in steam_service.CURRENCIES:
         await call.answer("Валюта недоступна", show_alert=True)
@@ -898,10 +900,15 @@ async def cb_steam_currency(call: CallbackQuery, db: Database, state: FSMContext
     data = await state.get_data()
     async with db.session() as session:
         lo, hi = await steam_service.get_limits(session)
+        markup = await steam_service.get_markup(session)
+    fzr_rates = await steam_service.get_fzr_rates(fzr)
+    rate = steam_service.rate_per_unit(cur, fzr_rates, markup=markup)
+    rate_s = f"{rate:.2f}".rstrip("0").rstrip(".") if rate >= 1 else f"{rate:.4f}".rstrip("0").rstrip(".")
     await state.update_data(currency=cur)
     await state.set_state(SteamFlow.amount)
     await call.message.answer(
-        texts.STEAM_ASK_AMOUNT.format(
+        f"💱 Курс: <b>~{rate_s} ₽</b> за 1 {cur}\n\n"
+        + texts.STEAM_ASK_AMOUNT.format(
             login=data.get("login", ""), currency=cur,
             min=texts.rub(lo), max=texts.rub(hi),
         ),
