@@ -1126,11 +1126,10 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
         for q in pkgs:
             owner = stars_service.owner_price(q, per_star=per_star, pps=pps, markup=markup)
             prices[q] = await mprice_service.markup_price(session, merchant_id, stvid, owner)
-    # Курс за 1 звезду: заданная цена, иначе из расчёта (цена 1000 звёзд / 1000).
-    if per_star is not None:
-        pstar = per_star
-    else:
-        pstar = stars_service.price_rub(1000, pps, markup=markup) / Decimal(1000)
+        # Курс за 1 звезду с учётом наценки магазина (у франшизы — её наценка).
+        owner_1000 = stars_service.owner_price(1000, per_star=per_star, pps=pps, markup=markup)
+        client_1000 = await mprice_service.markup_price(session, merchant_id, stvid, owner_1000)
+    pstar = Decimal(client_1000) / Decimal(1000)
     pstar_s = f"{pstar:.2f}".rstrip("0").rstrip(".")
     rate_line = f'{texts.ce("5890883384057533697", "⭐")} Курс — {pstar_s} ₽ за 1 звезду'
 
