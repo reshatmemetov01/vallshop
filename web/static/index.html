@@ -545,6 +545,32 @@ const content = $("content"), crumbs = $("crumbs");
 let stack = [];  // хлебные крошки: [{id, title}]
 let vmap = {};   // id номинала -> данные (для покупки)
 
+// ── История навигации (кнопка «Назад» в браузере не должна выкидывать с сайта) ──
+let _view = "catalog";   // текущий экран: catalog | orders | account
+let _navReady = false;   // во время восстановления состояния пуши в историю отключены
+function _snapshot(){
+  return { spa: true, view: _view, stack: stack.map(s => ({id: s.id, title: s.title})) };
+}
+function _pushNav(){ if(_navReady) history.pushState(_snapshot(), "", "/"); }
+function _replaceNav(){ history.replaceState(_snapshot(), "", "/"); }
+async function _applyState(st){
+  _navReady = false;
+  _view = (st && st.view) || "catalog";
+  try{
+    if(_view === "orders"){ await showOrders(); }
+    else if(_view === "account"){ await showAccount(); }
+    else {
+      stack = ((st && st.stack) || []).map(s => ({id: s.id, title: s.title}));
+      renderCrumbs();
+      if(!stack.length){ await _homeView(); }
+      else { const t = stack[stack.length - 1]; await _catalogNode(t.id, t.title); }
+    }
+  } finally { _navReady = true; }
+}
+window.addEventListener("popstate", (e) => {
+  _applyState((e.state && e.state.spa) ? e.state : {spa:true, view:"catalog", stack:[]});
+});
+
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
 $("year").textContent = new Date().getFullYear();
 
@@ -691,7 +717,7 @@ function variantCard(v){
     + `<div class="vprice">${price}</div>${badge}${lim}${desc}${btn}</div>`;
 }
 
-async function goHome(){
+async function _homeView(){
   stack = [];
   renderCrumbs();
   $("hero").style.display = "";
@@ -711,9 +737,13 @@ async function goHome(){
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить каталог.</div>'; }
 }
 
-async function open_(id, title){
-  stack.push({id, title});
-  renderCrumbs();
+async function goHome(){
+  _view = "catalog";
+  await _homeView();
+  _pushNav();
+}
+
+async function _catalogNode(id, title){
   $("hero").style.display = "none";
   $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
@@ -731,6 +761,14 @@ async function open_(id, title){
     revealScan();
     fillSteamRates();
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить товар.</div>'; }
+}
+
+async function open_(id, title){
+  _view = "catalog";
+  stack.push({id, title});
+  renderCrumbs();
+  await _catalogNode(id, title);
+  _pushNav();
 }
 
 function goTo(i){
@@ -1091,10 +1129,12 @@ async function showOrders(){
   const token = localStorage.getItem("vs_token");
   if(!token){ location.href="/login"; return; }
   stack = [];
+  _view = "orders";
   $("hero").style.display = "none";
   $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
   crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
+  _pushNav();
   content.innerHTML = skeleton(6);
   try{
     const r = await fetch("/api/orders", {headers:{Authorization:"Bearer "+token}});
@@ -1119,8 +1159,9 @@ let _acc = {me:null, orders:[], topups:[]};
 async function showAccount(){
   const token = localStorage.getItem("vs_token");
   if(!token){ location.href="/login"; return; }
-  stack=[]; $("hero").style.display="none"; $("searchbar").style.display="none"; $("homesections").style.display="none";
+  stack=[]; _view = "account"; $("hero").style.display="none"; $("searchbar").style.display="none"; $("homesections").style.display="none";
   crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Кабинет</b>';
+  _pushNav();
   content.innerHTML = skeleton(3);
   const hdr = {Authorization:"Bearer "+token};
   try{
@@ -1342,14 +1383,18 @@ function revealScan(){
 
 initAuth();
 const _openId = parseInt(new URLSearchParams(location.search).get("open"), 10);
+// Во время первичной отрисовки пуши в историю отключены (_navReady=false);
+// после — помечаем текущую запись истории состоянием SPA, чтобы «Назад»
+// в браузере переключал экраны внутри сайта, а не выкидывал на /login.
+function _navInit(p){ p.then(()=>{ _navReady = true; _replaceNav(); }); }
 if(location.pathname === "/account" && localStorage.getItem("vs_token")){
-  goHome().then(()=> showAccount());
+  _navInit(goHome().then(()=> showAccount()));
 }else if(_openId){
   // Deep-link с серверной страницы товара (/?open=<id>): открыть товар в витрине.
   history.replaceState(null, "", "/");
-  goHome().then(()=> open_(_openId, "Товар"));
+  _navInit(goHome().then(()=> open_(_openId, "Товар")));
 }else{
-  goHome();
+  _navInit(goHome());
 }
 </script>
 </body>
