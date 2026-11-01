@@ -84,6 +84,27 @@ async def markup_price(
     return price if price > owner else owner
 
 
+async def markup_rate(
+    session: AsyncSession, merchant_id: int, variant_id: int, owner_rate: Decimal
+) -> Decimal:
+    """Наценка мерчанта на дробный курс (₽ за 1 единицу) — без округления до ₽.
+
+    Как ``markup_price``, но сохраняет дробную точность: курс пополнения — это
+    множитель (например 1.38 ₽/ед.), который нельзя округлять до целого рубля.
+    """
+    owner = Decimal(owner_rate)
+    if merchant_id == HEAD_MERCHANT_ID:
+        return owner
+    ov = await get_override(session, merchant_id, variant_id)
+    dm = await default_markup(session, merchant_id)
+    if ov is not None and ov.mode == "markup" and ov.markup_percent is not None:
+        pct = Decimal(ov.markup_percent)
+    else:
+        pct = dm
+    rate = owner * (Decimal(1) + pct / Decimal(100))
+    return rate if rate > owner else owner
+
+
 async def client_prices(
     session: AsyncSession, merchant_id: int, owner_prices: Dict[int, Decimal]
 ) -> Dict[int, Decimal]:

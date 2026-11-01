@@ -309,7 +309,7 @@ async def cb_product(
             return
         # Спец-кнопка «Пополнить Steam» — свой флоу (логин → валюта → сумма).
         if product.game == "STEAM_TOPUP":
-            await _start_steam(call, db, state)
+            await _start_steam(call, db, state, fzr, merchant_id)
             return
         # Спец-кнопка «Телеграм Звёзды» — свой флоу (@username → количество).
         if product.game == "TG_STARS":
@@ -423,7 +423,7 @@ async def cb_variant(
         is_stars = variant.source == "fazercard" and variant.fzr_kind == "stars"
     if is_steam:
         # Steam-пополнение — свой флоу (логин → валюта → сумма).
-        await _start_steam(call, db, state)
+        await _start_steam(call, db, state, fzr, merchant_id)
         return
     if is_stars:
         await _start_stars(call, db, state, fzr, merchant_id)
@@ -567,7 +567,7 @@ async def cb_buy(
         is_stars = bool(variant and variant.source == "fazercard" and variant.fzr_kind == "stars")
         is_smm = bool(variant and variant.is_active and smm_panels.is_smm(variant.source))
     if is_steam:
-        await _start_steam(call, db, state)
+        await _start_steam(call, db, state, fzr, merchant_id)
         return
     if is_stars:
         await _start_stars(call, db, state, fzr, merchant_id)
@@ -852,15 +852,46 @@ async def _steam_variant(session):
     )
 
 
-async def _start_steam(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+def _fmt_steam_rate(r) -> str:
+    """Курс ₽ за 1 единицу: 2 знака при r>=1, иначе 4, без хвостовых нулей."""
+    r = Decimal(r)
+    s = f"{r:.2f}" if r >= Decimal(1) else f"{r:.4f}"
+    s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
+
+async def _steam_rates_block(session, fzr, variant_id: int, merchant_id: int) -> str:
+    """Строки курса по каждой валюте (с учётом наценки магазина/франшизы)."""
+    if fzr is None:
+        return ""
+    try:
+        fzr_rates = await steam_service.get_fzr_rates(fzr)
+        markup = await steam_service.get_markup(session)
+    except Exception:  # noqa: BLE001
+        return ""
+    lines = []
+    for cur in steam_service.CURRENCIES:
+        owner_rate = steam_service.rate_per_unit(cur, fzr_rates, markup=markup)
+        client_rate = await mprice_service.markup_rate(session, merchant_id, variant_id, owner_rate)
+        label = steam_service.CURRENCY_LABELS.get(cur, cur)
+        lines.append(f"{label} — ~{_fmt_steam_rate(client_rate)} ₽")
+    if not lines:
+        return ""
+    return "💱 <b>Курс</b> (₽ за 1 единицу):\n" + "\n".join(lines)
+
+
+async def _start_steam(call: CallbackQuery, db: Database, state: FSMContext,
+                       fzr: FazerCardClient = None, merchant_id: int = HEAD_MERCHANT_ID) -> None:
     async with db.session() as session:
         variant = await _steam_variant(session)
-    if not variant:
-        await call.answer("Пополнение Steam сейчас недоступно", show_alert=True)
-        return
+        if not variant:
+            await call.answer("Пополнение Steam сейчас недоступно", show_alert=True)
+            return
+        rates_block = await _steam_rates_block(session, fzr, variant.id, merchant_id)
     await state.set_state(SteamFlow.login)
     await state.update_data(svid=variant.id)
-    await call.message.answer(texts.STEAM_ASK_LOGIN, reply_markup=_steam_cancel_kb())
+    text = texts.steam_ask_login(rates_block)
+    await call.message.answer(text, reply_markup=_steam_cancel_kb())
     await call.answer()
 
 

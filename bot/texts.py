@@ -117,6 +117,17 @@ STEAM_ASK_LOGIN = (
     "💳 <b>Пополнение Steam</b>\n\n"
     "Введите <b>логин Steam</b> (аккаунт, который пополняем):"
 )
+
+
+def steam_ask_login(rates_block: str = "") -> str:
+    """Экран ввода логина Steam с блоком курсов (если удалось посчитать)."""
+    if rates_block:
+        return (
+            "💳 <b>Пополнение Steam</b>\n\n"
+            f"{rates_block}\n\n"
+            "Введите <b>логин Steam</b> (аккаунт, который пополняем):"
+        )
+    return STEAM_ASK_LOGIN
 STEAM_LOGIN_INVALID = (
     "❌ На этот логин сейчас нельзя зачислить. Проверьте логин и пришлите ещё раз."
 )
