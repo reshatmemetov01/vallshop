@@ -135,16 +135,20 @@ def _fmt_amount(amount: Decimal) -> str:
 
 
 async def steam_config(session: AsyncSession) -> dict:
-    """Валюты и лимиты (₽) для пополнения Steam."""
+    """Валюты, лимиты (₽) и эффективный курс за 1 единицу для пополнения Steam."""
     lo, hi = await steam_service.get_limits(session)
-    return {
-        "currencies": [
-            {"code": c, "label": steam_service.CURRENCY_LABELS.get(c, c)}
-            for c in steam_service.CURRENCIES
-        ],
-        "min": int(lo),
-        "max": int(hi),
-    }
+    fzr = _sup()["fazercard"]
+    fzr_rates = await steam_service.get_fzr_rates(fzr)
+    markup = await steam_service.get_markup(session)
+    rate = await _db_rate(session)
+    currencies = []
+    for c in steam_service.CURRENCIES:
+        rpu = steam_service.rate_per_unit(c, fzr_rates, markup=markup, our_rate=rate)
+        currencies.append({
+            "code": c, "label": steam_service.CURRENCY_LABELS.get(c, c),
+            "rate_per_unit": float(rpu),
+        })
+    return {"currencies": currencies, "min": int(lo), "max": int(hi)}
 
 
 async def steam_quote(
@@ -177,20 +181,33 @@ def steam_check_login(login: str) -> bool:
     return True
 
 
+_STAR_PACKAGES = [50, 75, 100, 150, 250, 350, 500, 750, 1000, 1500]
+
+
 async def stars_quote(session: AsyncSession, quantity: Optional[int] = None) -> dict:
-    """Границы и (если задано количество) цена для Telegram Звёзд."""
+    """Границы, курс за 1 звезду, пакеты и (если задано) цена для Telegram Звёзд."""
     fzr = _sup()["fazercard"]
     pps, api_min, api_max = await stars_service.get_quote(fzr)
     lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
-    out = {"min": lo, "max": hi, "price_rub": None}
+    markup = await stars_service.get_markup(session)
+    per_star = await stars_service.get_price_per_star(session)
+    rate = await _db_rate(session)
+
+    def _price(q):
+        return stars_service.owner_price(q, per_star=per_star, pps=pps, markup=markup, our_rate=rate)
+
+    # эффективный курс за 1 звезду
+    rps = per_star if per_star is not None else (_price(1000) / Decimal(1000))
+    out = {
+        "min": lo, "max": hi, "price_rub": None,
+        "rate_per_star": float(rps),
+        "packages": [{"qty": q, "price_rub": float(_price(q))}
+                     for q in _STAR_PACKAGES if lo <= q <= hi],
+    }
     if quantity is not None:
         q = int(quantity)
         if lo <= q <= hi:
-            markup = await stars_service.get_markup(session)
-            rate = await _db_rate(session)
-            out["price_rub"] = float(
-                stars_service.price_rub(q, pps, markup=markup, our_rate=rate)
-            )
+            out["price_rub"] = float(_price(q))
     return out
 
 
@@ -239,8 +256,10 @@ async def purchase(
         if not (lo <= stars_n <= hi):
             raise CheckoutError(f"Количество звёзд — от {lo} до {hi}")
         markup = await stars_service.get_markup(session)
+        per_star = await stars_service.get_price_per_star(session)
         rate = await _db_rate(session)
-        owner_unit_price = stars_service.price_rub(stars_n, pps, markup=markup, our_rate=rate)
+        owner_unit_price = stars_service.owner_price(
+            stars_n, per_star=per_star, pps=pps, markup=markup, our_rate=rate)
         unit_price = owner_unit_price            # сайт — головной
         call_quantity = 1                         # кол-во звёзд — в полях, не в quantity
         topup_fields = {

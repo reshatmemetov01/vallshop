@@ -412,6 +412,7 @@
     <section id="pkgsec" style="display:none">
       <h2 class="section">⭐ Популярные пакеты звёзд</h2>
       <div class="section-sub">Частые суммы с мгновенной выдачей. Нужно другое количество — откройте «Звёзды» в каталоге.</div>
+      <div id="starsrate" class="section-sub" style="font-weight:700;color:var(--accent)"></div>
       <div id="pkgs" class="pkgs"></div>
     </section>
 
@@ -499,6 +500,7 @@
       <input id="buysteamlogin" type="text" autocomplete="off" placeholder="ваш логин Steam (не email)">
       <label>Валюта пополнения</label>
       <select id="buysteamcur"></select>
+      <div id="buysteamrate" class="hint" style="color:var(--accent);font-weight:600"></div>
       <label>Сумма в валюте</label>
       <input id="buysteamamt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="например, 500">
     </div>
@@ -917,7 +919,17 @@ async function refreshStarsPrice(){
     }else{ $("buytotal").textContent = `Введите от ${d.min} до ${d.max}`; }
   }catch(e){ $("buytotal").textContent = "Не удалось рассчитать цену."; }
 }
-let steamPrice = null, steamTimer = null, steamLoaded = false;
+let steamPrice = null, steamTimer = null, steamLoaded = false, steamRates = {};
+function fmtRate(r){
+  r = Number(r);
+  return (r >= 1 ? r.toFixed(2) : r.toFixed(4)).replace(/\.?0+$/, "");
+}
+function showSteamRate(){
+  const cur = $("buysteamcur").value || "RUB";
+  const r = steamRates[cur];
+  const el = $("buysteamrate");
+  if(el) el.textContent = (r != null) ? `Курс: ~${fmtRate(r)} ₽ за 1 ${cur}` : "";
+}
 async function loadSteamConfig(){
   steamPrice = null;
   $("buytotal").textContent = "";
@@ -926,11 +938,13 @@ async function loadSteamConfig(){
       const cfg = await api("/api/buy/steam-config");
       const sel = $("buysteamcur");
       sel.innerHTML = cfg.currencies.map(c => `<option value="${c.code}">${esc(c.label)}</option>`).join("");
-      sel.onchange = () => updateBuyTotal();
+      steamRates = {}; cfg.currencies.forEach(c => { steamRates[c.code] = c.rate_per_unit; });
+      sel.onchange = () => { showSteamRate(); updateBuyTotal(); };
       $("buysteamamt").addEventListener("input", updateBuyTotal);
       steamLoaded = true;
     }catch(e){}
   }
+  showSteamRate();
 }
 async function refreshSteamPrice(){
   const amt = String($("buysteamamt").value||"").trim();
@@ -1232,27 +1246,23 @@ async function loadStarPackages(products){
     if(!sv){ sec.style.display="none"; return; }
     starsVid = sv.id; vmap[sv.id] = sv;
     const lim = await api("/api/buy/stars-quote");
-    const lo = lim.min||50, hi = lim.max||10000;
-    const presets = [100,250,500,1000,2500].filter(a => a>=lo && a<=hi);
-    if(!presets.length){ sec.style.display="none"; return; }
-    $("pkgs").innerHTML = presets.map(a => `
-      <div class="pkg reveal${a===250?' hit':''}">
-        ${a===250?'<div class="hit-badge">ХИТ</div>':''}
-        <div class="q">${a} <span class="star">★</span></div>
+    const pkgs = lim.packages || [];
+    if(!pkgs.length){ sec.style.display="none"; return; }
+    // Курс за 1 звезду.
+    if(lim.rate_per_star != null){
+      $("starsrate").textContent = "Курс — " + rub(lim.rate_per_star) + " за 1 звезду";
+    }
+    const hitQ = 250;
+    $("pkgs").innerHTML = pkgs.map(p => `
+      <div class="pkg reveal${p.qty===hitQ?' hit':''}">
+        ${p.qty===hitQ?'<div class="hit-badge">ХИТ</div>':''}
+        <div class="q">${p.qty} <span class="star">★</span></div>
         <div class="inst">⚡ Мгновенная выдача</div>
-        <div class="pp" id="pp-${a}"><span class="load">расчёт…</span></div>
-        <button onclick="openStars(${a})">Купить</button>
+        <div class="pp">${p.price_rub != null ? rub(p.price_rub) : "—"}</div>
+        <button onclick="openStars(${p.qty})">Купить</button>
       </div>`).join("");
     sec.style.display = "";
     revealScan();
-    // Живые цены по каждому пакету.
-    presets.forEach(async a => {
-      try{
-        const q = await api("/api/buy/stars-quote?quantity=" + a);
-        const el = $("pp-"+a);
-        if(el) el.textContent = q.price_rub != null ? rub(q.price_rub) : "—";
-      }catch(e){}
-    });
   }catch(e){ sec.style.display="none"; }
 }
 function openStars(amount){
