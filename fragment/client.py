@@ -44,6 +44,29 @@ _DEVICE = {
 }
 
 
+def _find_messages(obj) -> list:
+    """Найти список transaction-сообщений в ответе getBuyStarsLink.
+
+    Ответ Fragment: {... "transaction"?: {"messages": [...]}, "confirm_method",
+    "confirm_params"}. Структура обёртки может меняться — ищем ключ "messages"
+    рекурсивно (список словарей с address/amount).
+    """
+    if isinstance(obj, dict):
+        m = obj.get("messages")
+        if isinstance(m, list) and m and isinstance(m[0], dict) and m[0].get("address"):
+            return m
+        for v in obj.values():
+            found = _find_messages(v)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_messages(v)
+            if found:
+                return found
+    return []
+
+
 class FragmentError(Exception):
     pass
 
@@ -189,20 +212,29 @@ class FragmentClient:
         req_id = init.get("req_id") or init.get("id")
         if not req_id:
             raise FragmentError("Fragment не вернул req_id")
-        # 3) платёжная транзакция под наш кошелёк
+        # 3) платёжная транзакция (кошелёк Fragment берёт из сессии по stel_ton_token).
+        #    Браузер шлёт ровно id/show_sender/transaction — без account/device.
         wi = self._wallet_info()
-        link = self._api("getBuyStarsLink", {  # CALIBRATE
-            "account": json.dumps(ton_mod.account_payload(wi)),
-            "device": json.dumps(_DEVICE),
-            "transaction": 1, "id": req_id, "show_sender": 0,
+        link = self._api("getBuyStarsLink", {
+            "id": req_id, "show_sender": 1, "transaction": 1,
         })
-        tx = link.get("transaction") or {}
-        messages = tx.get("messages") or []
-        # 4) подписать и оплатить
+        messages = _find_messages(link)
+        if not messages:
+            raise FragmentError("Fragment не вернул платёжную транзакцию")
+        # 4) подписать и оплатить с нашего W5-кошелька
         sent = ton_mod.send_payment(wi, messages, self.tonapi)
         ton_amount = str(messages[0].get("amount")) if messages else "0"
+        # 5) подтвердить запрос у Fragment (confirm_method/params из ответа)
+        confirm_method = link.get("confirm_method")
+        confirm_params = link.get("confirm_params") or {"id": req_id}
+        if confirm_method:
+            try:
+                self._api(confirm_method, dict(confirm_params))
+            except FragmentError:
+                pass  # оплата уже ушла; подтверждение подхватит и поллер
         return {"ok": True, "order": sent["ext_hash"], "status": "pending",
-                "seqno_at_send": sent["seqno_at_send"], "ton_amount": ton_amount}
+                "seqno_at_send": sent["seqno_at_send"], "ton_amount": ton_amount,
+                "req_id": req_id}
 
     def poll(self, state: Mapping[str, Any]) -> Dict[str, Any]:
         """Проверить статус оплаты по seqno кошелька. {status: pending|completed}."""

@@ -71,12 +71,8 @@ def main() -> None:
         req_id = init.get("req_id") or init.get("id")
         if not req_id:
             print("⚠ req_id не найден — сверь ключи ответа"); return
-        link = c._api("getBuyStarsLink", {
-            "account": json.dumps(ton_mod.account_payload(c._wallet_info())),
-            "device": json.dumps({"platform": "iphone", "appName": "Tonkeeper",
-                                  "appVersion": "4.10.0", "maxProtocolVersion": 2}),
-            "transaction": 1, "id": req_id, "show_sender": 0,
-        })
+        # как в браузере: только id/show_sender/transaction, без account/device
+        link = c._api("getBuyStarsLink", {"id": req_id, "show_sender": 1, "transaction": 1})
         _show("getBuyStarsLink (транзакция для оплаты, НЕ оплачено)", link)
         print("\nЕсли messages[] есть — всё готово к оплате. Запусти с --pay для реальной покупки.")
     except FragmentError as e:
