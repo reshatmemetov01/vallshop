@@ -181,7 +181,7 @@ STARS_DELIVERED = (
     "Спасибо за покупку в VallShop 💚"
 )
 STARS_INTRO = (
-    "⭐️ <b>Telegram Звёзды</b>\n"
+    "⭐️ <b>Telegram Звёзды</b>\n\n"
     "{rate_line}\n\n"
     "Выберите пакет или укажите своё количество:"
 )

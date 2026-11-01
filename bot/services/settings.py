@@ -34,6 +34,15 @@ STARS_MARKUP = "stars_markup_percent"   # наценка %, напр. "10"
 STARS_MIN_QTY = "stars_min_qty"         # мин. кол-во звёзд (переопределение API)
 STARS_MAX_QTY = "stars_max_qty"         # макс. кол-во звёзд (переопределение API)
 STARS_PRICE_PER_STAR = "stars_price_per_star"  # ₽ за 1 звезду; задано → цена = кол-во × это
+# Оформление кнопок звёзд (эмодзи — custom_emoji_id / символ / "none"; цвет — стиль кнопки).
+STARS_PKG_EMOJI = "stars_pkg_emoji"
+STARS_PKG_COLOR = "stars_pkg_color"
+STARS_SELF_TEXT = "stars_self_text"
+STARS_SELF_EMOJI = "stars_self_emoji"
+STARS_SELF_COLOR = "stars_self_color"
+STARS_OTHER_TEXT = "stars_other_text"
+STARS_OTHER_EMOJI = "stars_other_emoji"
+STARS_OTHER_COLOR = "stars_other_color"
 
 # Реферальная программа
 REF_ENABLED = "ref_enabled"              # "1"/"0"

@@ -1078,6 +1078,18 @@ async def _stars_variant(session):
 _STAR_PACKAGES = [50, 75, 100, 150, 250, 350, 500, 750, 1000, 1500]
 
 
+def _stars_btn(text: str, data: str, emoji_val, color):
+    """Кнопка звёзд с настраиваемым эмодзи (премиум/символ) и цветом."""
+    ev = (emoji_val or "").strip()
+    icon = None
+    if ev and ev != "none":
+        if ev.isdigit():
+            icon = ev                      # премиум-эмодзи
+        else:
+            text = f"{ev} {text}"          # обычный символ — в текст
+    return kb._b(text, callback_data=data, style=(color or None), icon=icon)
+
+
 async def _stars_price(session, fzr, qty: int, merchant_id: int, stvid):
     """(цена_клиента, цена_владельца, себестоимость_usd) для qty звёзд."""
     pps, _amin, _amax = await stars_service.get_quote(fzr)
@@ -1101,6 +1113,7 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
         lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
         markup = await stars_service.get_markup(session)
         per_star = await stars_service.get_price_per_star(session)
+        cfg = await stars_service.button_config(session)
         pkgs = [q for q in _STAR_PACKAGES if lo <= q <= hi]
         prices = {}
         for q in pkgs:
@@ -1119,7 +1132,8 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
     b = InlineKeyboardBuilder()
     buf = []
     for q in pkgs:
-        buf.append(InlineKeyboardButton(text=f"⭐ {q} · {texts.rub(prices[q])}", callback_data=f"stpkg:{q}"))
+        buf.append(_stars_btn(f"{q} · {texts.rub(prices[q])}", f"stpkg:{q}",
+                              cfg["pkg_emoji"], cfg["pkg_color"]))
         if len(buf) == 2:
             b.row(*buf); buf = []
     if buf:
@@ -1130,13 +1144,15 @@ async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
     await call.answer()
 
 
-async def _ask_stars_recipient(msg: Message, state: FSMContext, qty: int) -> None:
-    """Экран выбора получателя: «Себе» / «Другому»."""
+async def _ask_stars_recipient(msg: Message, db: Database, state: FSMContext, qty: int) -> None:
+    """Экран выбора получателя: «Себе» / «Другому» (оформление из настроек)."""
     await state.set_state(StarsFlow.menu)
+    async with db.session() as session:
+        cfg = await stars_service.button_config(session)
     b = InlineKeyboardBuilder()
     b.row(
-        InlineKeyboardButton(text="👤 Себе", callback_data="stself"),
-        InlineKeyboardButton(text="🎁 Другому", callback_data="stoth"),
+        _stars_btn(cfg["self_text"], "stself", cfg["self_emoji"], cfg["self_color"]),
+        _stars_btn(cfg["other_text"], "stoth", cfg["other_emoji"], cfg["other_color"]),
     )
     b.row(InlineKeyboardButton(text="⬅️ Отмена", callback_data="catalog"))
     await msg.answer(texts.STARS_ASK_RECIPIENT.format(qty=qty), reply_markup=b.as_markup())
@@ -1155,7 +1171,7 @@ async def cb_stars_pkg(
         await call.answer("Этот пакет сейчас недоступен", show_alert=True)
         return
     await state.update_data(qty=qty)
-    await _ask_stars_recipient(call.message, state, qty)
+    await _ask_stars_recipient(call.message, db, state, qty)
     await call.answer()
 
 
@@ -1193,7 +1209,7 @@ async def msg_stars_quantity(
         await message.answer(texts.STARS_QTY_RANGE.format(min=lo, max=hi))
         return
     await state.update_data(qty=qty)
-    await _ask_stars_recipient(message, state, qty)
+    await _ask_stars_recipient(message, db, state, qty)
 
 
 @router.callback_query(StarsFlow.menu, F.data == "stself")

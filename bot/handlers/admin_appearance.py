@@ -17,6 +17,8 @@ from ..db.models import Product, Variant
 from ..services import catalog as catalog_service
 from ..services import menu as menu_service
 from ..services import paymethods as paymethods_service
+from ..services import settings as settings_service
+from ..services import stars as stars_service
 
 router = Router(name="admin_appearance")
 
@@ -41,6 +43,8 @@ class APState(StatesGroup):
     set_caption = State()
     set_pay_label = State()
     set_pay_heading = State()
+    set_stars_text = State()
+    set_stars_emoji = State()
 
 
 def _btn(text: str, data: str) -> InlineKeyboardButton:
@@ -66,6 +70,7 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
     for m, title in menu_service.MENU_TITLES.items():
         kb.row(_btn(f"📋 Кнопки: {title}", f"ap_menu:{m}"))
     kb.row(_btn("🛍 Кнопки каталога", "apc_home"))
+    kb.row(_btn("⭐ Кнопки звёзд", "apst_home"))
     kb.row(_btn("💳 Способы оплаты", "pm_home"))
     kb.row(_btn("♻️ Перевести Цены", "ap_migprices"))
     kb.row(_btn("♻️ Сбросить к стандартному", "ap_reset"))
@@ -370,6 +375,142 @@ async def cb_cat_fw(call: CallbackQuery, db: Database) -> None:
             await session.commit()
     await _show_catalog_btn(call, db, pid)
     await call.answer("Ширина изменена")
+
+
+# ── Оформление кнопок звёзд (пакеты, Себе/Другому) ──────────────────────────
+_STARS_SLOT = {
+    "pkg": {"color": settings_service.STARS_PKG_COLOR, "emoji": settings_service.STARS_PKG_EMOJI},
+    "self": {"text": settings_service.STARS_SELF_TEXT, "emoji": settings_service.STARS_SELF_EMOJI,
+             "color": settings_service.STARS_SELF_COLOR},
+    "other": {"text": settings_service.STARS_OTHER_TEXT, "emoji": settings_service.STARS_OTHER_EMOJI,
+              "color": settings_service.STARS_OTHER_COLOR},
+}
+
+
+def _emoji_show(val) -> str:
+    v = (val or "").strip()
+    if not v or v == "none":
+        return "—"
+    return "премиум" if v.isdigit() else v
+
+
+async def _show_stars_buttons(call: CallbackQuery, db: Database) -> None:
+    async with db.session() as session:
+        cfg = await stars_service.button_config(session)
+    kb = InlineKeyboardBuilder()
+    cap = (
+        "⭐ <b>Кнопки звёзд</b>\n\n"
+        f"Пакеты: эмодзи <b>{_emoji_show(cfg['pkg_emoji'])}</b> · "
+        f"цвет {_MENU_COLOR_NAME.get(cfg['pkg_color'] or '', '⚪ без цвета')}\n"
+        f"Себе: <b>{_emoji_show(cfg['self_emoji'])} {cfg['self_text']}</b> · "
+        f"{_MENU_COLOR_NAME.get(cfg['self_color'] or '', '⚪ без цвета')}\n"
+        f"Другому: <b>{_emoji_show(cfg['other_emoji'])} {cfg['other_text']}</b> · "
+        f"{_MENU_COLOR_NAME.get(cfg['other_color'] or '', '⚪ без цвета')}\n\n"
+        "Эмодзи: пришлите премиум-эмодзи или обычный символ; "
+        "<code>-</code> — убрать, <code>0</code> — по умолчанию."
+    )
+    kb.row(_btn("🙂 Эмодзи пакетов", "apst_emoji:pkg"),
+           _btn(f"🎨 Цвет пакетов", "apst_color:pkg"))
+    kb.row(_btn("✏️ Текст «Себе»", "apst_text:self"), _btn("🙂 Эмодзи «Себе»", "apst_emoji:self"))
+    kb.row(_btn("🎨 Цвет «Себе»", "apst_color:self"))
+    kb.row(_btn("✏️ Текст «Другому»", "apst_text:other"), _btn("🙂 Эмодзи «Другому»", "apst_emoji:other"))
+    kb.row(_btn("🎨 Цвет «Другому»", "apst_color:other"))
+    kb.row(_btn("⬅️ Назад", "ap_home"))
+    await call.message.edit_text(cap, reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data == "apst_home")
+async def cb_stars_buttons(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+    await state.clear()
+    await _show_stars_buttons(call, db)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("apst_color:"))
+async def cb_stars_color(call: CallbackQuery, db: Database) -> None:
+    slot = call.data.split(":", 1)[1]
+    key = _STARS_SLOT.get(slot, {}).get("color")
+    if key:
+        async with db.session() as session:
+            cur = await settings_service.get(session, key) or ""
+            nxt = _MENU_COLOR_CYCLE[(_MENU_COLOR_CYCLE.index(cur) + 1) % len(_MENU_COLOR_CYCLE)] \
+                if cur in _MENU_COLOR_CYCLE else "primary"
+            await settings_service.set(session, key, nxt)
+            await session.commit()
+    await _show_stars_buttons(call, db)
+    await call.answer("Цвет изменён")
+
+
+@router.callback_query(F.data.startswith("apst_text:"))
+async def cb_stars_text(call: CallbackQuery, state: FSMContext) -> None:
+    slot = call.data.split(":", 1)[1]
+    await state.set_state(APState.set_stars_text)
+    await state.update_data(slot=slot)
+    await call.message.edit_text(
+        "✏️ Пришлите новый текст кнопки (например <code>Себе</code>).",
+        reply_markup=_cancel("apst_home"),
+    )
+    await call.answer()
+
+
+@router.message(APState.set_stars_text)
+async def msg_stars_text(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    key = _STARS_SLOT.get(data.get("slot"), {}).get("text")
+    txt = (message.text or "").strip()
+    if not txt or not key:
+        await message.answer("Пришлите непустой текст.")
+        return
+    async with db.session() as session:
+        await settings_service.set(session, key, txt[:40])
+        await session.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_btn("⬅️ К кнопкам звёзд", "apst_home")).as_markup()
+    await message.answer("✅ Текст кнопки обновлён", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("apst_emoji:"))
+async def cb_stars_emoji(call: CallbackQuery, state: FSMContext) -> None:
+    slot = call.data.split(":", 1)[1]
+    await state.set_state(APState.set_stars_emoji)
+    await state.update_data(slot=slot)
+    await call.message.edit_text(
+        "🙂 Пришлите эмодзи для кнопки — премиум-эмодзи или обычный символ (напр. ⭐).\n"
+        "<code>-</code> — убрать эмодзи, <code>0</code> — вернуть по умолчанию.",
+        reply_markup=_cancel("apst_home"),
+    )
+    await call.answer()
+
+
+@router.message(APState.set_stars_emoji)
+async def msg_stars_emoji(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    key = _STARS_SLOT.get(data.get("slot"), {}).get("emoji")
+    if not key:
+        await state.clear()
+        await message.answer("Сессия устарела.")
+        return
+    raw = (message.text or "").strip()
+    if raw == "0":
+        val = ""          # сброс к дефолту
+    elif raw == "-":
+        val = "none"      # без эмодзи
+    else:
+        cid = None
+        for ent in (message.entities or []):
+            if ent.type == "custom_emoji" and getattr(ent, "custom_emoji_id", None):
+                cid = ent.custom_emoji_id
+                break
+        val = cid or raw[:8]   # премиум-id или обычный символ
+        if not val:
+            await message.answer("Пришлите эмодзи, либо <code>-</code> / <code>0</code>.")
+            return
+    async with db.session() as session:
+        await settings_service.set(session, key, val)
+        await session.commit()
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_btn("⬅️ К кнопкам звёзд", "apst_home")).as_markup()
+    await message.answer("✅ Эмодзи кнопки обновлено", reply_markup=kb)
 
 
 # ── Оформление номиналов (ширина/порядок) ───────────────────────────────────

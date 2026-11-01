@@ -117,6 +117,42 @@ def owner_price(qty: int, *, per_star=None, pps=None, markup=Decimal(0), our_rat
     return price_rub(qty, pps, markup=markup, our_rate=our_rate)
 
 
+# ── Оформление кнопок звёзд (пакеты, Себе/Другому) ──────────────────────────
+BTN_DEFAULTS = {
+    "pkg_emoji": "⭐", "pkg_color": "",
+    "self_text": "Себе", "self_emoji": "👤", "self_color": "",
+    "other_text": "Другому", "other_emoji": "🎁", "other_color": "",
+}
+_BTN_KEYS = {
+    "pkg_emoji": settings_service.STARS_PKG_EMOJI, "pkg_color": settings_service.STARS_PKG_COLOR,
+    "self_text": settings_service.STARS_SELF_TEXT, "self_emoji": settings_service.STARS_SELF_EMOJI,
+    "self_color": settings_service.STARS_SELF_COLOR,
+    "other_text": settings_service.STARS_OTHER_TEXT, "other_emoji": settings_service.STARS_OTHER_EMOJI,
+    "other_color": settings_service.STARS_OTHER_COLOR,
+}
+
+
+async def button_config(session: AsyncSession) -> dict:
+    """Оформление кнопок звёзд: тексты/эмодзи/цвета (с дефолтами)."""
+    out = dict(BTN_DEFAULTS)
+    for field, skey in _BTN_KEYS.items():
+        v = await settings_service.get(session, skey)
+        if v is not None and v != "":
+            out[field] = v
+    return out
+
+
+def emoji_prefix(val) -> str:
+    """Отрисовать эмодзи кнопки: custom_emoji_id → премиум, 'none' → без, иначе символ."""
+    from ..texts import ce
+    v = (val or "").strip()
+    if not v or v == "none":
+        return ""
+    if v.isdigit():
+        return ce(v, "⭐")
+    return v
+
+
 async def get_limits(session: AsyncSession, *, api_min: int, api_max: int) -> Tuple[int, int]:
     """Границы количества: переопределение из админки, иначе — из котировки API."""
     lo_raw = await settings_service.get(session, settings_service.STARS_MIN_QTY)
