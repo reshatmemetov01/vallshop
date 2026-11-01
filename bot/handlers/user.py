@@ -319,6 +319,11 @@ async def cb_product(
         children = await catalog_service.list_children(
             session, product_id, exclude_head_only=is_franchise
         )
+        # «Звёзды»-категория: если внутри только товар-звёзды (TG_STARS) — открыть
+        # пакеты сразу, без лишнего уровня «Своё количество».
+        if children and all((c.game or "") == "TG_STARS" for c in children):
+            await _start_stars(call, db, state, fzr, merchant_id)
+            return
         # Переопределения франшизы для этого товара и его дочерних элементов.
         p_ov = await mcatalog_service.get_override(
             session, merchant_id, mcatalog_service.PRODUCT, product_id
