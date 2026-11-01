@@ -180,6 +180,26 @@ STARS_DELIVERED = (
     "Количество: <b>{qty} ⭐️</b>\n\n"
     "Спасибо за покупку в VallShop 💚"
 )
+STARS_INTRO = (
+    "⭐️ <b>Telegram Звёзды</b>\n"
+    "{rate_line}\n\n"
+    "Выберите пакет или укажите своё количество:"
+)
+STARS_ASK_QTY_SIMPLE = (
+    "⭐️ <b>Telegram Звёзды</b>\n\n"
+    "Введите <b>количество звёзд</b> (от {min} до {max})."
+)
+STARS_ASK_RECIPIENT = (
+    "⭐️ <b>{qty} ⭐️</b>\n\nКому отправить звёзды?"
+)
+STARS_ASK_USERNAME_OTHER = (
+    "Пришлите <b>@username</b> получателя (кому зачислить звёзды).\n"
+    "У аккаунта должен быть открытый username."
+)
+STARS_SELF_NO_USERNAME = (
+    "У вас не задан <b>@username</b> в Telegram.\n"
+    "Введите получателя вручную — пришлите <b>@username</b>."
+)
 
 # ── VPN ───────────────────────────────────────────────────────────────────────
 VPN_DELIVERED = (

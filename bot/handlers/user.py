@@ -85,9 +85,10 @@ class SteamFlow(StatesGroup):
 
 
 class StarsFlow(StatesGroup):
-    """Telegram Звёзды: @username → количество → подтверждение."""
-    username = State()
+    """Telegram Звёзды: пакет/количество → получатель (себе/другому) → подтверждение."""
+    menu = State()
     quantity = State()
+    username = State()
     confirming = State()
 
 
@@ -312,7 +313,7 @@ async def cb_product(
             return
         # Спец-кнопка «Телеграм Звёзды» — свой флоу (@username → количество).
         if product.game == "TG_STARS":
-            await _start_stars(call, db, state)
+            await _start_stars(call, db, state, fzr, merchant_id)
             return
         parent_id = product.parent_id
         children = await catalog_service.list_children(
@@ -420,7 +421,7 @@ async def cb_variant(
         await _start_steam(call, db, state)
         return
     if is_stars:
-        await _start_stars(call, db, state)
+        await _start_stars(call, db, state, fzr, merchant_id)
         return
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
@@ -564,7 +565,7 @@ async def cb_buy(
         await _start_steam(call, db, state)
         return
     if is_stars:
-        await _start_stars(call, db, state)
+        await _start_stars(call, db, state, fzr, merchant_id)
         return
     if is_smm:
         await _start_smm(call, db, config, state, variant_id, merchant_id)
@@ -1068,35 +1069,98 @@ async def _stars_variant(session):
     )
 
 
-async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+# Готовые пакеты звёзд (кнопки в 2 столбика). Показываются только те, что в лимитах.
+_STAR_PACKAGES = [50, 75, 100, 150, 250, 350, 500, 750, 1000, 1500]
+
+
+async def _stars_price(session, fzr, qty: int, merchant_id: int, stvid):
+    """(цена_клиента, цена_владельца, себестоимость_usd) для qty звёзд."""
+    pps, _amin, _amax = await stars_service.get_quote(fzr)
+    markup = await stars_service.get_markup(session)
+    owner = stars_service.price_rub(qty, pps, markup=markup)
+    c_usd = stars_service.cost_usd(qty, pps)
+    client = await mprice_service.markup_price(session, merchant_id, stvid, owner)
+    return client, owner, c_usd
+
+
+async def _start_stars(call: CallbackQuery, db: Database, state: FSMContext,
+                       fzr: FazerCardClient = None, merchant_id: int = HEAD_MERCHANT_ID) -> None:
+    from ..db.models import Product
     async with db.session() as session:
         variant = await _stars_variant(session)
-    if not variant:
-        await call.answer("Telegram Звёзды сейчас недоступны", show_alert=True)
-        return
-    await state.set_state(StarsFlow.username)
-    await state.update_data(stvid=variant.id)
-    await call.message.answer(texts.STARS_ASK_USERNAME, reply_markup=_stars_cancel_kb())
+        if not variant:
+            await call.answer("Telegram Звёзды сейчас недоступны", show_alert=True)
+            return
+        stvid = variant.id
+        product = await session.get(Product, variant.product_id)
+        pps, api_min, api_max = await stars_service.get_quote(fzr)
+        lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
+        markup = await stars_service.get_markup(session)
+        pkgs = [q for q in _STAR_PACKAGES if lo <= q <= hi]
+        prices = {}
+        for q in pkgs:
+            owner = stars_service.price_rub(q, pps, markup=markup)
+            prices[q] = await mprice_service.markup_price(session, merchant_id, stvid, owner)
+        _dm = await mprice_service.default_markup(session, merchant_id)
+    rate_line = ratetext_service.apply_markup((product.description if product else "") or "", _dm).strip()
+
+    await state.set_state(StarsFlow.menu)
+    await state.update_data(stvid=stvid)
+    b = InlineKeyboardBuilder()
+    buf = []
+    for q in pkgs:
+        buf.append(InlineKeyboardButton(text=f"⭐ {q} · {texts.rub(prices[q])}", callback_data=f"stpkg:{q}"))
+        if len(buf) == 2:
+            b.row(*buf); buf = []
+    if buf:
+        b.row(*buf)
+    b.row(InlineKeyboardButton(text="✏️ Своё количество", callback_data="stcust"))
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="catalog"))
+    await call.message.answer(texts.STARS_INTRO.format(rate_line=rate_line), reply_markup=b.as_markup())
     await call.answer()
 
 
-@router.message(StarsFlow.username)
-async def msg_stars_username(
-    message: Message, db: Database, fzr: FazerCardClient, state: FSMContext
-) -> None:
-    uname = (message.text or "").strip().lstrip("@")
-    if not _USERNAME_RE.match(uname):
-        await message.answer(texts.STARS_USERNAME_BAD)
-        return
-    async with db.session() as session:
-        _pps, api_min, api_max = await stars_service.get_quote(fzr)
-        lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
-    await state.update_data(username=uname)
-    await state.set_state(StarsFlow.quantity)
-    await message.answer(
-        texts.STARS_ASK_QTY.format(username="@" + uname, min=lo, max=hi),
-        reply_markup=_stars_cancel_kb(),
+async def _ask_stars_recipient(msg: Message, state: FSMContext, qty: int) -> None:
+    """Экран выбора получателя: «Себе» / «Другому»."""
+    await state.set_state(StarsFlow.menu)
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(text="👤 Себе", callback_data="stself"),
+        InlineKeyboardButton(text="🎁 Другому", callback_data="stoth"),
     )
+    b.row(InlineKeyboardButton(text="⬅️ Отмена", callback_data="catalog"))
+    await msg.answer(texts.STARS_ASK_RECIPIENT.format(qty=qty), reply_markup=b.as_markup())
+
+
+@router.callback_query(StarsFlow.menu, F.data.startswith("stpkg:"))
+async def cb_stars_pkg(
+    call: CallbackQuery, db: Database, fzr: FazerCardClient, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    qty = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        _pps, amin, amax = await stars_service.get_quote(fzr)
+        lo, hi = await stars_service.get_limits(session, api_min=amin, api_max=amax)
+    if not (lo <= qty <= hi):
+        await call.answer("Этот пакет сейчас недоступен", show_alert=True)
+        return
+    await state.update_data(qty=qty)
+    await _ask_stars_recipient(call.message, state, qty)
+    await call.answer()
+
+
+@router.callback_query(StarsFlow.menu, F.data == "stcust")
+async def cb_stars_custom(
+    call: CallbackQuery, db: Database, fzr: FazerCardClient, state: FSMContext
+) -> None:
+    async with db.session() as session:
+        _pps, amin, amax = await stars_service.get_quote(fzr)
+        lo, hi = await stars_service.get_limits(session, api_min=amin, api_max=amax)
+    await state.set_state(StarsFlow.quantity)
+    await call.message.answer(
+        texts.STARS_ASK_QTY_SIMPLE.format(min=lo, max=hi), reply_markup=_stars_cancel_kb()
+    )
+    await call.answer()
 
 
 @router.message(StarsFlow.quantity)
@@ -1112,34 +1176,75 @@ async def msg_stars_quantity(
     if qty is None or qty <= 0:
         await message.answer(texts.STARS_QTY_BAD)
         return
-    data = await state.get_data()
-    uname = data.get("username", "")
     async with db.session() as session:
-        pps, api_min, api_max = await stars_service.get_quote(fzr)
-        lo, hi = await stars_service.get_limits(session, api_min=api_min, api_max=api_max)
-        markup = await stars_service.get_markup(session)
-        balance = await get_balance(session, message.from_user.id, merchant_id)
+        _pps, amin, amax = await stars_service.get_quote(fzr)
+        lo, hi = await stars_service.get_limits(session, api_min=amin, api_max=amax)
     if qty < lo or qty > hi:
         await message.answer(texts.STARS_QTY_RANGE.format(min=lo, max=hi))
         return
-    owner_price = stars_service.price_rub(qty, pps, markup=markup)
-    c_usd = stars_service.cost_usd(qty, pps)
-    # Цена клиента франшизы = цена владельца + %-наценка мерчанта (для головного — равна).
+    await state.update_data(qty=qty)
+    await _ask_stars_recipient(message, state, qty)
+
+
+@router.callback_query(StarsFlow.menu, F.data == "stself")
+async def cb_stars_self(
+    call: CallbackQuery, db: Database, fzr: FazerCardClient, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    uname = (call.from_user.username or "").strip()
+    if not uname:
+        # нет @username — просим ввести вручную
+        await state.set_state(StarsFlow.username)
+        await call.message.answer(texts.STARS_SELF_NO_USERNAME, reply_markup=_stars_cancel_kb())
+        await call.answer()
+        return
+    await state.update_data(username=uname)
+    await _show_stars_confirm(call.message, db, state, call.from_user.id, merchant_id, fzr)
+    await call.answer()
+
+
+@router.callback_query(StarsFlow.menu, F.data == "stoth")
+async def cb_stars_other(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(StarsFlow.username)
+    await call.message.answer(texts.STARS_ASK_USERNAME_OTHER, reply_markup=_stars_cancel_kb())
+    await call.answer()
+
+
+@router.message(StarsFlow.username)
+async def msg_stars_username(
+    message: Message, db: Database, fzr: FazerCardClient, state: FSMContext,
+    merchant_id: int = HEAD_MERCHANT_ID,
+) -> None:
+    uname = (message.text or "").strip().lstrip("@")
+    if not _USERNAME_RE.match(uname):
+        await message.answer(texts.STARS_USERNAME_BAD)
+        return
+    await state.update_data(username=uname)
+    await _show_stars_confirm(message, db, state, message.from_user.id, merchant_id, fzr)
+
+
+async def _show_stars_confirm(msg: Message, db: Database, state: FSMContext,
+                              user_id: int, merchant_id: int, fzr) -> None:
+    data = await state.get_data()
+    qty = int(data.get("qty", 0))
+    uname = data.get("username", "")
+    stvid = data.get("stvid")
+    if not qty or not uname:
+        await state.clear()
+        await msg.answer("Сессия устарела, начните заново.")
+        return
     async with db.session() as session:
-        price = await mprice_service.markup_price(
-            session, merchant_id, data.get("stvid"), owner_price
-        )
-    await state.update_data(
-        qty=qty, price=str(price), owner_price=str(owner_price), cost_usd=str(c_usd)
-    )
+        client, owner, c_usd = await _stars_price(session, fzr, qty, merchant_id, stvid)
+        balance = await get_balance(session, user_id, merchant_id)
+    await state.update_data(price=str(client), owner_price=str(owner), cost_usd=str(c_usd))
     await state.set_state(StarsFlow.confirming)
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text=f"✅ Оплатить {texts.rub(price)}", callback_data="stbuy"))
+    b.row(InlineKeyboardButton(text=f"✅ Купить за {texts.rub(client)}", callback_data="stbuy"))
     b.row(InlineKeyboardButton(text="⬅️ Отмена", callback_data="catalog"))
-    await message.answer(
+    await msg.answer(
         texts.STARS_CONFIRM.format(
             username="@" + uname, qty=qty,
-            price=texts.rub(price), balance=texts.rub(balance),
+            price=texts.rub(client), balance=texts.rub(balance),
         ),
         reply_markup=b.as_markup(),
     )
