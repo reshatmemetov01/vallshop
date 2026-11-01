@@ -61,6 +61,7 @@ def _sup() -> dict:
     if _suppliers is None:
         from fazercard import FazerCardClient
         from vpnresellers import VPNResellersClient
+        from fragment import FragmentClient
         from bot.services import smm_panels
 
         panels = smm_panels.build_clients()
@@ -69,6 +70,7 @@ def _sup() -> dict:
             "vpn": VPNResellersClient.from_env(),
             "soc": panels["socproof"],   # back-compat
             "panels": panels,
+            "fragment": FragmentClient.from_env(),
         }
     return _suppliers
 
@@ -334,6 +336,7 @@ async def purchase(
             vpn=sup["vpn"],
             soc=sup["soc"],
             panels=sup["panels"],
+            fragment=sup["fragment"],
             smm_link=smm_link,
             smm_quantity=smm_quantity,
             topup_fields=topup_fields,

@@ -1148,7 +1148,7 @@ async def msg_stars_quantity(
 @router.callback_query(StarsFlow.confirming, F.data == "stbuy")
 async def cb_stars_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, fragment=None,
 ) -> None:
     data = await state.get_data()
     vid = data.get("stvid")
@@ -1171,7 +1171,7 @@ async def cb_stars_buy(
             order, _codes = await order_service.purchase_from_balance(
                 session, user_id=call.from_user.id, variant=variant,
                 unit_price=price, quantity=1, merchant_id=merchant_id,
-                owner_unit_price=owner_price, fzr=fzr,
+                owner_unit_price=owner_price, fzr=fzr, fragment=fragment,
                 topup_fields={
                     "telegram_username": uname, "stars_qty": qty,
                     "_cost_usd": cost_usd,

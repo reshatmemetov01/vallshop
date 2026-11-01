@@ -5,6 +5,7 @@ SQLAlchemy>=2.0,<2.1       # ORM / БД
 aiosqlite>=0.19            # async-драйвер SQLite (дефолтная БД)
 httpx>=0.26               # HTTP-клиент платёжного провайдера (BoltUtil)
 aiohttp>=3.9              # HTTP-сервер вебхуков
+tonsdk>=1.0.15,<2         # подпись TON-транзакций (оплата Fragment за звёзды)
 
 # ── Опционально ────────────────────────────────────────────────────────────
 # asyncpg>=0.29            # для PostgreSQL (DATABASE_URL=postgresql+asyncpg://...)

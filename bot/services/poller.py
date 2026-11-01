@@ -98,6 +98,61 @@ async def _settle_smm(bot, db, panels, config, bots, order_id) -> None:
         )
 
 
+# Сколько ждём подтверждения оплаты Fragment, прежде чем считать сбоем и вернуть.
+_FRAGMENT_TIMEOUT = timedelta(minutes=20)
+
+
+async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
+    """Опросить оплату Fragment (по seqno) и уведомить клиента при завершении."""
+    if fragment is None:
+        return
+    async with db.session() as session:
+        fresh = await session.get(Order, order_id)
+        if not fresh or fresh.status != OrderStatus.FULFILLING:
+            return
+        res = await order_service.settle_fragment(session, fresh, fragment)
+        # Таймаут: оплата не подтвердилась слишком долго (не ушла в сеть) → возврат.
+        if res.get("outcome") == "progress":
+            age = datetime.utcnow() - (fresh.created_at or datetime.utcnow())
+            if age > _FRAGMENT_TIMEOUT:
+                refund = Decimal(fresh.price_usd)
+                await balance_service.credit(
+                    session, fresh.user_id, refund, merchant_id=fresh.merchant_id
+                )
+                await referral_service.reverse_for_order(session, fresh)
+                await mprice_service.reverse_earnings(
+                    session, fresh.merchant_id, Decimal(fresh.merchant_margin or 0)
+                )
+                fresh.status = OrderStatus.REFUNDED
+                fresh.fail_reason = "Fragment: оплата не подтвердилась (таймаут)"
+                res = {"outcome": "failed"}
+        user_id = fresh.user_id
+        merchant_id = fresh.merchant_id
+        oid = fresh.id
+        variant_id = fresh.variant_id
+        variant = await session.get(Variant, fresh.variant_id)
+        item_name = variant.title if variant else "звёзды"
+        await session.commit()
+
+    outcome = res.get("outcome")
+    if outcome == "progress":
+        return
+    cbot = _pick_bot(bots, merchant_id, bot)
+    admin_ids = list(config.admin_ids) if config else []
+    if outcome == "completed":
+        await _notify(cbot, user_id, f"✅ Заказ #{oid} «{item_name}» выполнен — звёзды отправлены.",
+                      kb.order_done_kb(oid, variant_id))
+    elif outcome == "failed":
+        await _notify(
+            cbot, user_id,
+            f"↩️ Заказ #{oid} «{item_name}» не прошёл — средства возвращены на баланс.",
+        )
+        await notify_service.notify_admins(
+            bot, admin_ids,
+            f"↩️ Fragment-заказ #{oid} (<b>{item_name}</b>) не подтвердился, покупателю возвращены средства.",
+        )
+
+
 async def run_fulfillment_poller(
     bot: Bot,
     db: Database,
@@ -108,13 +163,14 @@ async def run_fulfillment_poller(
     bots: dict | None = None,
     soc: SocProofClient | None = None,
     panels: dict | None = None,
+    fragment=None,
 ) -> None:
-    """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard + SMM)."""
+    """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard + SMM + Fragment)."""
     if panels is None and soc is not None:
         panels = {"socproof": soc}
     while True:
         try:
-            await _tick(bot, db, liog, fzr, config, bots, panels)
+            await _tick(bot, db, liog, fzr, config, bots, panels, fragment)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — поллер не должен падать
@@ -130,6 +186,7 @@ async def _tick(
     config: BotConfig | None = None,
     bots: dict | None = None,
     panels: dict | None = None,
+    fragment=None,
 ) -> None:
     async with db.session() as session:
         orders = list(
@@ -142,6 +199,10 @@ async def _tick(
         # SMM (панели soc-proof / 1xpanel) — своя логика опроса/возврата.
         if smm_panels.is_smm(order.supplier):
             await _settle_smm(bot, db, panels, config, bots, order.id)
+            continue
+        # Fragment (Telegram Stars через TON) — подтверждение оплаты по seqno.
+        if order.supplier == "fragment":
+            await _settle_fragment(bot, db, fragment, config, bots, order.id)
             continue
         async with db.session() as session:
             fresh = await session.get(Order, order.id)

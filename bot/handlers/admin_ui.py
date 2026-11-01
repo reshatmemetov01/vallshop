@@ -564,7 +564,8 @@ async def msg_steam_max(message: Message, db: Database, state: FSMContext) -> No
 
 # ── Telegram Звёзды (наценка, лимиты количества) ───────────────────────────────
 @router.callback_query(F.data == "stars_home")
-async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext,
+                        fragment=None) -> None:
     await state.clear()
     from ..services import stars as stars_service
     from ..services import settings as settings_service
@@ -574,6 +575,18 @@ async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext) ->
         hi_raw = await settings_service.get(session, settings_service.STARS_MAX_QTY)
     lo_lbl = f"{lo_raw} ⭐️" if lo_raw else "авто"
     hi_lbl = f"{hi_raw} ⭐️" if hi_raw else "авто"
+
+    # Источник выдачи: Fragment (если настроен) → иначе FazerCards.
+    if fragment is not None and getattr(fragment, "configured", False):
+        src_line = "Источник: <b>Fragment</b> (при сбое — FazerCards)"
+        try:
+            bal = await asyncio.to_thread(fragment.balance)
+            src_line += f"\nБаланс TON-кошелька: <b>{bal.get('balance')} TON</b>"
+        except Exception:  # noqa: BLE001 — сеть/кошелёк недоступны
+            src_line += "\nБаланс TON: — (не удалось получить)"
+    else:
+        src_line = "Источник: <b>FazerCards</b> (Fragment не настроен)"
+
     kb = InlineKeyboardBuilder()
     kb.row(_btn(f"📈 Наценка: {_fmt_rub(markup)}%", "stars_markup"))
     kb.row(
@@ -584,10 +597,10 @@ async def cb_stars_home(call: CallbackQuery, db: Database, state: FSMContext) ->
     await call.message.edit_text(
         "⭐️ <b>Telegram Звёзды</b>\n\n"
         f"Наценка: <b>{_fmt_rub(markup)}%</b>\n"
-        f"Лимит количества: <b>{lo_lbl} — {hi_lbl}</b>\n\n"
+        f"Лимит количества: <b>{lo_lbl} — {hi_lbl}</b>\n"
+        f"{src_line}\n\n"
         "Клиент сам вводит количество звёзд; цена в ₽ считается от себестоимости "
-        "FazerCards (живая котировка) + наценка. «авто» — брать лимиты из "
-        "котировки поставщика (50–10000).",
+        "+ наценка. «авто» — брать лимиты из котировки (50–10000).",
         reply_markup=kb.as_markup(),
     )
     await call.answer()

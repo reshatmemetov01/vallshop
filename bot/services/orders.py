@@ -122,6 +122,7 @@ async def purchase_from_balance(
     public_base_url: Optional[str] = None,
     soc: Optional[SocProofClient] = None,
     panels: Optional[dict] = None,
+    fragment=None,
     smm_link: Optional[str] = None,
     smm_quantity: Optional[int] = None,
 ) -> tuple[Order, list[str]]:
@@ -176,6 +177,19 @@ async def purchase_from_balance(
 
     # 2) Выдача по источнику.
     if variant.source == "fazercard":
+        # Telegram Stars: сначала Fragment (если настроен), при сбое — FazerCard.
+        if variant.fzr_a == "telegram_stars" and fragment is not None \
+                and getattr(fragment, "configured", False):
+            fzr_usable = fzr is not None and (getattr(fzr, "mock", False) or getattr(fzr, "api_key", None))
+            try:
+                return await _fulfill_fragment(session, order, variant, fragment, topup_fields)
+            except SupplierError:
+                if fzr_usable:
+                    log.warning("Fragment не смог выдать звёзды — фолбэк на FazerCard")
+                    return await _fulfill_fazercard(
+                        session, order, variant, quantity, fzr, topup_fields
+                    )
+                raise
         return await _fulfill_fazercard(session, order, variant, quantity, fzr, topup_fields)
 
     if smm_panels.is_smm(variant.source):
@@ -382,6 +396,94 @@ async def poll_fazercard(
     if order.status == OrderStatus.COMPLETED:
         await referral_service.accrue_for_order(session, order)
     return order.status
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Fragment (Telegram Stars через TON): оплата уходит в блокчейн, статус поллером
+# ──────────────────────────────────────────────────────────────────────────
+async def _fulfill_fragment(
+    session: AsyncSession, order: Order, variant: Variant, fragment, fields: Optional[dict]
+) -> tuple[Order, list[str]]:
+    """Купить звёзды через Fragment (оплата TON). Подтверждение дотянет поллер."""
+    from fragment import FragmentError
+
+    fields = fields or {}
+    uname = (fields.get("telegram_username") or "").strip()
+    amount = fields.get("stars_qty") or _first_int(variant.title)
+    try:
+        amount = int(amount) if amount else None
+    except (TypeError, ValueError):
+        amount = None
+    if not uname:
+        raise SupplierError("Не указан Telegram @username получателя")
+    if not amount:
+        raise SupplierError("Не удалось определить количество звёзд")
+
+    order.supplier = "fragment"
+    order.status = OrderStatus.FULFILLING
+    await session.flush()
+
+    def _call():
+        return fragment.buy_stars(username=uname, quantity=amount,
+                                  idempotency_key=order.client_ref)
+
+    try:
+        res = await asyncio.to_thread(_call)
+    except FragmentError as e:
+        # Отдаём как SupplierError → выше сработает фолбэк на FazerCard / возврат.
+        raise SupplierError(f"Fragment: {e}")
+
+    order.supplier_order_id = str(res.get("order") or "")
+    order.fields_json = json.dumps(
+        {"username": uname, "stars_qty": amount, "status": res.get("status") or "pending",
+         "seqno_at_send": res.get("seqno_at_send"), "ton_amount": res.get("ton_amount")},
+        ensure_ascii=False,
+    )
+    # Fragment-mock может вернуть сразу completed.
+    if (res.get("status") or "").lower() == "completed":
+        order.status = OrderStatus.COMPLETED
+        await session.flush()
+        await referral_service.accrue_for_order(session, order)
+    else:
+        await session.flush()
+    return order, []
+
+
+async def settle_fragment(session: AsyncSession, order: Order, fragment) -> dict:
+    """Опросить статус оплаты Fragment (по seqno) и закрыть/вернуть при терминале.
+
+    Возвращает ``{outcome}`` где outcome ∈ {"progress","completed","failed"}.
+    """
+    from fragment import FragmentError
+
+    out = {"outcome": "progress"}
+    try:
+        fields = json.loads(order.fields_json) if order.fields_json else {}
+    except (ValueError, TypeError):
+        fields = {}
+    try:
+        res = await asyncio.to_thread(fragment.poll, fields)
+    except FragmentError:
+        return out  # сеть недоступна — попробуем позже
+
+    status = (res.get("status") or "pending").lower()
+    if status == "completed":
+        fields["status"] = "completed"
+        order.fields_json = json.dumps(fields, ensure_ascii=False)
+        order.status = OrderStatus.COMPLETED
+        await session.flush()
+        await referral_service.accrue_for_order(session, order)
+        out["outcome"] = "completed"
+    elif status == "failed":
+        refund = Decimal(order.price_usd)
+        await balance_service.credit(session, order.user_id, refund, merchant_id=order.merchant_id)
+        await referral_service.reverse_for_order(session, order)
+        await mprice_service.reverse_earnings(session, order.merchant_id, Decimal(order.merchant_margin or 0))
+        order.status = OrderStatus.REFUNDED
+        order.fail_reason = "Fragment: оплата не прошла"
+        await session.flush()
+        out["outcome"] = "failed"
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────────
