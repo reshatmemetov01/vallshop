@@ -91,6 +91,12 @@
   .logo span{color:var(--accent)}
   .navlink{color:var(--muted);font-weight:600;font-size:14px;padding:8px 10px;border-radius:9px;transition:.15s;cursor:pointer}
   .navlink:hover{color:var(--accent)}
+  .burger{display:none;margin-left:auto;width:44px;height:40px;border:1px solid var(--line2);border-radius:11px;
+    background:var(--panel2);cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0}
+  .burger span{display:block;width:19px;height:2px;background:var(--text);border-radius:2px;transition:.2s}
+  .burger.on span:nth-child(1){transform:translateY(6px) rotate(45deg)}
+  .burger.on span:nth-child(2){opacity:0}
+  .burger.on span:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
   .rightnav{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
   .auth{display:flex;gap:8px;align-items:center;font-size:14px;flex-wrap:wrap;justify-content:flex-end}
   .auth .email{color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
@@ -427,14 +433,30 @@
   .btn:active,.buy.active:active,.pkg button:active,.modal .pay:active,.topup:active{transform:translateY(1px)!important}
 
   @media (max-width:640px){
-    .hero{padding:32px 18px 28px;border-radius:18px;margin-top:18px}
-    .hero h1{font-size:28px}.hero p{font-size:15px}
+    /* Шапка: логотип + бургер, меню выпадает */
+    .bar{position:relative;gap:10px;padding:12px 0}
+    .logo{font-size:26px}
+    .burger{display:flex}
+    .rightnav{margin-left:0;position:absolute;top:calc(100% + 10px);right:0;left:auto;
+      width:min(290px,86vw);flex-direction:column;align-items:stretch;gap:8px;flex-wrap:nowrap;
+      background:rgba(16,22,32,.98);border:1px solid var(--line2);border-radius:16px;padding:12px;
+      box-shadow:0 20px 44px rgba(0,0,0,.55);display:none;z-index:40}
+    .rightnav.open{display:flex}
+    .rightnav .navlink{padding:11px 12px;border-radius:11px;font-size:15px;color:var(--text)}
+    .auth{flex-direction:column;align-items:stretch;width:100%;gap:8px;flex-wrap:nowrap;font-size:15px}
+    .auth .bal{text-align:center;padding:10px 13px;order:-1}
+    .auth .email{max-width:100%;text-align:center;padding:2px 0}
+    .auth button,.auth .loginbtn,.auth .topup{width:100%;text-align:center;padding:12px 14px;font-size:14px}
+    .hero{padding:28px 16px 26px;border-radius:18px;margin-top:14px}
+    .hero h1{font-size:27px}.hero p{font-size:15px}
+    .hero .cta-row .btn{flex:1 1 auto;justify-content:center}
     .statcards{grid-template-columns:1fr;gap:10px;max-width:420px}
     .scard{padding:16px 14px}
     .scard .sic{width:60px;height:60px}
     .scard .sic svg{width:32px;height:32px}
     .steps{grid-template-columns:1fr}
-    .foot{gap:24px}.foot .cols{gap:32px}
+    h2.section{font-size:20px}
+    .foot{gap:24px}.foot .cols{gap:28px}
   }
 </style>
 </head>
@@ -455,7 +477,8 @@
 </div>
 <header><div class="wrap bar">
   <div class="logo" onclick="goHome()">Vall<span>Shop</span></div>
-  <div class="rightnav">
+  <button class="burger" id="burger" aria-label="Меню" onclick="toggleMenu()"><span></span><span></span><span></span></button>
+  <div class="rightnav" id="rightnav" onclick="if(event.target.closest('a,button'))closeMenu()">
     <a class="navlink" href="/catalog" onclick="goCatalog();return false">Каталог</a>
     <a class="navlink" href="/reviews">Отзывы</a>
     <div id="auth" class="auth"></div>
@@ -674,6 +697,24 @@ async function _applyState(st){
 }
 window.addEventListener("popstate", (e) => {
   _applyState((e.state && e.state.spa) ? e.state : {spa:true, view:"home", stack:[]});
+});
+
+// Мобильное меню (бургер)
+function toggleMenu(){
+  const rn = $("rightnav"), bg = $("burger");
+  const open = rn.classList.toggle("open");
+  if(bg) bg.classList.toggle("on", open);
+}
+function closeMenu(){
+  const rn = $("rightnav"), bg = $("burger");
+  if(rn) rn.classList.remove("open");
+  if(bg) bg.classList.remove("on");
+}
+document.addEventListener("click", (e)=>{
+  const rn = $("rightnav");
+  if(rn && rn.classList.contains("open") && !e.target.closest(".rightnav") && !e.target.closest(".burger")){
+    closeMenu();
+  }
 });
 
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
