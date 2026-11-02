@@ -139,16 +139,14 @@
   .sic.zap svg{animation:zapFlash 2.8s ease-in-out infinite;transform-origin:50% 50%}
   @keyframes zapFlash{0%,100%{opacity:.9;transform:scale(1)}
     7%{opacity:1;transform:scale(1.14)}14%{opacity:.65}21%{opacity:1;transform:scale(1.07)}36%{opacity:.92;transform:scale(1)}}
-  /* Карта — мягкое всплывание (по центру, без наклона) */
-  .sic.card svg{animation:cardFloat 3.2s ease-in-out infinite}
-  @keyframes cardFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.07)}}
+  /* Карта — без анимации, строго по центру */
   /* Часы — идущие стрелки (24/7) */
   .sic.clock .hhour,.sic.clock .hmin{transform-box:view-box;transform-origin:12px 12px}
   .sic.clock .hhour{animation:handSpin 24s linear infinite}
   .sic.clock .hmin{animation:handSpin 6s linear infinite}
   @keyframes handSpin{to{transform:rotate(360deg)}}
   @media (prefers-reduced-motion: reduce){
-    .sic.zap svg,.sic.card svg,.sic.clock .hhour,.sic.clock .hmin{animation:none}}
+    .sic.zap svg,.sic.clock .hhour,.sic.clock .hmin{animation:none}}
   .scard b{font-size:19px;font-weight:800}
   .scard span{color:var(--dim);font-size:14px}
 
@@ -412,7 +410,8 @@
     .hero h1{font-size:28px}.hero p{font-size:15px}
     .statcards{grid-template-columns:1fr;gap:10px;max-width:420px}
     .scard{padding:16px 14px}
-    .scard .sic{width:46px;height:46px;font-size:22px}
+    .scard .sic{width:60px;height:60px}
+    .scard .sic svg{width:32px;height:32px}
     .steps{grid-template-columns:1fr}
     .foot{gap:24px}.foot .cols{gap:32px}
   }
