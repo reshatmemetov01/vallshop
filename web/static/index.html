@@ -378,10 +378,12 @@
     filter:drop-shadow(0 0 5px rgba(90,170,255,.45))}
   .hicon svg{width:23px;height:23px}
   .hicon.bulb svg{animation:icGlow 2.8s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-  .hicon.grid svg{animation:icBreathe 4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  .hicon.grid svg,.hicon.help svg,.hicon.shop svg{animation:icBreathe 4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  .hicon.star svg{animation:icGlow 3s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
   @keyframes icGlow{0%,100%{opacity:.8;transform:scale(1)}50%{opacity:1;transform:scale(1.1)}}
   @media (prefers-reduced-motion: reduce){
-    .sic2.wallet svg,.sic2.bag svg,.sic2.gift svg,.hicon.bulb svg,.hicon.grid svg{animation:none}}
+    .sic2.wallet svg,.sic2.bag svg,.sic2.gift svg,
+    .hicon.bulb svg,.hicon.grid svg,.hicon.star svg,.hicon.help svg,.hicon.shop svg{animation:none}}
   .step b{display:block;font-size:17px;margin-bottom:6px}
   .step span{color:var(--muted);font-size:14px}
 
@@ -503,7 +505,7 @@
 
   <div id="homesections" style="display:none">
     <section id="pkgsec" style="display:none">
-      <h2 class="section">⭐ Популярные пакеты звёзд</h2>
+      <h2 class="section"><span class="hicon star"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.9l-5.8 3.05 1.1-6.5L2.6 9.8l6.5-.95z"/></svg></span>Популярные пакеты звёзд</h2>
       <div class="section-sub">Частые суммы с мгновенной выдачей. Нужно другое количество — откройте «Звёзды» в каталоге.</div>
       <div id="starsrate" class="section-sub" style="font-weight:700;color:var(--accent)"></div>
       <div id="pkgs" class="pkgs"></div>
@@ -526,7 +528,7 @@
     </section>
 
     <section>
-      <h2 class="section">❓ Частые вопросы</h2>
+      <h2 class="section"><span class="hicon help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.3a2.8 2.8 0 0 1 5.4 1c0 1.8-2.7 2.4-2.7 2.4"/><circle cx="12" cy="16.6" r=".7" fill="currentColor" stroke="none"/></svg></span>Частые вопросы</h2>
       <div class="section-sub">Коротко о том, как всё работает.</div>
       <div class="faq">
         <details class="qa reveal"><summary>Как сделать заказ?</summary><div class="ans">Зарегистрируйтесь или войдите через Telegram, пополните баланс удобным способом и купите нужный товар — списание происходит с баланса, выдача мгновенная или в течение короткого времени.</div></details>
@@ -675,6 +677,7 @@ window.addEventListener("popstate", (e) => {
 });
 
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
+const ICON_SHOP = '<span class="hicon shop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5V20a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9.5"/><path d="M3 6.5 4.2 3h15.6L21 6.5a2.5 2.5 0 0 1-4.5 1.6 2.5 2.5 0 0 1-4.5 0 2.5 2.5 0 0 1-4.5 0A2.5 2.5 0 0 1 3 6.5Z"/><path d="M9.2 21v-5h5.6v5"/></svg></span>';
 $("year").textContent = new Date().getFullYear();
 
 // Иконка (SVG) и описание категории по названию (для карточек каталога).
@@ -854,7 +857,7 @@ async function _catalogRoot(){
   try{
     const data = await api("/api/catalog");
     if(!data.products.length){ content.innerHTML = '<div class="state">Каталог пуст.</div>'; return; }
-    content.innerHTML = `<h2 class="section">🛍️ Каталог</h2>`
+    content.innerHTML = `<h2 class="section">${ICON_SHOP}Каталог</h2>`
       + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
       + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
     revealScan();
@@ -1504,7 +1507,7 @@ async function doSearch(){
     $("homesections").style.display = "";
     try{
       const data = await api("/api/catalog");
-      content.innerHTML = `<h2 class="section">🛍️ Каталог</h2>`
+      content.innerHTML = `<h2 class="section">${ICON_SHOP}Каталог</h2>`
         + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
         + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
       revealScan();
