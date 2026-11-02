@@ -127,9 +127,28 @@
   .scard{background:transparent;border:none;border-radius:16px;
     padding:22px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;transition:.18s}
   .scard:hover{transform:translateY(-3px)}
-  .scard .sic{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:24px;margin-bottom:6px;
-    background:radial-gradient(circle at 30% 25%,rgba(42,171,238,.28),rgba(41,158,217,.08));
-    border:1px solid rgba(42,171,238,.3)}
+  .scard .sic{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;margin-bottom:8px;
+    color:#64bdfa;position:relative;transition:.2s;
+    background:radial-gradient(circle at 32% 22%,rgba(60,140,246,.32),rgba(41,158,217,.06));
+    border:1px solid rgba(60,140,246,.34);
+    box-shadow:0 8px 20px rgba(42,171,238,.14), inset 0 0 14px rgba(90,160,255,.1)}
+  .scard .sic svg{width:28px;height:28px;filter:drop-shadow(0 0 6px rgba(90,170,255,.55))}
+  .scard:hover .sic{transform:translateY(-1px) scale(1.04);border-color:rgba(90,170,255,.6);
+    box-shadow:0 10px 26px rgba(42,171,238,.3), inset 0 0 16px rgba(90,170,255,.16)}
+  /* Молния — вспышка «мгновенно» */
+  .sic.zap svg{animation:zapFlash 2.8s ease-in-out infinite;transform-origin:50% 50%}
+  @keyframes zapFlash{0%,100%{opacity:.9;transform:scale(1)}
+    7%{opacity:1;transform:scale(1.14)}14%{opacity:.65}21%{opacity:1;transform:scale(1.07)}36%{opacity:.92;transform:scale(1)}}
+  /* Карта — лёгкое покачивание */
+  .sic.card svg{animation:cardRock 3.4s ease-in-out infinite;transform-origin:50% 62%}
+  @keyframes cardRock{0%,100%{transform:rotate(-7deg) translateY(0)}50%{transform:rotate(7deg) translateY(-1px)}}
+  /* Часы — идущие стрелки (24/7) */
+  .sic.clock .hhour,.sic.clock .hmin{transform-box:view-box;transform-origin:12px 12px}
+  .sic.clock .hhour{animation:handSpin 24s linear infinite}
+  .sic.clock .hmin{animation:handSpin 6s linear infinite}
+  @keyframes handSpin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion: reduce){
+    .sic.zap svg,.sic.card svg,.sic.clock .hhour,.sic.clock .hmin{animation:none}}
   .scard b{font-size:17px;font-weight:800}
   .scard span{color:var(--dim);font-size:13px}
 
@@ -440,9 +459,9 @@
       </a>
     </div>
     <div class="statcards">
-      <div class="scard reveal"><div class="sic">⚡</div><b>Мгновенно</b><span>быстрая выдача заказов</span></div>
-      <div class="scard reveal"><div class="sic">💳</div><b>Карта · СБП · USDT</b><span>удобные способы оплаты</span></div>
-      <div class="scard reveal"><div class="sic">🕐</div><b>24/7</b><span>моментальная выдача</span></div>
+      <div class="scard reveal"><div class="sic zap"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5 2 5 13.2h5.2L9.3 22l9-11.8h-5.4L13.5 2z"/></svg></div><b>Мгновенно</b><span>быстрая выдача заказов</span></div>
+      <div class="scard reveal"><div class="sic card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.6"/><path d="M2.5 9.6h19" stroke-width="2.6"/><path d="M6 15h4.5"/></svg></div><b>Карта · СБП · USDT</b><span>удобные способы оплаты</span></div>
+      <div class="scard reveal"><div class="sic clock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line class="hhour" x1="12" y1="12" x2="12" y2="7.6"/><line class="hmin" x1="12" y1="12" x2="12" y2="5.8"/></svg></div><b>24/7</b><span>моментальная выдача</span></div>
     </div>
     <div class="brands">
       <div class="bl">работаем с сервисами</div>
