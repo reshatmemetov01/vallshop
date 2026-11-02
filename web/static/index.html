@@ -435,6 +435,7 @@
 <header><div class="wrap bar">
   <div class="logo" onclick="goHome()">Vall<span>Shop</span></div>
   <div class="rightnav">
+    <a class="navlink" href="/catalog" onclick="goCatalog();return false">Каталог</a>
     <a class="navlink" href="/reviews">Отзывы</a>
     <div id="auth" class="auth"></div>
   </div>
@@ -448,7 +449,7 @@
     <h1>Цифровые товары и услуги<br><em>в один клик</em></h1>
     <p>Звёзды, Premium, пополнение Steam, игровые сервисы, SMM и VPN. Пополнил баланс — купил за секунды.</p>
     <div class="cta-row">
-      <button class="btn primary" onclick="document.getElementById('catalog').scrollIntoView()">В каталог</button>
+      <button class="btn primary" onclick="goCatalog()">В каталог</button>
       <button class="btn ghost" onclick="openTopup()">Пополнить баланс</button>
     </div>
     <div class="cta-row" style="margin-top:12px">
@@ -528,7 +529,7 @@
     <div class="cols">
       <div class="col">
         <h4>Магазин</h4>
-        <a href="#catalog" onclick="goHome()">Каталог</a>
+        <a href="/catalog" onclick="goCatalog();return false">Каталог</a>
         <a href="#" onclick="showOrders();return false">Мои заказы</a>
         <a href="#" onclick="openTopup();return false">Пополнить баланс</a>
         <a href="/reviews">Отзывы</a>
@@ -623,29 +624,35 @@ let stack = [];  // хлебные крошки: [{id, title}]
 let vmap = {};   // id номинала -> данные (для покупки)
 
 // ── История навигации (кнопка «Назад» в браузере не должна выкидывать с сайта) ──
-let _view = "catalog";   // текущий экран: catalog | orders | account
+let _view = "home";      // текущий экран: home | catalog | orders | account
 let _navReady = false;   // во время восстановления состояния пуши в историю отключены
 function _snapshot(){
   return { spa: true, view: _view, stack: stack.map(s => ({id: s.id, title: s.title})) };
 }
-function _pushNav(){ if(_navReady) history.pushState(_snapshot(), "", "/"); }
-function _replaceNav(){ history.replaceState(_snapshot(), "", "/"); }
+function _viewPath(){
+  if(_view === "catalog") return "/catalog";
+  if(_view === "account") return "/account";
+  return "/";            // home, orders
+}
+function _pushNav(){ if(_navReady) history.pushState(_snapshot(), "", _viewPath()); }
+function _replaceNav(){ history.replaceState(_snapshot(), "", _viewPath()); }
 async function _applyState(st){
   _navReady = false;
-  _view = (st && st.view) || "catalog";
+  _view = (st && st.view) || "home";
   try{
     if(_view === "orders"){ await showOrders(); }
     else if(_view === "account"){ await showAccount(); }
-    else {
+    else if(_view === "catalog"){
       stack = ((st && st.stack) || []).map(s => ({id: s.id, title: s.title}));
       renderCrumbs();
-      if(!stack.length){ await _homeView(); }
+      if(!stack.length){ await _catalogRoot(); }
       else { const t = stack[stack.length - 1]; await _catalogNode(t.id, t.title); }
     }
+    else { await _homeView(); }
   } finally { _navReady = true; }
 }
 window.addEventListener("popstate", (e) => {
-  _applyState((e.state && e.state.spa) ? e.state : {spa:true, view:"catalog", stack:[]});
+  _applyState((e.state && e.state.spa) ? e.state : {spa:true, view:"home", stack:[]});
 });
 
 const rub = (n) => (n == null ? "—" : (Number.isInteger(n) ? n : n.toFixed(2)) + " ₽");
@@ -697,7 +704,7 @@ async function api(path){
 }
 
 function renderCrumbs(){
-  const parts = ['<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b>'];
+  const parts = ['<b style="cursor:pointer" onclick="goCatalog()">🏠 Каталог</b>'];
   stack.forEach((s, i) => {
     parts.push('<span class="sep">›</span>');
     const last = i === stack.length - 1;
@@ -794,13 +801,36 @@ function variantCard(v){
     + `<div class="vprice">${price}</div>${badge}${lim}${desc}${btn}</div>`;
 }
 
+// Главная — маркетинговая (без поиска и сетки каталога)
 async function _homeView(){
   stack = [];
-  renderCrumbs();
   $("hero").style.display = "";
-  $("searchbar").style.display = "";
-  const sb = $("search"); if(sb) sb.value = "";
   $("homesections").style.display = "";
+  $("catalog").style.display = "none";
+  loadStarPackages();
+  renderBrands();
+  revealScan();
+}
+
+async function goHome(){
+  _view = "home";
+  await _homeView();
+  _pushNav();
+}
+
+// Страница каталога — поиск + сетка категорий
+function _showCatalogLayout(){
+  $("hero").style.display = "none";
+  $("homesections").style.display = "none";
+  $("catalog").style.display = "";
+  $("searchbar").style.display = "";
+}
+
+async function _catalogRoot(){
+  stack = [];
+  _showCatalogLayout();
+  const sb = $("search"); if(sb) sb.value = "";
+  renderCrumbs();
   content.innerHTML = skeleton(6);
   try{
     const data = await api("/api/catalog");
@@ -808,22 +838,19 @@ async function _homeView(){
     content.innerHTML = `<h2 class="section">🛍️ Каталог</h2>`
       + `<div class="section-sub">Выберите категорию — внутри номиналы и цены.</div>`
       + `<div class="grid">${data.products.map(productCard).join("")}</div>`;
-    loadStarPackages(data.products);
-    renderBrands();
     revealScan();
   }catch(e){ content.innerHTML = '<div class="state">Не удалось загрузить каталог.</div>'; }
 }
 
-async function goHome(){
+async function goCatalog(){
   _view = "catalog";
-  await _homeView();
+  stack = [];
+  await _catalogRoot();
   _pushNav();
 }
 
 async function _catalogNode(id, title){
-  $("hero").style.display = "none";
-  $("searchbar").style.display = "none";
-  $("homesections").style.display = "none";
+  _showCatalogLayout();
   content.innerHTML = skeleton(6);
   try{
     const data = await api("/api/catalog/" + id);
@@ -1251,7 +1278,8 @@ async function showOrders(){
   $("hero").style.display = "none";
   $("searchbar").style.display = "none";
   $("homesections").style.display = "none";
-  crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
+  $("catalog").style.display = "";
+  crumbs.innerHTML = '<b style="cursor:pointer" onclick="goCatalog()">🏠 Каталог</b> <span class="sep">›</span> <b>Мои заказы</b>';
   _pushNav();
   content.innerHTML = skeleton(6);
   try{
@@ -1277,8 +1305,8 @@ let _acc = {me:null, orders:[], topups:[]};
 async function showAccount(){
   const token = localStorage.getItem("vs_token");
   if(!token){ location.href="/login"; return; }
-  stack=[]; _view = "account"; $("hero").style.display="none"; $("searchbar").style.display="none"; $("homesections").style.display="none";
-  crumbs.innerHTML = '<b style="cursor:pointer" onclick="goHome()">🏠 Каталог</b> <span class="sep">›</span> <b>Кабинет</b>';
+  stack=[]; _view = "account"; $("hero").style.display="none"; $("searchbar").style.display="none"; $("homesections").style.display="none"; $("catalog").style.display="";
+  crumbs.innerHTML = '<b style="cursor:pointer" onclick="goCatalog()">🏠 Каталог</b> <span class="sep">›</span> <b>Кабинет</b>';
   _pushNav();
   content.innerHTML = skeleton(3);
   const hdr = {Authorization:"Bearer "+token};
@@ -1506,11 +1534,14 @@ const _openId = parseInt(new URLSearchParams(location.search).get("open"), 10);
 // в браузере переключал экраны внутри сайта, а не выкидывал на /login.
 function _navInit(p){ p.then(()=>{ _navReady = true; _replaceNav(); }); }
 if(location.pathname === "/account" && localStorage.getItem("vs_token")){
-  _navInit(goHome().then(()=> showAccount()));
+  _navInit(showAccount());
 }else if(_openId){
-  // Deep-link с серверной страницы товара (/?open=<id>): открыть товар в витрине.
-  history.replaceState(null, "", "/");
-  _navInit(goHome().then(()=> open_(_openId, "Товар")));
+  // Deep-link с серверной страницы товара (/?open=<id>): открыть товар в каталоге.
+  history.replaceState(null, "", "/catalog");
+  _view = "catalog";
+  _navInit(open_(_openId, "Товар"));
+}else if(location.pathname === "/catalog"){
+  _navInit(goCatalog());
 }else{
   _navInit(goHome());
 }
