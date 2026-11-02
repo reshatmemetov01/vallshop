@@ -104,10 +104,11 @@
   .auth .topup:hover{color:var(--accent-ink)!important;filter:brightness(1.05)}
 
   /* ── Hero ── */
-  .hero{position:relative;margin:28px 0 8px;padding:48px 36px 40px;border:1px solid var(--line);
+  .hero{position:relative;margin:28px 0 8px;padding:48px 36px 40px;border:1px solid rgba(140,175,225,.14);
     border-radius:22px;text-align:center;background:
-      radial-gradient(700px 300px at 50% -10%, rgba(51,144,236,.16), transparent 70%),
-      linear-gradient(180deg,#1b2735,#14110d);overflow:hidden}
+      radial-gradient(700px 300px at 50% -10%, rgba(51,144,236,.14), transparent 70%),
+      linear-gradient(180deg, rgba(22,31,46,.46), rgba(11,17,27,.30));
+    backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);overflow:hidden}
   .hero::after{content:"";position:absolute;left:50%;top:-80px;transform:translateX(-50%);
     width:320px;height:320px;border-radius:50%;background:var(--grad);filter:blur(90px);opacity:.22}
   .hero>*{position:relative;z-index:1}
@@ -126,7 +127,7 @@
   .btn.tg:hover{filter:brightness(1.06);transform:translateY(-1px)}
   /* Карточки преимуществ (как у референса) */
   .statcards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:34px auto 0;max-width:760px}
-  .scard{background:rgba(255,255,255,.025);border:1px solid var(--line2);border-radius:16px;
+  .scard{background:rgba(255,255,255,.018);border:1px solid rgba(255,255,255,.06);border-radius:16px;
     padding:22px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;transition:.18s}
   .scard:hover{border-color:rgba(42,171,238,.5);transform:translateY(-3px);box-shadow:var(--glow)}
   .scard .sic{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:24px;margin-bottom:6px;
@@ -143,7 +144,8 @@
 
   /* ── Category grid ── */
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin:4px 0 36px}
-  .card{position:relative;background:linear-gradient(180deg,var(--panel),#141e28);border:1px solid var(--line);
+  .card{position:relative;background:linear-gradient(180deg, rgba(22,31,46,.5), rgba(12,18,28,.4));
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(140,175,225,.1);
     border-radius:var(--radius);padding:20px;cursor:pointer;transition:.18s;display:flex;flex-direction:column;
     gap:6px;overflow:hidden}
   .card:hover{border-color:rgba(42,171,238,.5);transform:translateY(-3px);box-shadow:var(--glow)}
@@ -164,7 +166,8 @@
 
   /* ── Номиналы карточками ── */
   .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin:4px 0 36px}
-  .vcard{background:linear-gradient(180deg,var(--panel),#16202b);border:1px solid var(--line);
+  .vcard{background:linear-gradient(180deg, rgba(22,31,46,.5), rgba(12,18,28,.4));
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(140,175,225,.1);
     border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:8px;transition:.18s;position:relative}
   .vcard:hover{border-color:rgba(42,171,238,.45);transform:translateY(-3px);box-shadow:var(--glow)}
   .vcard .vctx{color:var(--dim);font-size:12px;font-weight:600}
