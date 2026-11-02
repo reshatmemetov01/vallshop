@@ -139,10 +139,9 @@
   .sic.zap svg{animation:zapFlash 2.8s ease-in-out infinite;transform-origin:50% 50%}
   @keyframes zapFlash{0%,100%{opacity:.9;transform:scale(1)}
     7%{opacity:1;transform:scale(1.14)}14%{opacity:.65}21%{opacity:1;transform:scale(1.07)}36%{opacity:.92;transform:scale(1)}}
-  /* Карта — лёгкое покачивание строго вокруг своего центра */
-  .sic.card svg{animation:cardRock 3.4s ease-in-out infinite;
-    transform-box:fill-box;transform-origin:center}
-  @keyframes cardRock{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(6deg)}}
+  /* Карта — мягкое всплывание (по центру, без наклона) */
+  .sic.card svg{animation:cardFloat 3.2s ease-in-out infinite}
+  @keyframes cardFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.07)}}
   /* Часы — идущие стрелки (24/7) */
   .sic.clock .hhour,.sic.clock .hmin{transform-box:view-box;transform-origin:12px 12px}
   .sic.clock .hhour{animation:handSpin 24s linear infinite}
