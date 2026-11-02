@@ -24,7 +24,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kaushan+Script&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#17212b; --bg2:#0e1621; --panel:#1d2733; --panel2:#232e3c; --panel3:#2b3848;
+    --bg:#0a0f1a; --bg2:#060a12; --panel:#141d2a; --panel2:#1b2636; --panel3:#243246;
     --line:#2a3a4a; --line2:#394b5e;
     --text:#eef4f8; --muted:#a3b4c2; --dim:#78889a;
     --accent:#3ba3f0; --accent2:#7cc6f7; --accent-ink:#ffffff;
@@ -36,11 +36,21 @@
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{margin:0;background:
-      radial-gradient(1100px 500px at 78% -8%, rgba(51,144,236,.10), transparent 60%),
-      radial-gradient(900px 500px at 0% 0%, rgba(42,171,238,.06), transparent 55%),
+      radial-gradient(1200px 620px at 50% -12%, rgba(56,132,246,.18), transparent 62%),
+      radial-gradient(1000px 560px at 85% 4%, rgba(42,171,238,.09), transparent 60%),
+      radial-gradient(900px 560px at 2% 12%, rgba(51,144,236,.06), transparent 58%),
       var(--bg);
+    background-attachment:fixed;
     color:var(--text);font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;line-height:1.5;min-height:100vh}
+  /* Еле заметная синяя сетка, растворяющаяся к краям — «воздушный» фон */
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background-image:
+      linear-gradient(to right, rgba(56,132,246,.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(56,132,246,.05) 1px, transparent 1px);
+    background-size:44px 44px;
+    -webkit-mask-image:radial-gradient(ellipse 85% 60% at 50% 0%, #000 8%, transparent 72%);
+    mask-image:radial-gradient(ellipse 85% 60% at 50% 0%, #000 8%, transparent 72%)}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
 
