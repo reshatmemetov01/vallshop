@@ -361,8 +361,27 @@
     border-radius:var(--radius);padding:24px 20px;transition:.18s;overflow:hidden}
   .step:hover{border-color:rgba(42,171,238,.5);transform:translateY(-3px);box-shadow:var(--glow)}
   .step .snum{position:absolute;top:14px;right:18px;font-size:46px;font-weight:900;color:rgba(42,171,238,.14);line-height:1}
-  .step .sic2{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:26px;margin-bottom:12px;
-    background:radial-gradient(circle at 30% 25%,rgba(42,171,238,.28),rgba(41,158,217,.08));border:1px solid rgba(42,171,238,.3)}
+  .step .sic2{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;margin-bottom:12px;color:#64bdfa;
+    background:radial-gradient(circle at 32% 22%,rgba(60,140,246,.32),rgba(41,158,217,.06));border:1px solid rgba(60,140,246,.34);
+    box-shadow:0 8px 20px rgba(42,171,238,.14), inset 0 0 14px rgba(90,160,255,.1)}
+  .step .sic2 svg{width:30px;height:30px;filter:drop-shadow(0 0 6px rgba(90,170,255,.5))}
+  .step:hover .sic2{border-color:rgba(90,170,255,.6);box-shadow:0 10px 24px rgba(42,171,238,.26)}
+  /* Анимации иконок шагов */
+  .sic2.wallet svg{animation:icBreathe 3.4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  .sic2.bag svg{animation:icBob 3s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  .sic2.gift svg{animation:icPop 3.4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  @keyframes icBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.09)}}
+  @keyframes icBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  @keyframes icPop{0%,70%,100%{transform:scale(1)}12%{transform:scale(1.16)}24%{transform:scale(1)}}
+  /* Иконки в заголовках разделов */
+  .hicon{display:inline-flex;vertical-align:-4px;width:23px;height:23px;margin-right:7px;color:var(--accent);
+    filter:drop-shadow(0 0 5px rgba(90,170,255,.45))}
+  .hicon svg{width:23px;height:23px}
+  .hicon.bulb svg{animation:icGlow 2.8s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  .hicon.grid svg{animation:icBreathe 4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  @keyframes icGlow{0%,100%{opacity:.8;transform:scale(1)}50%{opacity:1;transform:scale(1.1)}}
+  @media (prefers-reduced-motion: reduce){
+    .sic2.wallet svg,.sic2.bag svg,.sic2.gift svg,.hicon.bulb svg,.hicon.grid svg{animation:none}}
   .step b{display:block;font-size:17px;margin-bottom:6px}
   .step span{color:var(--muted);font-size:14px}
 
@@ -491,17 +510,17 @@
     </section>
 
     <section>
-      <h2 class="section">⚡ Как это работает</h2>
+      <h2 class="section"><span class="hicon bulb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.1 14c.2-1 .7-1.8 1.4-2.5A4.6 4.6 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.2 1.5 1.4 2.5"/></svg></span>Как это работает</h2>
       <div class="section-sub">Три простых шага — и товар у вас.</div>
       <div class="steps">
-        <div class="step reveal"><div class="snum">1</div><div class="sic2">💳</div><b>Пополните баланс</b><span>Картой, СБП или USDT — в рублях, за пару минут.</span></div>
-        <div class="step reveal"><div class="snum">2</div><div class="sic2">🛍️</div><b>Выберите товар</b><span>Звёзды, Premium, Steam, SMM, VPN и другое.</span></div>
-        <div class="step reveal"><div class="snum">3</div><div class="sic2">⚡</div><b>Получите мгновенно</b><span>Коды, ссылки и выдача — в разделе «Мои заказы».</span></div>
+        <div class="step reveal"><div class="snum">1</div><div class="sic2 wallet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a1 1 0 0 1 1 1v1"/><path d="M3 7.5V18a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5.5A2.5 2.5 0 0 1 3 7.5Z"/><circle cx="16.3" cy="13.5" r="1.3" fill="currentColor" stroke="none"/></svg></div><b>Пополните баланс</b><span>Картой, СБП или USDT — в рублях, за пару минут.</span></div>
+        <div class="step reveal"><div class="snum">2</div><div class="sic2 bag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2 3.5 6.5V20a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2V6.5L18 2z"/><path d="M3.5 6.5h17"/><path d="M8.5 10a3.5 3.5 0 0 0 7 0"/></svg></div><b>Выберите товар</b><span>Звёзды, Premium, Steam, SMM, VPN и другое.</span></div>
+        <div class="step reveal"><div class="snum">3</div><div class="sic2 gift"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="4.2" rx="1"/><path d="M12 8v13"/><path d="M19.5 12.2V19a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-6.8"/><path d="M7.8 8a2.4 2.4 0 0 1 0-4.8C11 3.2 12 8 12 8"/><path d="M16.2 8a2.4 2.4 0 0 0 0-4.8C13 3.2 12 8 12 8"/></svg></div><b>Получите мгновенно</b><span>Коды, ссылки и выдача — в разделе «Мои заказы».</span></div>
       </div>
     </section>
 
     <section>
-      <h2 class="section">🧩 Пополнение сервисов</h2>
+      <h2 class="section"><span class="hicon grid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg></span>Пополнение сервисов</h2>
       <div class="section-sub">Работаем с популярными платформами и играми.</div>
       <div class="brandgrid" id="brandgrid"></div>
     </section>
