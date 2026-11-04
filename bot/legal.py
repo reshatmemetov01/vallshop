@@ -100,6 +100,24 @@ def _tg_contact(config) -> str:
     return "служба поддержки VallShop"
 
 
+def _payment_requisites_html() -> str:
+    """Реквизиты платёжного агента — требуются банком-эквайером на страницах
+    оферты/соглашения/политики. Вставляются дословно, без пояснений
+    (иначе автоматическая проверка эквайера не проходит)."""
+    return (
+        "<h2>Реквизиты</h2>"
+        "<ul>"
+        "<li>Наименование: GeoPay Solutions LLC</li>"
+        "<li>Страна регистрации: Грузия</li>"
+        "<li>Регистрационный номер: 405630511</li>"
+        "<li>Дата регистрации: 15.03.2024</li>"
+        "<li>Юридический адрес: Грузия, г. Тбилиси, район Ваке, "
+        "ул. Чавчавадзе, д. 37, этаж 3, офис 12</li>"
+        "<li>Директор: Giorgi Beridze</li>"
+        "</ul>"
+    )
+
+
 def offer_html(config) -> str:
     tg = _tg_contact(config)
     body = (
@@ -431,6 +449,8 @@ def offer_html(config) -> str:
         "<p class='muted'>Канал связи: служба поддержки VallShop через "
         "предусмотренные Сервисом каналы.</p>"
 
+        + _payment_requisites_html() +
+
         "</div>"
         f"<footer>© {date.today().year} {SHOP_NAME} («ВаллШоп»). "
         "Все права защищены.</footer>"
@@ -703,6 +723,8 @@ def agreement_html(config) -> str:
         "Политикой конфиденциальности и иными правилами VallShop, "
         "размещёнными в Сервисе.</p>"
 
+        + _payment_requisites_html() +
+
         "</div>"
         f"<footer>© {date.today().year} {SHOP_NAME} («ВаллШоп»). "
         "Все права защищены.</footer>"
@@ -885,6 +907,8 @@ def privacy_html(config) -> str:
         "<p>9.4. Используя VallShop, Пользователь подтверждает, что "
         "ознакомился с настоящей Политикой конфиденциальности и принимает её "
         "условия.</p>"
+
+        + _payment_requisites_html() +
 
         "</div>"
         f"<footer>© {date.today().year} {SHOP_NAME} («ВаллШоп»). "
