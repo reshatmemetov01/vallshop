@@ -426,6 +426,9 @@ class ActivationRequest(Base):
     code: Mapped[str] = mapped_column(String(64), index=True)
     product: Mapped[Optional[str]] = mapped_column(String(255))
     user_id: Mapped[int] = mapped_column(Integer, index=True)
+    # Заявка с сайта привязана к веб-аккаунту (для раздела «Мои активации»);
+    # у заявок из бота — NULL (идентификация по user_id Telegram).
+    web_account_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(64))
     nickname: Mapped[Optional[str]] = mapped_column(String(128))
     expected_price: Mapped[Optional[int]] = mapped_column(Integer)

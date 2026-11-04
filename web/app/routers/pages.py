@@ -61,6 +61,11 @@ async def catalog_page() -> FileResponse:
     return FileResponse(_INDEX)
 
 
+@router.get("/redeem")
+async def redeem_page() -> FileResponse:
+    return FileResponse(_INDEX)
+
+
 @router.get("/verify")
 async def verify_page() -> FileResponse:
     return FileResponse(_VERIFY)

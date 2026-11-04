@@ -82,6 +82,7 @@ class Database:
             ("reviews", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("referral_earnings", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("activation_requests", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("activation_requests", "web_account_id", "INTEGER"),
             ("vpn_subscriptions", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             # Франшиза (P1): наценка по умолчанию и баланс заработка мерчанта.
             ("merchants", "default_markup", "NUMERIC(6,2) NOT NULL DEFAULT 0"),

@@ -480,6 +480,7 @@
   <button class="burger" id="burger" aria-label="Меню" onclick="toggleMenu()"><span></span><span></span><span></span></button>
   <div class="rightnav" id="rightnav" onclick="if(event.target.closest('a,button'))closeMenu()">
     <a class="navlink" href="/catalog" onclick="goCatalog();return false">Каталог</a>
+    <a class="navlink" href="/redeem" onclick="openRedeem();return false">Активировать код</a>
     <a class="navlink" href="/reviews">Отзывы</a>
     <div id="auth" class="auth"></div>
   </div>
@@ -603,6 +604,13 @@
     <div class="row">
       <button class="cancel" onclick="closeOrder()">Закрыть</button>
     </div>
+  </div>
+</div>
+
+<div id="actovl" class="ovl">
+  <div class="modal">
+    <h3>🎟 Активация кода</h3>
+    <div id="actbody"></div>
   </div>
 </div>
 
@@ -1042,6 +1050,91 @@ async function doTopup(){
 document.getElementById("amount").addEventListener("input", refreshPay);
 document.getElementById("ovl").addEventListener("click", (e)=>{ if(e.target.id==="ovl") closeTopup(); });
 
+// ── Активация кодов (Roblox) ─────────────────────────────────────────────────
+let _redeem = { code:"", product:"", instruction:"", price:null };
+function closeRedeem(){ $("actovl").classList.remove("show"); }
+function openRedeem(){
+  if(!localStorage.getItem("vs_token")){ location.href="/login"; return; }
+  _redeem = { code:"", product:"", instruction:"", price:null };
+  _redeemStep1();
+  $("actovl").classList.add("show");
+}
+function _redeemStep1(msg){
+  $("actbody").innerHTML = `
+    <label>Код активации</label>
+    <input id="actcode" type="text" autocomplete="off" inputmode="numeric" placeholder="XXX-XXX-XXX" value="${esc(_redeem.code)}">
+    <div class="hint">Формат: 123-456-789</div>
+    <div class="mmsg" id="actmsg">${msg?esc(msg):""}</div>
+    <div class="row">
+      <button class="cancel" onclick="closeRedeem()">Закрыть</button>
+      <button class="pay" onclick="redeemCheck()">Проверить</button>
+    </div>`;
+  const i = $("actcode"); if(i) i.focus();
+}
+async function redeemCheck(){
+  const code = ($("actcode").value||"").trim();
+  $("actmsg").textContent = "Проверяем…";
+  try{
+    const r = await fetch("/api/activate/check", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({code})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ $("actmsg").textContent = d.detail || "Ошибка проверки."; return; }
+    if(d.status==="not_found"){ $("actmsg").textContent = "🚫 Код не найден. Проверьте и попробуйте снова."; return; }
+    if(d.status==="used"){ $("actmsg").textContent = "❌ Этот код уже активирован."; return; }
+    _redeem = { code, product:d.product||"", instruction:d.instruction||"", price:d.expected_price };
+    _redeemStep2();
+  }catch(e){ $("actmsg").textContent = "Нет связи с сервером."; }
+}
+function _redeemStep2(){
+  const priceLine = _redeem.price!=null
+    ? `<div class="hint" style="color:var(--accent);font-weight:700">💰 Цена Game Pass: установите ${esc(String(_redeem.price))} Robux</div>` : "";
+  $("actbody").innerHTML = `
+    <div class="hint">✅ Код найден</div>
+    <div style="font-weight:800;font-size:17px;margin:6px 0">📦 ${esc(_redeem.product)}</div>
+    ${priceLine}
+    <div class="hint" style="white-space:pre-wrap;margin-top:10px">🏷 Создайте Game Pass по инструкции:\n\n${esc(_redeem.instruction||"—")}</div>
+    <div class="mmsg" id="actmsg"></div>
+    <div class="row">
+      <button class="cancel" onclick="_redeemStep1()">Назад</button>
+      <button class="pay" onclick="_redeemStep3()">✅ Гейм Пасс создан</button>
+    </div>`;
+}
+function _redeemStep3(){
+  $("actbody").innerHTML = `
+    <label>Ваш ник Roblox</label>
+    <input id="actnick" type="text" autocomplete="off" placeholder="ник (можно с @)">
+    <div class="hint">Как узнать ник: <a href="https://telegra.ph/Kak-Uznat-svoj-niknejm-09-04" target="_blank" rel="noopener" style="color:var(--accent2)">инструкция</a></div>
+    <div class="mmsg" id="actmsg"></div>
+    <div class="row">
+      <button class="cancel" onclick="_redeemStep2()">Назад</button>
+      <button class="pay" id="actsubmit" onclick="redeemSubmit()">Отправить заявку</button>
+    </div>`;
+  const i = $("actnick"); if(i) i.focus();
+}
+async function redeemSubmit(){
+  const token = localStorage.getItem("vs_token");
+  const nickname = ($("actnick").value||"").trim();
+  if(!nickname){ $("actmsg").textContent = "Укажите ник Roblox."; return; }
+  $("actsubmit").disabled = true; $("actmsg").textContent = "Отправляем…";
+  try{
+    const r = await fetch("/api/activate/submit", {method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body: JSON.stringify({code:_redeem.code, nickname})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ $("actmsg").textContent = d.detail || "Не удалось отправить."; $("actsubmit").disabled=false; return; }
+    $("actbody").innerHTML = `
+      <div style="text-align:center;padding:6px 0">
+        <div style="font-size:40px">♻️</div>
+        <div style="font-weight:800;font-size:18px;margin:8px 0">Гейм Пасс на проверке!</div>
+        <div class="hint">Ник: ${esc(nickname)} · ${esc(_redeem.product)}</div>
+        <div class="hint" style="margin-top:8px">После обработки статус появится в разделе «Кабинет → Мои активации».</div>
+      </div>
+      <div class="row"><button class="pay" onclick="closeRedeem();showAccount()">Мои активации</button></div>`;
+    toast("Заявка отправлена ✓", "ok");
+  }catch(e){ $("actmsg").textContent = "Нет связи с сервером."; $("actsubmit").disabled=false; }
+}
+document.getElementById("actovl").addEventListener("click", (e)=>{ if(e.target.id==="actovl") closeRedeem(); });
+
 // ── Покупка товара ───────────────────────────────────────────────────────────
 let buyVar = null;
 let topupFields = [];   // поля игрока для пополнения игр (PUBG Mobile Auto)
@@ -1374,12 +1467,13 @@ async function showAccount(){
   content.innerHTML = skeleton(3);
   const hdr = {Authorization:"Bearer "+token};
   try{
-    const [me,orders,topups] = await Promise.all([
+    const [me,orders,topups,acts] = await Promise.all([
       fetch("/api/auth/me",{headers:hdr}).then(r=>r.json()),
       fetch("/api/orders",{headers:hdr}).then(r=>r.json()).catch(()=>({orders:[]})),
       fetch("/api/topup/history",{headers:hdr}).then(r=>r.json()).catch(()=>({topups:[]})),
+      fetch("/api/activate/mine",{headers:hdr}).then(r=>r.json()).catch(()=>({items:[]})),
     ]);
-    _acc = {me, orders:orders.orders||[], topups:topups.topups||[]};
+    _acc = {me, orders:orders.orders||[], topups:topups.topups||[], activations:acts.items||[]};
     renderAccount("orders");
   }catch(e){ content.innerHTML='<div class="state">Не удалось загрузить кабинет.</div>'; }
 }
@@ -1404,10 +1498,15 @@ function renderAccount(tab){
     <div class="acctab">
       <button class="${tab==='orders'?'on':''}" onclick="renderAccount('orders')">Заказы (${_acc.orders.length})</button>
       <button class="${tab==='topups'?'on':''}" onclick="renderAccount('topups')">Пополнения (${_acc.topups.length})</button>
+      <button class="${tab==='acts'?'on':''}" onclick="renderAccount('acts')">Мои активации (${(_acc.activations||[]).length})</button>
     </div>`;
   if(tab==='orders'){
     h += _acc.orders.length ? `<div class="vlist">${_acc.orders.map(orderRow).join("")}</div>`
       : '<div class="state">Заказов пока нет.</div>';
+  }else if(tab==='acts'){
+    const a = _acc.activations||[];
+    h += a.length ? `<div class="vlist">${a.map(activationRow).join("")}</div>`
+      : '<div class="state">Активаций пока нет. Нажмите «Активировать код» в шапке.</div>';
   }else{
     h += _acc.topups.length ? `<div class="vlist">${_acc.topups.map(topupRow).join("")}</div>`
       : '<div class="state">Пополнений пока нет.</div>';
@@ -1421,6 +1520,13 @@ function topupRow(t){
     <div class="tt">Пополнение<div class="td">${esc(t.method)} · ${esc(_fmtDate(t.created_at))}</div></div>
     <div class="tamt">+${rub(t.amount_rub)}</div>
     <span class="st ${cls}">${esc(t.status_label)}</span>
+  </div>`;
+}
+function activationRow(a){
+  const cls = a.status==="approved" ? "done" : (a.status==="review" ? "work" : "bad");
+  return `<div class="trow">
+    <div class="tt">${esc(a.product||"Активация")}<div class="td">Ник: ${esc(a.nickname||"—")} · код ${esc(a.code)} · ${esc(_fmtDate(a.created_at))}</div></div>
+    <span class="st ${cls}">${esc(a.status_label)}</span>
   </div>`;
 }
 
@@ -1605,6 +1711,9 @@ if(location.pathname === "/account" && localStorage.getItem("vs_token")){
   _navInit(open_(_openId, "Товар"));
 }else if(location.pathname === "/catalog"){
   _navInit(goCatalog());
+}else if(location.pathname === "/redeem"){
+  history.replaceState(null, "", "/");
+  _navInit(goHome().then(()=>{ if(localStorage.getItem("vs_token")) openRedeem(); }));
 }else{
   _navInit(goHome());
 }

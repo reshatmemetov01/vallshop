@@ -45,15 +45,25 @@ async def create_request(
     nickname: Optional[str],
     expected_price: Optional[int],
     actual_price: Optional[int],
+    web_account_id: Optional[int] = None,
 ) -> ActivationRequest:
     req = ActivationRequest(
         code=code, product=product, user_id=user_id, username=username,
         nickname=nickname, expected_price=expected_price, actual_price=actual_price,
-        status="review",
+        status="review", web_account_id=web_account_id,
     )
     session.add(req)
     await session.flush()
     return req
+
+
+async def list_for_account(session: AsyncSession, web_account_id: int):
+    """Заявки конкретного веб-аккаунта (раздел «Мои активации»), новые сверху."""
+    return list(await session.scalars(
+        select(ActivationRequest)
+        .where(ActivationRequest.web_account_id == web_account_id)
+        .order_by(ActivationRequest.id.desc())
+    ))
 
 
 async def get_request(session: AsyncSession, request_id: int) -> Optional[ActivationRequest]:
