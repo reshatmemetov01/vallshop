@@ -436,6 +436,7 @@ async def purchase(
             smm_quantity=smm_quantity,
             topup_fields=topup_fields,
             public_base_url=cfg.public_base_url,
+            source="site",            # заказ оформлен через сайт (для статистики)
         )
     except order_service.InsufficientBalance:
         await session.rollback()

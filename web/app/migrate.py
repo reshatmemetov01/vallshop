@@ -45,3 +45,24 @@ def ensure_web_accounts_nullable(conn: Connection) -> None:
         f"INSERT INTO web_accounts ({_COLS}) SELECT {_COLS} FROM _web_accounts_old"
     )
     conn.exec_driver_sql("DROP TABLE _web_accounts_old")
+
+
+def ensure_source_columns(conn: Connection) -> None:
+    """Добавить orders.source / topups.source, если их ещё нет (идемпотентно).
+
+    Нужно для раздельной статистики бот/сайт. Сайт не должен зависеть от того,
+    успел ли бот доехать со своей миграцией — INSERT заказов ставит source,
+    поэтому колонка обязана существовать до запуска нового кода. ALTER TABLE
+    ADD COLUMN безопасен и в SQLite, и в Postgres.
+    """
+    from sqlalchemy import inspect
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    for table in ("orders", "topups"):
+        if table not in tables:
+            continue  # create_all создаст таблицу уже с колонкой
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if "source" not in cols:
+            conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN source VARCHAR(8) NOT NULL DEFAULT 'bot'"
+            )

@@ -355,6 +355,9 @@ class Order(Base):
     # Для головного (merchant_id=0) = 0. Начисляется на баланс заработка при
     # покупке и сторнируется при возврате.
     merchant_margin: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, server_default="0")
+    # Канал оформления заказа: "bot" (Telegram-бот) или "site" (веб-витрина).
+    # Нужно для раздельной статистики, даже если аккаунт один (общий кошелёк).
+    source: Mapped[str] = mapped_column(String(8), default="bot", server_default="bot")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -585,6 +588,8 @@ class TopUp(Base):
 
     amount_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2))  # сколько зачислить
     status: Mapped[TopUpStatus] = mapped_column(String(16), default=TopUpStatus.PENDING)
+    # Канал пополнения: "bot" или "site" (для раздельной статистики).
+    source: Mapped[str] = mapped_column(String(8), default="bot", server_default="bot")
 
     provider: Mapped[str] = mapped_column(String(32), default="boltutil")
     provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), index=True)

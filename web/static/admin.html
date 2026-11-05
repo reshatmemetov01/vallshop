@@ -87,6 +87,9 @@
   <div class="wrap" style="padding-bottom:50px">
     <div class="presets" id="presets"></div>
 
+    <h2>📊 Общее (бот + сайт)</h2>
+    <div class="cards" id="totalCards"></div>
+
     <h2>🤖 Бот</h2>
     <div class="cards" id="botCards"></div>
 
@@ -145,13 +148,19 @@ function setPreset(p){ preset=p; renderPresets(); loadOverview(); }
 async function loadOverview(){
   try{
     const d = await api("/api/admin/overview?preset="+preset);
-    const b = d.bot, s = d.site, v = d.visits;
+    const t = d.total, b = d.bot, s = d.site, v = d.visits;
+    $("totalCards").innerHTML =
+      card("Клиенты", `${t.users_total}<small> + ${t.accounts_total} сайт</small>`) +
+      card("Заказы всего", t.orders, "бот + сайт") +
+      card("Выручка всего", rub(t.revenue_rub)) +
+      card("Пополнения всего", rub(t.topups_rub), `${t.topups} шт.`) +
+      card("Баланс клиентов", rub(t.balance_rub));
     $("botCards").innerHTML =
       card("Пользователи", b.users_total, `+${b.users_new} за период`) +
       card("Активные", b.active, `неактивных: ${b.inactive}`) +
       card("Заказы", b.orders, "завершённые") +
       card("Выручка", rub(b.revenue_rub)) +
-      card("Баланс клиентов", rub(b.balance_rub));
+      card("Пополнения", rub(b.topups_rub), `${b.topups} шт.`);
     $("siteCards").innerHTML =
       card("Аккаунты сайта", s.accounts_total, `+${s.accounts_new} за период`) +
       card("Заказы с сайта", s.orders) +

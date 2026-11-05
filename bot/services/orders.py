@@ -92,6 +92,7 @@ async def create_order(
     price_usd: Decimal,
     quantity: int = 1,
     merchant_id: int = HEAD_MERCHANT_ID,
+    source: str = "bot",
 ) -> Order:
     order = Order(
         client_ref=new_client_ref(),
@@ -101,6 +102,7 @@ async def create_order(
         price_usd=price_usd,
         quantity=quantity,
         status=OrderStatus.CREATED,
+        source=source,
     )
     session.add(order)
     await session.flush()
@@ -125,6 +127,7 @@ async def purchase_from_balance(
     fragment=None,
     smm_link: Optional[str] = None,
     smm_quantity: Optional[int] = None,
+    source: str = "bot",
 ) -> tuple[Order, list[str]]:
     """Купить quantity единиц с баланса и выдать коды.
 
@@ -164,6 +167,7 @@ async def purchase_from_balance(
         price_usd=unit_price,
         quantity=quantity,
         merchant_id=merchant_id,
+        source=source,
     )
     order.merchant_margin = margin
 

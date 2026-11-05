@@ -38,10 +38,11 @@ async def overview(
 ) -> dict:
     if preset not in adminstats.PRESETS:
         preset = "7d"
+    total = await adminstats.total_block(session, preset)
     bot = await adminstats.bot_block(session, preset)
     site = await adminstats.site_block(session, preset)
     visits = await adminstats.visits_summary(session)
-    return {"preset": preset, "bot": bot, "site": site, "visits": visits}
+    return {"preset": preset, "total": total, "bot": bot, "site": site, "visits": visits}
 
 
 @router.get("/visits")

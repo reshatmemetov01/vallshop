@@ -18,7 +18,7 @@ from bot.db.models import SiteVisit
 
 from .config import settings
 from .db import database
-from .migrate import ensure_web_accounts_nullable
+from .migrate import ensure_source_columns, ensure_web_accounts_nullable
 from .routers import activate, admin, auth, buy, catalog, orders, pages, reviews, topup
 
 
@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
         # Довести web_accounts до nullable email/password_hash (для аккаунтов
         # через Telegram без email) — если таблица создана старой схемой.
         await conn.run_sync(ensure_web_accounts_nullable)
+        # orders.source / topups.source — для раздельной статистики бот/сайт.
+        await conn.run_sync(ensure_source_columns)
     yield
 
 

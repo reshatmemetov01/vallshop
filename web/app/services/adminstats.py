@@ -29,25 +29,18 @@ from bot.services import stats as bot_stats
 PRESETS = ("today", "7d", "30d", "all")
 
 
-async def _web_wallet_ids(session: AsyncSession) -> set[int]:
-    rows = await session.scalars(
-        select(WebAccount.wallet_user_id).where(WebAccount.wallet_user_id.is_not(None))
-    )
-    return {int(x) for x in rows if x is not None}
+async def _orders_sum(session: AsyncSession, start, end, *, source=None):
+    """(кол-во, выручка ₽) завершённых заказов за период. source: bot|site|None(все).
 
-
-async def _orders_sum(session: AsyncSession, start, end, *, in_ids=None, not_in_ids=None):
-    """(кол-во, выручка ₽) завершённых заказов за период с фильтром по user_id."""
+    Разделение по Order.source — проставляется при оформлении (бот/сайт),
+    не зависит от кошелька, поэтому не путает покупки при привязке Telegram.
+    """
     conds = [Order.status == OrderStatus.COMPLETED, Order.created_at < end,
              Order.merchant_id == HEAD_MERCHANT_ID]
     if start is not None:
         conds.append(Order.created_at >= start)
-    if in_ids is not None:
-        if not in_ids:
-            return 0, Decimal(0)
-        conds.append(Order.user_id.in_(in_ids))
-    if not_in_ids:
-        conds.append(Order.user_id.not_in(not_in_ids))
+    if source is not None:
+        conds.append(Order.source == source)
     row = (await session.execute(
         select(func.count(Order.id),
                func.coalesce(func.sum(Order.price_usd * Order.quantity), 0))
@@ -56,26 +49,39 @@ async def _orders_sum(session: AsyncSession, start, end, *, in_ids=None, not_in_
     return int(row[0] or 0), Decimal(row[1] or 0)
 
 
+async def _topups_sum(session: AsyncSession, start, end, *, source=None):
+    """(кол-во, сумма ₽) оплаченных пополнений за период. source: bot|site|None."""
+    conds = [TopUp.status == TopUpStatus.PAID, TopUp.created_at < end,
+             TopUp.merchant_id == HEAD_MERCHANT_ID]
+    if start is not None:
+        conds.append(TopUp.created_at >= start)
+    if source is not None:
+        conds.append(TopUp.source == source)
+    row = (await session.execute(
+        select(func.count(TopUp.id), func.coalesce(func.sum(TopUp.amount_usd), 0)).where(*conds)
+    )).one()
+    return int(row[0] or 0), Decimal(row[1] or 0)
+
+
 async def bot_block(session: AsyncSession, preset: str = "7d") -> dict:
     start, end, label = bot_stats.preset_range(preset)
-    web_ids = await _web_wallet_ids(session)
     users = await bot_stats.users_stats(session, start, end, HEAD_MERCHANT_ID)
     activity = await bot_stats.activity_stats(session, HEAD_MERCHANT_ID)
     balance = await bot_stats.total_balance(session, HEAD_MERCHANT_ID)
-    # Заказы бота — всё, что НЕ привязано к веб-кошелькам.
-    orders_n, revenue = await _orders_sum(session, start, end, not_in_ids=web_ids)
+    orders_n, revenue = await _orders_sum(session, start, end, source="bot")
+    tn, ts = await _topups_sum(session, start, end, source="bot")
     return {
         "preset": preset, "label": label,
         "users_total": users["total"], "users_new": users["new"],
         "active": activity["active"], "inactive": activity["inactive"],
         "balance_rub": float(balance),
         "orders": orders_n, "revenue_rub": float(revenue),
+        "topups": tn, "topups_rub": float(ts),
     }
 
 
 async def site_block(session: AsyncSession, preset: str = "7d") -> dict:
     start, end, label = bot_stats.preset_range(preset)
-    web_ids = await _web_wallet_ids(session)
 
     acc_total = await session.scalar(select(func.count()).select_from(WebAccount)) or 0
     acc_new_stmt = select(func.count()).select_from(WebAccount).where(WebAccount.created_at < end)
@@ -83,21 +89,8 @@ async def site_block(session: AsyncSession, preset: str = "7d") -> dict:
         acc_new_stmt = acc_new_stmt.where(WebAccount.created_at >= start)
     acc_new = await session.scalar(acc_new_stmt) or 0
 
-    orders_n, revenue = await _orders_sum(session, start, end, in_ids=web_ids)
-
-    # Пополнения сайта (оплаченные) за период.
-    tconds = [TopUp.status == TopUpStatus.PAID, TopUp.created_at < end,
-              TopUp.merchant_id == HEAD_MERCHANT_ID]
-    if start is not None:
-        tconds.append(TopUp.created_at >= start)
-    if web_ids:
-        tconds.append(TopUp.user_id.in_(web_ids))
-        topups_row = (await session.execute(
-            select(func.count(TopUp.id), func.coalesce(func.sum(TopUp.amount_usd), 0)).where(*tconds)
-        )).one()
-        topups_n, topups_sum = int(topups_row[0] or 0), Decimal(topups_row[1] or 0)
-    else:
-        topups_n, topups_sum = 0, Decimal(0)
+    orders_n, revenue = await _orders_sum(session, start, end, source="site")
+    topups_n, topups_sum = await _topups_sum(session, start, end, source="site")
 
     # Активации кодов с сайта за период.
     aconds = [ActivationRequest.web_account_id.is_not(None), ActivationRequest.created_at < end]
@@ -113,6 +106,23 @@ async def site_block(session: AsyncSession, preset: str = "7d") -> dict:
         "orders": orders_n, "revenue_rub": float(revenue),
         "topups": topups_n, "topups_rub": float(topups_sum),
         "activations": int(acts_n),
+    }
+
+
+async def total_block(session: AsyncSession, preset: str = "7d") -> dict:
+    """Общая статистика (бот + сайт вместе) за период."""
+    start, end, label = bot_stats.preset_range(preset)
+    orders_n, revenue = await _orders_sum(session, start, end, source=None)
+    topups_n, topups_sum = await _topups_sum(session, start, end, source=None)
+    users = await bot_stats.users_stats(session, start, end, HEAD_MERCHANT_ID)
+    accounts = await session.scalar(select(func.count()).select_from(WebAccount)) or 0
+    balance = await bot_stats.total_balance(session, HEAD_MERCHANT_ID)
+    return {
+        "preset": preset, "label": label,
+        "users_total": users["total"], "accounts_total": int(accounts),
+        "orders": orders_n, "revenue_rub": float(revenue),
+        "topups": topups_n, "topups_rub": float(topups_sum),
+        "balance_rub": float(balance),
     }
 
 

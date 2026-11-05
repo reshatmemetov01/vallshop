@@ -83,6 +83,9 @@ class Database:
             ("referral_earnings", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("activation_requests", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             ("activation_requests", "web_account_id", "INTEGER"),
+            # Канал заказа/пополнения: bot|site (раздельная статистика).
+            ("orders", "source", "VARCHAR(8) NOT NULL DEFAULT 'bot'"),
+            ("topups", "source", "VARCHAR(8) NOT NULL DEFAULT 'bot'"),
             ("vpn_subscriptions", "merchant_id", "INTEGER NOT NULL DEFAULT 0"),
             # Франшиза (P1): наценка по умолчанию и баланс заработка мерчанта.
             ("merchants", "default_markup", "NUMERIC(6,2) NOT NULL DEFAULT 0"),

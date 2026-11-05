@@ -128,7 +128,7 @@ async def create_topup(
     wallet_id = await wallet_service.ensure_wallet(session, account)
     # amount_usd хранит сумму ЗАЧИСЛЕНИЯ — у нас это всегда рубли.
     topup = await balance_service.create_topup(
-        session, user_id=wallet_id, amount_usd=amount
+        session, user_id=wallet_id, amount_usd=amount, source="site"
     )
     try:
         invoice = await prov.create_invoice(

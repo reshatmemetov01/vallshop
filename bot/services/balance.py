@@ -73,7 +73,7 @@ async def try_debit(
 # ── Пополнения ───────────────────────────────────────────────────────────────
 async def create_topup(
     session: AsyncSession, *, user_id: int, amount_usd: Decimal,
-    merchant_id: int = HEAD_MERCHANT_ID,
+    merchant_id: int = HEAD_MERCHANT_ID, source: str = "bot",
 ) -> TopUp:
     topup = TopUp(
         client_ref=new_topup_ref(),
@@ -81,6 +81,7 @@ async def create_topup(
         merchant_id=merchant_id,
         amount_usd=_q(amount_usd),
         status=TopUpStatus.PENDING,
+        source=source,
     )
     session.add(topup)
     await session.flush()
