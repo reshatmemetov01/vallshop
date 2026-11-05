@@ -294,21 +294,6 @@ async def cb_catalog(
     await call.answer()
 
 
-async def _in_games_subtree(session, product) -> bool:
-    """Находится ли категория/товар внутри раздела «Игры и Сервисы»
-    (сам раздел или любой его предок). Кнопки внутри него — на всю строку."""
-    cur = product
-    seen = 0
-    while cur is not None and seen < 12:
-        if "игры и сервис" in (cur.title or "").lower():
-            return True
-        if not cur.parent_id:
-            return False
-        cur = await catalog_service.get_product(session, cur.parent_id)
-        seen += 1
-    return False
-
-
 @router.callback_query(F.data.startswith("prod:"))
 async def cb_product(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
@@ -331,8 +316,6 @@ async def cb_product(
             await _start_stars(call, db, state, fzr, merchant_id)
             return
         parent_id = product.parent_id
-        # Внутри раздела «Игры и Сервисы» все кнопки — на всю строку.
-        in_games = await _in_games_subtree(session, product)
         children = await catalog_service.list_children(
             session, product_id, exclude_head_only=is_franchise
         )
@@ -370,8 +353,7 @@ async def cb_product(
             if p_desc:
                 caption += f"\n\n{p_desc}"
             caption += "\n\nВыберите категорию:"
-            markup = kb.products_kb(children, back=back, back_text="Назад",
-                                    columns=1 if in_games else 2, overrides=ch_ov)
+            markup = kb.products_kb(children, back=back, back_text="Назад", columns=2, overrides=ch_ov)
             await render(
                 call, banner="catalog", caption=caption,
                 reply_markup=markup, photo=banner_photo,
@@ -418,7 +400,6 @@ async def cb_product(
         reply_markup=kb.variants_kb(
             variants, prices, stock, config.currency,
             product_icon=p_emoji_id, back=back, overrides=v_ov,
-            columns=1 if in_games else 2,
         ),
         photo=banner_photo,
     )
