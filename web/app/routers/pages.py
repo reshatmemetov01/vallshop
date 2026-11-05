@@ -30,6 +30,7 @@ _AUTH = _STATIC / "auth.html"
 _VERIFY = _STATIC / "verify.html"
 _RESET = _STATIC / "reset.html"
 _REVIEWS = _STATIC / "reviews.html"
+_ADMIN = _STATIC / "admin.html"
 _FAVICON = _STATIC / "favicon.svg"
 _OG = _STATIC / "og.png"
 _YANDEX = _STATIC / "yandex_efe8bde404b85b63.html"
@@ -64,6 +65,12 @@ async def catalog_page() -> FileResponse:
 @router.get("/redeem")
 async def redeem_page() -> FileResponse:
     return FileResponse(_INDEX)
+
+
+@router.api_route("/admin", methods=["GET", "HEAD"])
+@router.api_route("/admin/", methods=["GET", "HEAD"])
+async def admin_page() -> FileResponse:
+    return FileResponse(_ADMIN)
 
 
 @router.get("/verify")

@@ -40,3 +40,32 @@ def decode_token(token: str) -> Optional[int]:
         return int(data["sub"])
     except (JWTError, KeyError, ValueError, TypeError):
         return None
+
+
+# ── Админ-панель (отдельный вход) ────────────────────────────────────────────
+ADMIN_TOKEN_TTL = timedelta(days=7)
+
+
+def verify_admin_credentials(username: str, password: str) -> bool:
+    """Сверка логина/пароля админа с настройками сервера (constant-time)."""
+    import hmac
+    u, p = settings.admin_user, settings.admin_password
+    if not u or not p:
+        return False
+    ok_u = hmac.compare_digest((username or ""), u)
+    ok_p = hmac.compare_digest((password or ""), p)
+    return ok_u and ok_p
+
+
+def create_admin_token() -> str:
+    now = datetime.utcnow()
+    payload = {"adm": True, "iat": now, "exp": now + ADMIN_TOKEN_TTL}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=_ALGO)
+
+
+def is_admin_token(token: str) -> bool:
+    try:
+        data = jwt.decode(token, settings.jwt_secret, algorithms=[_ALGO])
+        return bool(data.get("adm")) is True
+    except (JWTError, KeyError, ValueError, TypeError):
+        return False

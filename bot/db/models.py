@@ -775,3 +775,23 @@ class EmailToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class SiteVisit(Base):
+    """Посещения публичного сайта (агрегат по дню и посетителю).
+
+    Одна строка на (день, посетитель); hits — число загрузок страниц за день.
+    Посетитель — хеш IP+User-Agent (без хранения самих IP). Используется
+    админ-панелью для статистики визитов/уникальных по дням.
+    """
+
+    __tablename__ = "site_visits"
+    __table_args__ = (UniqueConstraint("day", "visitor", name="uq_site_visit_day_visitor"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)   # YYYY-MM-DD (местный TZ)
+    visitor: Mapped[str] = mapped_column(String(32), index=True)
+    hits: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=func.now()
+    )

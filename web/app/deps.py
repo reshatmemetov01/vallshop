@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db.models import WebAccount
 
 from .db import get_session
-from .security import decode_token
+from .security import decode_token, is_admin_token
 from .services import accounts as account_service
 
 
@@ -27,3 +27,12 @@ async def current_account(
     if acc is None or acc.is_blocked:
         raise HTTPException(status_code=401, detail="Аккаунт недоступен")
     return acc
+
+
+async def require_admin(authorization: Optional[str] = Header(None)) -> bool:
+    """Доступ только с валидным админ-токеном (панель управления)."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Требуется вход в админку")
+    if not is_admin_token(authorization.split(" ", 1)[1]):
+        raise HTTPException(status_code=401, detail="Недействительный админ-токен")
+    return True
