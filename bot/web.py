@@ -31,7 +31,7 @@ log = logging.getLogger("vallshop.web")
 def build_app(
     *, bot: Bot, db: Database, provider: PaymentProvider, liog: LioGamesClient,
     config=None, payhot: PaymentProvider = None, paydex: PaymentProvider = None,
-    bots: dict | None = None,
+    platega: PaymentProvider = None, bots: dict | None = None,
 ) -> web.Application:
     app = web.Application()
 
@@ -101,6 +101,18 @@ def build_app(
         await _apply_payment(bot, db, liog, update, bots, config)
         return web.json_response({"ok": True})
 
+    async def platega_webhook(request: web.Request) -> web.Response:
+        if platega is None:
+            return web.json_response({"ok": False}, status=404)
+        raw = await request.read()
+        if not platega.verify_webhook(raw, dict(request.headers)):
+            log.warning("Platega: вебхук с неверными X-MerchantId/X-Secret отклонён")
+            return web.json_response({"ok": False}, status=401)
+        update = platega.parse_webhook(raw)
+        await _apply_payment(bot, db, liog, update, bots, config)
+        # Platega ждёт 200 OK (иначе будет повторять доставку).
+        return web.json_response({"ok": True})
+
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/", landing_page)
     app.router.add_get("/offer", offer_page)
@@ -114,6 +126,7 @@ def build_app(
         app.router.add_post(path, bolt_webhook)
     app.router.add_post("/payhot/webhook", payhot_webhook)
     app.router.add_post("/paydex/webhook", paydex_webhook)
+    app.router.add_post("/platega/webhook", platega_webhook)
     return app
 
 

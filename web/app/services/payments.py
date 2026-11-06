@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import BotConfig
 from bot.db.models import TopUp, WebAccount
-from bot.payments import build_paydex, build_payhot, build_provider
+from bot.payments import build_paydex, build_payhot, build_platega, build_provider
 from bot.payments.boltutil import MIN_PAYMENT_USDT
 from bot.services import balance as balance_service
 from bot.services import paymethods as paymethods_service
@@ -29,8 +29,9 @@ from ..config import settings
 from . import wallet as wallet_service
 
 # Способы с редиректом на хостинговую страницу оплаты (подходят для сайта):
-# card (PayHot), sbp/sbp_ph (Paydex/PayHot), usdt (BoltUtil — своя hosted-страница).
-_WEB_METHODS = {"card", "sbp", "sbp_ph", "usdt"}
+# card (PayHot), sbp/sbp_ph (Paydex/PayHot), card_pg/sbp_pg (Platega — резерв),
+# usdt (BoltUtil — своя hosted-страница).
+_WEB_METHODS = {"card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "usdt"}
 
 TOPUP_MIN = balance_service.TOPUP_MIN
 TOPUP_MAX = balance_service.TOPUP_MAX
@@ -63,6 +64,7 @@ def _provs() -> dict:
         _providers = {
             "payhot": build_payhot(cfg),
             "paydex": build_paydex(cfg),
+            "platega": build_platega(cfg),
             # BoltUtil — только если реально настроен (иначе mock с фейковой ссылкой).
             "bolt": build_provider(cfg) if _bolt_configured(cfg) else None,
         }
@@ -79,6 +81,7 @@ async def available_methods(session: AsyncSession) -> List[dict]:
     avail = {
         "payhot": provs.get("payhot") is not None,
         "paydex": provs.get("paydex") is not None,
+        "platega": provs.get("platega") is not None,
         "bolt": provs.get("bolt") is not None,
     }
     methods = await paymethods_service.client_methods(session, available=avail)
@@ -121,9 +124,12 @@ async def create_topup(
     else:
         pay_amount = amount
         net = paymethods_service.method_code(method)
-        notify_url = (
-            cfg.paydex_notify_url if provider_name == "paydex" else cfg.payhot_notify_url
-        )
+        if provider_name == "paydex":
+            notify_url = cfg.paydex_notify_url
+        elif provider_name == "platega":
+            notify_url = cfg.platega_notify_url  # у Platega callback задаётся в кабинете
+        else:
+            notify_url = cfg.payhot_notify_url
 
     wallet_id = await wallet_service.ensure_wallet(session, account)
     # amount_usd хранит сумму ЗАЧИСЛЕНИЯ — у нас это всегда рубли.

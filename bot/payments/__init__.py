@@ -5,6 +5,7 @@ from .boltutil import BoltUtilProvider
 from .mock import MockProvider
 from .paydex import PaydexProvider
 from .payhot import PayHotProvider
+from .platega import PlategaProvider
 
 
 def build_payhot(config):
@@ -32,6 +33,18 @@ def build_paydex(config):
     )
 
 
+def build_platega(config):
+    """Собрать Platega-провайдера (₽: СБП/карта/SberPay) или None, если не настроен."""
+    if not getattr(config, "platega_enabled", False):
+        return None
+    return PlategaProvider(
+        base_url=config.platega_base_url,
+        merchant_id=config.platega_merchant_id,
+        secret=config.platega_secret,
+        mock=config.platega_mock,
+    )
+
+
 def build_provider(config) -> PaymentProvider:
     """Собрать провайдера по конфигу."""
     if config.mock_payments or not (config.bolt_api_key and config.bolt_secret):
@@ -56,7 +69,9 @@ __all__ = [
     "MockProvider",
     "PayHotProvider",
     "PaydexProvider",
+    "PlategaProvider",
     "build_provider",
     "build_payhot",
     "build_paydex",
+    "build_platega",
 ]

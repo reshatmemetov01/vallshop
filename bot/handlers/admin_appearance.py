@@ -760,6 +760,7 @@ def _provider_ok(config: BotConfig, provider_name: str) -> bool:
     return {
         "payhot": config.payhot_enabled,
         "paydex": config.paydex_enabled,
+        "platega": config.platega_enabled,
         "bolt": True,  # крипта всегда доступна (реальный провайдер или mock)
     }.get(provider_name, False)
 

@@ -81,6 +81,12 @@ class BotConfig:
     paydex_secret: Optional[str] = None   # webhook_secret (подпись вебхука)
     paydex_mock: bool = False
 
+    # ── Platega (резерв, приём ₽: СБП QR / карта / SberPay) ─────────────────────
+    platega_base_url: str = "https://app.platega.io"
+    platega_merchant_id: Optional[str] = None  # X-MerchantId (UUID)
+    platega_secret: Optional[str] = None       # X-Secret (API-ключ; им же колбэк)
+    platega_mock: bool = False
+
     # Контакт поддержки (Telegram @username, ссылка или email) — для оферты/FAQ.
     support_contact: Optional[str] = None
     # Юр. данные для оферты (ИП/самозанятый/компания и т.п.) — опционально.
@@ -141,6 +147,15 @@ class BotConfig:
     def paydex_enabled(self) -> bool:
         return self.paydex_mock or bool(self.paydex_api_key and self.paydex_secret)
 
+    @property
+    def platega_notify_url(self) -> Optional[str]:
+        # URL колбэка Platega задаётся в её кабинете; отдаём на всякий случай.
+        return self._pub("/platega/webhook")
+
+    @property
+    def platega_enabled(self) -> bool:
+        return self.platega_mock or bool(self.platega_merchant_id and self.platega_secret)
+
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
 
@@ -180,6 +195,10 @@ class BotConfig:
             paydex_api_key=_get("PAYDEX_API_KEY"),
             paydex_secret=_get("PAYDEX_SECRET"),
             paydex_mock=_truthy(_get("PAYDEX_MOCK")),
+            platega_base_url=_get("PLATEGA_BASE_URL", "https://app.platega.io"),
+            platega_merchant_id=_get("PLATEGA_MERCHANT_ID"),
+            platega_secret=_get("PLATEGA_SECRET"),
+            platega_mock=_truthy(_get("PLATEGA_MOCK")),
             mock_payments=_truthy(_get("MOCK_PAYMENTS")),
             support_contact=_get("SUPPORT_CONTACT"),
             legal_entity=_get("LEGAL_ENTITY"),
