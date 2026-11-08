@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 from typing import List, Optional
 
@@ -43,6 +44,20 @@ _STATUS_RU = {
     "refunded": "возврат",
     "pending": "ожидает",
 }
+
+# Стрелки «вниз, к товару/коду» — в боте они указывают на код ниже, а на сайте
+# код показывается отдельным блоком «Выдача», поэтому такие строки-указатели
+# («Ваш Товар ⬇️» и похожие) из текста выдачи убираем.
+_DOWN_ARROWS = ("⬇️", "⬇", "🔽", "👇")
+
+
+def _strip_pointer_lines(text: str) -> str:
+    if not text:
+        return text
+    kept = [ln for ln in text.split("\n") if not any(a in ln for a in _DOWN_ARROWS)]
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(kept))
+    return out.strip()
+
 
 _config: Optional[BotConfig] = None
 
@@ -187,7 +202,8 @@ async def order_detail(
             dtext = await catalog_service.resolve_text(
                 session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
             )
-            dtext = clean_plain(dtext)   # убрать Telegram-разметку (<b>, <tg-emoji>…)
+            dtext = clean_plain(dtext)          # убрать Telegram-разметку (<b>, <tg-emoji>…)
+            dtext = _strip_pointer_lines(dtext)  # убрать строки-указатели «Ваш Товар ⬇️»
             if dtext and dtext.strip():
                 dto["delivered_text"] = dtext
         except Exception:  # noqa: BLE001 — текст не критичен
