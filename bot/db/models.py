@@ -800,3 +800,25 @@ class SiteVisit(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, server_default=func.now()
     )
+
+
+class SiteVisitLog(Base):
+    """Журнал последних засчитанных визитов (техническая страница админки).
+
+    В отличие от агрегата site_visits, здесь хранятся IP/User-Agent/страница
+    каждого ЗАСЧИТАННОГО визита — чтобы владелец мог глазами проверить, кто
+    попадает в статистику, и заметить ботов, прорвавшихся через фильтр.
+    Таблица периодически подрезается (храним только недавние записи).
+    """
+
+    __tablename__ = "site_visit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=func.now(), index=True
+    )
+    ip: Mapped[Optional[str]] = mapped_column(String(64))
+    user_agent: Mapped[Optional[str]] = mapped_column(String(512))
+    path: Mapped[Optional[str]] = mapped_column(String(255))
+    visitor: Mapped[Optional[str]] = mapped_column(String(32), index=True)  # тот же хеш, что в site_visits
+    is_new: Mapped[bool] = mapped_column(Boolean, default=False)  # первый визит этого посетителя за день

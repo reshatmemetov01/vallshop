@@ -23,6 +23,12 @@
   .bar{display:flex;align-items:center;gap:14px;padding:14px 0}
   .logo{font-weight:800;font-size:20px}.logo span{color:var(--accent)}
   .bar .sp{margin-left:auto}
+  .nav{display:flex;gap:6px;margin-left:8px}
+  .nav button{background:transparent;border:1px solid transparent;color:var(--muted);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600}
+  .nav button.on{background:var(--panel2);border-color:var(--line2);color:var(--text)}
+  @media (max-width:640px){ .nav button{padding:6px 10px;font-size:12px} .logo{font-size:16px} }
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+  .pill{font-size:10px;padding:1px 7px;border-radius:999px;background:rgba(79,208,138,.16);color:#bff3d2;border:1px solid rgba(79,208,138,.4)}
   button{font-family:inherit;cursor:pointer}
   .btn{background:var(--grad);color:#fff;border:none;border-radius:11px;padding:11px 18px;font-weight:700;font-size:14px}
   .btn.ghost{background:var(--panel2);border:1px solid var(--line2);color:var(--text)}
@@ -81,10 +87,15 @@
 <div id="appView" style="display:none">
   <header><div class="wrap bar">
     <div class="logo">Vall<span>Shop</span> · админ</div>
+    <nav class="nav" id="nav">
+      <button class="on" data-page="dash" onclick="showPage('dash')">📊 Дашборд</button>
+      <button data-page="visits" onclick="showPage('visits')">👁 Журнал визитов</button>
+    </nav>
     <div class="sp"></div>
     <button class="btn ghost" onclick="logout()">Выйти</button>
   </div></header>
-  <div class="wrap" style="padding-bottom:50px">
+
+  <div class="wrap" style="padding-bottom:50px" id="pageDash">
     <div class="presets" id="presets"></div>
 
     <h2>📊 Общее (бот + сайт)</h2>
@@ -110,6 +121,16 @@
       <input id="uq" type="search" placeholder="Поиск по email…" oninput="onSearch()">
     </div>
     <div class="tbl-wrap"><table id="usersTbl"><tbody></tbody></table></div>
+  </div>
+
+  <div class="wrap" style="padding-bottom:50px;display:none" id="pageVisits">
+    <h2>👁 Журнал визитов</h2>
+    <div class="hint" style="color:var(--dim);font-size:13px;margin:-6px 0 14px">
+      Последние засчитанные визиты (кто попал в статистику). Здесь видно IP, браузер
+      и страницу — чтобы заметить бота, прорвавшегося через фильтр.
+      <a href="#" style="color:var(--accent2)" onclick="loadVisitLog(event)">Обновить ↻</a>
+    </div>
+    <div class="tbl-wrap"><table id="visitLog"><tbody></tbody></table></div>
   </div>
 </div>
 
@@ -198,9 +219,61 @@ async function resetVisits(e){
   if(!confirm("Обнулить всю статистику посещений? Накопленные данные будут удалены без возможности восстановления.")) return;
   try{
     const d = await api("/api/admin/visits/reset", {method:"POST"});
-    loadOverview(); loadVisits();
+    loadOverview(); loadVisits(); _visitsLoaded=false;
+    if($("pageVisits").style.display!=="none"){ loadVisitLog(); }
     alert("Готово. Удалено записей: "+(d.deleted||0)+". Счётчик начнётся заново.");
   }catch(err){ alert("Не удалось обнулить статистику."); }
+}
+
+// ── Страницы (Дашборд / Журнал визитов) ─────────────────────────────────────
+let _visitsLoaded=false;
+function showPage(p){
+  $("pageDash").style.display = p==="dash"?"":"none";
+  $("pageVisits").style.display = p==="visits"?"":"none";
+  document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on", b.dataset.page===p));
+  if(p==="visits" && !_visitsLoaded){ loadVisitLog(); }
+}
+
+function _browser(ua){
+  if(!ua) return "—";
+  const u = ua;
+  let m;
+  if((m=/YaBrowser\/([\d.]+)/.exec(u))) return "Я.Браузер "+m[1].split(".")[0];
+  if(/Edg(e|A|iOS)?\//.test(u)) return "Edge";
+  if((m=/OPR\/([\d.]+)/.exec(u))) return "Opera";
+  if(/(iPhone|iPad)/.test(u)) return "iPhone/iPad Safari";
+  if(/Android/.test(u)){ const c=/Chrome\/(\d+)/.exec(u); return "Android"+(c?" Chrome "+c[1]:""); }
+  if((m=/Firefox\/(\d+)/.exec(u))) return "Firefox "+m[1];
+  if((m=/Chrome\/(\d+)/.exec(u))) return "Chrome "+m[1];
+  if(/Safari\//.test(u)) return "Safari";
+  return u.length>40 ? u.slice(0,40)+"…" : u;
+}
+function _when(iso){
+  if(!iso) return "—";
+  const d=new Date(iso + (iso.endsWith("Z")?"":"Z"));
+  const msk=new Date(d.getTime()+3*3600*1000); // показываем по МСК
+  const p=n=>String(n).padStart(2,"0");
+  return `${p(msk.getUTCDate())}.${p(msk.getUTCMonth()+1)} ${p(msk.getUTCHours())}:${p(msk.getUTCMinutes())}`;
+}
+function _esc(s){ return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function loadVisitLog(e){
+  if(e) e.preventDefault();
+  _visitsLoaded=true;
+  const tb=$("visitLog").querySelector("tbody");
+  tb.innerHTML='<tr><td class="state">Загрузка…</td></tr>';
+  try{
+    const d=await api("/api/admin/visits/recent?limit=200");
+    const items=d.items||[];
+    if(!items.length){ tb.innerHTML='<tr><td class="state">Пока нет засчитанных визитов.</td></tr>'; return; }
+    tb.innerHTML = `<tr><th>Время (МСК)</th><th>IP</th><th>Браузер</th><th>Страница</th></tr>` +
+      items.map(r=>`<tr>
+        <td>${_when(r.created_at)} ${r.is_new?'<span class="pill">новый</span>':''}</td>
+        <td class="mono">${_esc(r.ip)||"—"}</td>
+        <td>${_esc(_browser(r.ua))}</td>
+        <td class="mono">${_esc(r.path)||"—"}</td>
+      </tr>`).join("");
+  }catch(err){ tb.innerHTML='<tr><td class="state">Не удалось загрузить журнал.</td></tr>'; }
 }
 
 let _st=null;

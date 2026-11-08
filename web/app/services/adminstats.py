@@ -163,12 +163,34 @@ async def visits_daily(session: AsyncSession, days: int = 30) -> list:
 
 
 async def reset_visits(session: AsyncSession) -> int:
-    """Обнулить статистику посещений: удалить все записи SiteVisit."""
+    """Обнулить статистику посещений: удалить агрегат и технический журнал."""
     from sqlalchemy import delete
+    from bot.db.models import SiteVisitLog
     n = await session.scalar(select(func.count(SiteVisit.id))) or 0
     await session.execute(delete(SiteVisit))
+    await session.execute(delete(SiteVisitLog))
     await session.commit()
     return int(n)
+
+
+async def recent_visits(session: AsyncSession, limit: int = 100) -> list:
+    """Последние засчитанные визиты (IP, браузер, страница, время) — для
+    технической страницы «Журнал визитов» в админке."""
+    from bot.db.models import SiteVisitLog
+    rows = await session.scalars(
+        select(SiteVisitLog).order_by(SiteVisitLog.id.desc()).limit(min(max(limit, 1), 500))
+    )
+    out = []
+    for r in rows:
+        out.append({
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "ip": r.ip,
+            "ua": r.user_agent,
+            "path": r.path,
+            "is_new": bool(r.is_new),
+        })
+    return out
 
 
 async def site_users(session: AsyncSession, q: str = "", limit: int = 50, offset: int = 0) -> dict:

@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 
 from bot.db import models as _models  # noqa: F401 — регистрация моделей (web_accounts)
 from bot.db.base import Base
-from bot.db.models import SiteVisit
+from bot.db.models import SiteVisit, SiteVisitLog
 
 from .config import settings
 from .db import database
@@ -94,18 +94,20 @@ async def _count_visits(request: Request, call_next):
 
 
 async def _log_visit(request: Request) -> None:
-    from sqlalchemy import select, update
+    from sqlalchemy import delete, select, update
     xff = request.headers.get("x-forwarded-for", "")
     ip = (xff.split(",")[0].strip() if xff else "") or (request.client.host if request.client else "")
     if ip and ip in settings.owner_ips:
         return  # заходы владельца (по IP) не считаем
     ua = request.headers.get("user-agent", "")
+    path = request.url.path
     visitor = hashlib.sha256(f"{ip}|{ua}|{settings.jwt_secret}".encode()).hexdigest()[:32]
     day = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%d")  # МСК
     async with database.session() as s:
         existing = await s.scalar(
             select(SiteVisit).where(SiteVisit.day == day, SiteVisit.visitor == visitor)
         )
+        is_new = existing is None
         if existing:
             await s.execute(
                 update(SiteVisit).where(SiteVisit.id == existing.id)
@@ -113,6 +115,14 @@ async def _log_visit(request: Request) -> None:
             )
         else:
             s.add(SiteVisit(day=day, visitor=visitor, hits=1))
+        # Технический журнал визитов (для страницы «Журнал визитов» в админке).
+        s.add(SiteVisitLog(ip=ip or None, user_agent=(ua or None), path=path,
+                           visitor=visitor, is_new=is_new))
+        # Подрезаем журнал: держим только записи за последние 14 дней. Делаем это
+        # лишь при новом посетителе (редко), чтобы не грузить каждый запрос.
+        if is_new:
+            cutoff = datetime.utcnow() - timedelta(days=14)
+            await s.execute(delete(SiteVisitLog).where(SiteVisitLog.created_at < cutoff))
         await s.commit()
 
 

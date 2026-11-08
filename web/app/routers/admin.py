@@ -58,6 +58,15 @@ async def visits(
     }
 
 
+@router.get("/visits/recent")
+async def visits_recent(
+    limit: int = 100,
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return {"items": await adminstats.recent_visits(session, int(limit or 100))}
+
+
 @router.post("/visits/reset")
 async def visits_reset(
     _: bool = Depends(require_admin),
