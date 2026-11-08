@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import (
@@ -18,10 +19,12 @@ from bot.db.models import (
     HEAD_MERCHANT_ID,
     Order,
     OrderStatus,
+    Product,
     SiteVisit,
     TopUp,
     TopUpStatus,
     User,
+    Variant,
     WebAccount,
 )
 from bot.services import stats as bot_stats
@@ -223,6 +226,137 @@ async def site_users(session: AsyncSession, q: str = "", limit: int = 50, offset
         "created_at": a.created_at.isoformat() if a.created_at else None,
     } for a in accs]
     return {"total": int(total), "items": items}
+
+
+def _status_str(st) -> str:
+    return st.value if hasattr(st, "value") else str(st)
+
+
+async def orders_list(
+    session: AsyncSession, q: str = "", status: str = "", source: str = "",
+    limit: int = 50, offset: int = 0,
+) -> dict:
+    """Список заказов (головной магазин) с фильтрами и поиском — для таблицы."""
+    conds = [Order.merchant_id == HEAD_MERCHANT_ID]
+    if status:
+        conds.append(Order.status == status)
+    if source in ("bot", "site"):
+        conds.append(Order.source == source)
+    q = (q or "").strip()
+    if q:
+        like = f"%{q}%"
+        ors = [
+            Order.client_ref.ilike(like),
+            Order.supplier_order_id.ilike(like),
+            Order.fail_reason.ilike(like),
+        ]
+        if q.isdigit():
+            ors.append(Order.id == int(q))
+            ors.append(Order.user_id == int(q))
+        conds.append(or_(*ors))
+
+    total = await session.scalar(select(func.count()).select_from(Order).where(*conds)) or 0
+    rows = list(await session.scalars(
+        select(Order).where(*conds)
+        .order_by(Order.id.desc()).limit(min(max(limit, 1), 200)).offset(max(offset, 0))
+    ))
+
+    variants = {}
+    vids = {r.variant_id for r in rows}
+    if vids:
+        for v in await session.scalars(select(Variant).where(Variant.id.in_(vids))):
+            variants[v.id] = v
+    accounts = {}
+    uids = {r.user_id for r in rows}
+    if uids:
+        for a in await session.scalars(select(WebAccount).where(WebAccount.wallet_user_id.in_(uids))):
+            accounts[a.wallet_user_id] = a
+
+    items = []
+    for r in rows:
+        v = variants.get(r.variant_id)
+        a = accounts.get(r.user_id)
+        items.append({
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "source": r.source,
+            "status": _status_str(r.status),
+            "item": v.title if v else f"#{r.variant_id}",
+            "supplier": r.supplier,
+            "quantity": r.quantity,
+            "total_rub": float(Decimal(r.price_usd or 0) * (r.quantity or 1)),
+            "user_id": r.user_id,
+            "email": a.email if a else None,
+            "delivered": r.status == OrderStatus.COMPLETED,
+            "has_error": bool(r.fail_reason),
+        })
+    return {"total": int(total), "items": items}
+
+
+async def order_detail(session: AsyncSession, order_id: int) -> Optional[dict]:
+    """Полная карточка одного заказа: товар, поставщик, пользователь, почта,
+    телеграм, статус, выдача, ошибка, собранные при покупке данные."""
+    o = await session.get(Order, order_id)
+    if o is None:
+        return None
+    v = await session.get(Variant, o.variant_id)
+    product = await session.get(Product, v.product_id) if (v and v.product_id) else None
+    user = await session.get(User, {"id": o.user_id, "merchant_id": o.merchant_id})
+    acc = await session.scalar(select(WebAccount).where(WebAccount.wallet_user_id == o.user_id))
+
+    buyer_fields = None
+    if o.fields_json:
+        try:
+            parsed = json.loads(o.fields_json)
+            if isinstance(parsed, dict):
+                buyer_fields = {k: parsed[k] for k in parsed if not str(k).startswith("_")}
+            else:
+                buyer_fields = {"raw": str(parsed)[:500]}
+        except (ValueError, TypeError):
+            buyer_fields = {"raw": o.fields_json[:500]}
+
+    telegram_id = acc.telegram_user_id if acc else (o.user_id if o.source == "bot" else None)
+    total = Decimal(o.price_usd or 0) * (o.quantity or 1)
+    return {
+        "id": o.id,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+        "updated_at": o.updated_at.isoformat() if o.updated_at else None,
+        "source": o.source,
+        "status": _status_str(o.status),
+        "delivered": o.status == OrderStatus.COMPLETED,
+        "client_ref": o.client_ref,
+        "quantity": o.quantity,
+        "price_rub": float(o.price_usd or 0),
+        "total_rub": float(total),
+        "cost_usd": float(o.cost_usd) if o.cost_usd is not None else None,
+        "merchant_margin_rub": float(o.merchant_margin or 0),
+        "supplier": o.supplier,
+        "supplier_order_id": o.supplier_order_id,
+        "delivery_code": o.delivery_code,
+        "fail_reason": o.fail_reason,
+        "fields": buyer_fields,
+        "item": {
+            "variant_id": o.variant_id,
+            "variant_title": v.title if v else None,
+            "product_title": product.title if product else None,
+            "fzr_kind": getattr(v, "fzr_kind", None) if v else None,
+            "source": getattr(v, "source", None) if v else None,
+        },
+        "user": {
+            "user_id": o.user_id,
+            "username": user.username if user else None,
+            "full_name": user.full_name if user else None,
+            "balance_rub": float(user.balance) if (user and user.balance is not None) else None,
+            "telegram_id": telegram_id,
+        },
+        "account": ({
+            "id": acc.id,
+            "email": acc.email,
+            "email_verified": bool(acc.email_verified),
+            "telegram_user_id": acc.telegram_user_id,
+            "created_at": acc.created_at.isoformat() if acc.created_at else None,
+        } if acc else None),
+    }
 
 
 def _today_str() -> str:

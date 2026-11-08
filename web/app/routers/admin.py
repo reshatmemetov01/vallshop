@@ -85,3 +85,30 @@ async def users(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     return await adminstats.site_users(session, q, int(limit or 50), int(offset or 0))
+
+
+@router.get("/orders")
+async def orders(
+    q: str = "",
+    status: str = "",
+    source: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await adminstats.orders_list(
+        session, q, status, source, int(limit or 50), int(offset or 0)
+    )
+
+
+@router.get("/orders/{order_id}")
+async def order_detail(
+    order_id: int,
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    data = await adminstats.order_detail(session, order_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    return data

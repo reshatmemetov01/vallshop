@@ -29,6 +29,20 @@
   @media (max-width:640px){ .nav button{padding:6px 10px;font-size:12px} .logo{font-size:16px} }
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
   .pill{font-size:10px;padding:1px 7px;border-radius:999px;background:rgba(79,208,138,.16);color:#bff3d2;border:1px solid rgba(79,208,138,.4)}
+  .dim{color:var(--dim)}
+  .st{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);white-space:nowrap}
+  .st.ok{background:rgba(79,208,138,.15);color:#bff3d2;border-color:rgba(79,208,138,.4)}
+  .st.warn{background:rgba(255,180,84,.15);color:#ffd9a8;border-color:rgba(255,180,84,.4)}
+  .st.bad{background:rgba(255,107,107,.15);color:#ffc9c9;border-color:rgba(255,107,107,.4)}
+  .st.dim{color:var(--dim)}
+  .srow select{background:var(--bg2);border:1px solid var(--line2);border-radius:11px;padding:11px 12px;color:var(--text);font-size:14px;font-family:inherit}
+  .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:8px}
+  .dcard{background:linear-gradient(180deg,var(--panel),#0f1724);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .dh{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--dim);margin-bottom:10px}
+  .dtbl{width:100%;border-collapse:collapse;font-size:14px}
+  .dtbl td{padding:7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  .dtbl td.dk{color:var(--dim);width:44%;padding-right:10px}
+  .errbox{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.4);border-radius:12px;padding:12px 14px;margin:12px 0;color:#ffd0d0;font-size:14px;white-space:pre-wrap;word-break:break-word}
   button{font-family:inherit;cursor:pointer}
   .btn{background:var(--grad);color:#fff;border:none;border-radius:11px;padding:11px 18px;font-weight:700;font-size:14px}
   .btn.ghost{background:var(--panel2);border:1px solid var(--line2);color:var(--text)}
@@ -89,6 +103,7 @@
     <div class="logo">Vall<span>Shop</span> · админ</div>
     <nav class="nav" id="nav">
       <button class="on" data-page="dash" onclick="showPage('dash')">📊 Дашборд</button>
+      <button data-page="orders" onclick="showPage('orders')">🧾 Заказы</button>
       <button data-page="visits" onclick="showPage('visits')">👁 Журнал визитов</button>
     </nav>
     <div class="sp"></div>
@@ -121,6 +136,37 @@
       <input id="uq" type="search" placeholder="Поиск по email…" oninput="onSearch()">
     </div>
     <div class="tbl-wrap"><table id="usersTbl"><tbody></tbody></table></div>
+  </div>
+
+  <div class="wrap" style="padding-bottom:50px;display:none" id="pageOrders">
+    <div id="ordersListView">
+      <h2>🧾 Заказы</h2>
+      <div class="srow" style="flex-wrap:wrap">
+        <input id="oq" type="search" placeholder="Поиск: ID, email, ref, поставщик…" oninput="onOrdersSearch()" style="min-width:220px;flex:1">
+        <select id="ofSource" onchange="loadOrders()">
+          <option value="">Все источники</option>
+          <option value="site">🌐 Сайт</option>
+          <option value="bot">🤖 Бот</option>
+        </select>
+        <select id="ofStatus" onchange="loadOrders()">
+          <option value="">Все статусы</option>
+          <option value="completed">Выполнен</option>
+          <option value="fulfilling">В обработке</option>
+          <option value="needs_action">Ждёт ручной выдачи</option>
+          <option value="failed">Ошибка</option>
+          <option value="refunded">Возврат</option>
+          <option value="created">Создан</option>
+          <option value="expired">Просрочен</option>
+        </select>
+      </div>
+      <div class="tbl-wrap"><table id="ordersTbl"><tbody></tbody></table></div>
+      <div class="srow" id="ordersPager" style="justify-content:center;display:none">
+        <button class="btn ghost" id="oPrev" onclick="ordersPage(-1)">← Назад</button>
+        <span class="mono" id="oPageInfo" style="align-self:center"></span>
+        <button class="btn ghost" id="oNext" onclick="ordersPage(1)">Вперёд →</button>
+      </div>
+    </div>
+    <div id="orderDetailView" style="display:none"></div>
   </div>
 
   <div class="wrap" style="padding-bottom:50px;display:none" id="pageVisits">
@@ -227,11 +273,14 @@ async function resetVisits(e){
 
 // ── Страницы (Дашборд / Журнал визитов) ─────────────────────────────────────
 let _visitsLoaded=false;
+let _ordersLoaded=false;
 function showPage(p){
   $("pageDash").style.display = p==="dash"?"":"none";
+  $("pageOrders").style.display = p==="orders"?"":"none";
   $("pageVisits").style.display = p==="visits"?"":"none";
   document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on", b.dataset.page===p));
   if(p==="visits" && !_visitsLoaded){ loadVisitLog(); }
+  if(p==="orders" && !_ordersLoaded){ _ordersLoaded=true; loadOrders(); }
 }
 
 function _browser(ua){
@@ -274,6 +323,100 @@ async function loadVisitLog(e){
         <td class="mono">${_esc(r.path)||"—"}</td>
       </tr>`).join("");
   }catch(err){ tb.innerHTML='<tr><td class="state">Не удалось загрузить журнал.</td></tr>'; }
+}
+
+// ── Заказы ──────────────────────────────────────────────────────────────────
+const OST = {
+  completed:["Выполнен","ok"], fulfilling:["В обработке","warn"], needs_action:["Ждёт ручной","warn"],
+  failed:["Ошибка","bad"], refunded:["Возврат","dim"], created:["Создан","dim"],
+  expired:["Просрочен","dim"], pending:["Ожидание","warn"],
+};
+function ostBadge(s){ const m=OST[s]||[s,"dim"]; return `<span class="st ${m[1]}">${_esc(m[0])}</span>`; }
+
+let _oOffset=0, _oLimit=50, _oTotal=0, _oSt=null;
+function onOrdersSearch(){ clearTimeout(_oSt); _oSt=setTimeout(()=>{_oOffset=0;loadOrders();},300); }
+async function loadOrders(){
+  const q=$("oq").value.trim(), source=$("ofSource").value, status=$("ofStatus").value;
+  const url=`/api/admin/orders?limit=${_oLimit}&offset=${_oOffset}`+
+    `&q=${encodeURIComponent(q)}&source=${source}&status=${status}`;
+  const tb=$("ordersTbl").querySelector("tbody");
+  tb.innerHTML='<tr><td class="state">Загрузка…</td></tr>';
+  try{
+    const d=await api(url); _oTotal=d.total||0; const items=d.items||[];
+    if(!items.length){ tb.innerHTML='<tr><td class="state">Заказов нет.</td></tr>'; $("ordersPager").style.display="none"; return; }
+    tb.innerHTML=`<tr><th>#</th><th>Дата</th><th>Источник</th><th>Товар</th><th>Сумма</th><th>Статус</th><th>Клиент</th></tr>`+
+      items.map(o=>`<tr style="cursor:pointer" onclick="openOrder(${o.id})">
+        <td class="mono">#${o.id}</td>
+        <td>${_when(o.created_at)}</td>
+        <td>${o.source==="site"?"🌐":"🤖"} ${o.source==="site"?"Сайт":"Бот"}</td>
+        <td>${_esc(o.item)}${o.quantity>1?` <span class="mono dim">×${o.quantity}</span>`:""}</td>
+        <td>${rub(o.total_rub)}</td>
+        <td>${ostBadge(o.status)}${o.has_error?' ⚠️':''}</td>
+        <td class="mono">${_esc(o.email) || (o.user_id?("id "+o.user_id):"—")}</td>
+      </tr>`).join("");
+    const pages=Math.max(1,Math.ceil(_oTotal/_oLimit)), cur=Math.floor(_oOffset/_oLimit)+1;
+    $("ordersPager").style.display = pages>1?"flex":"none";
+    $("oPageInfo").textContent=`${cur} / ${pages} · всего ${_oTotal}`;
+    $("oPrev").disabled=_oOffset<=0; $("oNext").disabled=_oOffset+_oLimit>=_oTotal;
+  }catch(e){ tb.innerHTML='<tr><td class="state">Не удалось загрузить заказы.</td></tr>'; }
+}
+function ordersPage(dir){ _oOffset=Math.max(0,_oOffset+dir*_oLimit); loadOrders(); window.scrollTo(0,0); }
+
+async function openOrder(id){
+  $("ordersListView").style.display="none";
+  const box=$("orderDetailView"); box.style.display=""; box.innerHTML='<div class="state">Загрузка…</div>'; window.scrollTo(0,0);
+  try{ box.innerHTML=renderOrderDetail(await api("/api/admin/orders/"+id)); }
+  catch(e){ box.innerHTML='<div class="state">Не удалось загрузить заказ. <a href="#" onclick="backToOrders(event)">← Назад</a></div>'; }
+}
+function backToOrders(e){ if(e)e.preventDefault(); $("orderDetailView").style.display="none"; $("ordersListView").style.display=""; }
+
+function drow(k,v){ return (v==null||v==="")?"":`<tr><td class="dk">${k}</td><td>${v}</td></tr>`; }
+function renderOrderDetail(d){
+  const u=d.user||{}, a=d.account||null, it=d.item||{};
+  const tg = u.telegram_id ? `<a target="_blank" href="tg://user?id=${u.telegram_id}">${u.telegram_id}</a>` : "—";
+  const deliv = d.delivered ? '<span class="st ok">Да, доставлен</span>'
+    : (d.status==="refunded" ? '<span class="st dim">Возврат</span>' : '<span class="st warn">Нет</span>');
+  const err = d.fail_reason ? `<div class="errbox"><b>⚠️ Почему не выдался:</b>\n${_esc(d.fail_reason)}</div>` : "";
+  const code = d.delivery_code ? `<tr><td class="dk">Выдача (коды)</td><td class="mono" style="white-space:pre-wrap;word-break:break-all">${_esc(d.delivery_code)}</td></tr>` : "";
+  let fieldsHtml="";
+  if(d.fields && Object.keys(d.fields).length)
+    fieldsHtml = Object.entries(d.fields).map(([k,v])=>`<tr><td class="dk">${_esc(k)}</td><td class="mono">${_esc(String(v))}</td></tr>`).join("");
+  return `
+    <div class="srow"><button class="btn ghost" onclick="backToOrders(event)">← К списку заказов</button></div>
+    <h2 style="margin-top:14px">Заказ #${d.id} · ${ostBadge(d.status)}</h2>
+    ${err}
+    <div class="dgrid">
+      <div class="dcard"><div class="dh">Заказ</div><table class="dtbl">
+        ${drow("Создан", _when(d.created_at))}
+        ${drow("Обновлён", _when(d.updated_at))}
+        ${drow("Источник", d.source==="site"?"🌐 Сайт":"🤖 Бот")}
+        ${drow("Статус", ostBadge(d.status))}
+        ${drow("Доставлен клиенту", deliv)}
+        ${drow("Товар", _esc(it.variant_title||"—")+(it.product_title?` <span class="dim">(${_esc(it.product_title)})</span>`:""))}
+        ${drow("Количество", d.quantity)}
+        ${drow("Сумма", rub(d.total_rub)+(d.quantity>1?` <span class="dim">(${rub(d.price_rub)} × ${d.quantity})</span>`:""))}
+        ${drow("Внутр. ref", `<span class="mono">${_esc(d.client_ref)}</span>`)}
+        ${code}
+      </table></div>
+      <div class="dcard"><div class="dh">Поставщик</div><table class="dtbl">
+        ${drow("Поставщик", _esc(d.supplier||"—"))}
+        ${drow("ID у поставщика", d.supplier_order_id?`<span class="mono">${_esc(d.supplier_order_id)}</span>`:"—")}
+        ${drow("Тип (fzr_kind)", _esc(it.fzr_kind||"—"))}
+        ${drow("Канал товара", _esc(it.source||"—"))}
+        ${drow("Себестоимость", d.cost_usd!=null?("$"+d.cost_usd):"—")}
+        ${drow("Маржа мерчанта", rub(d.merchant_margin_rub))}
+      </table></div>
+      <div class="dcard"><div class="dh">Клиент</div><table class="dtbl">
+        ${drow("User ID", `<span class="mono">${u.user_id}</span>`)}
+        ${drow("Имя", _esc(u.full_name||"—"))}
+        ${drow("Username", u.username?("@"+_esc(u.username)):"—")}
+        ${drow("Telegram ID", tg)}
+        ${drow("Email", a&&a.email?`${_esc(a.email)} ${a.email_verified?'<span class="st ok">✓</span>':'<span class="st warn">не подтв.</span>'}`:"—")}
+        ${drow("Баланс", u.balance_rub!=null?rub(u.balance_rub):"—")}
+        ${a?drow("Аккаунт создан", _when(a.created_at)):""}
+      </table></div>
+      ${fieldsHtml?`<div class="dcard"><div class="dh">Данные покупки</div><table class="dtbl">${fieldsHtml}</table></div>`:""}
+    </div>`;
 }
 
 let _st=null;
