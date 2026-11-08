@@ -238,7 +238,10 @@ async def orders_list(
 ) -> dict:
     """Список заказов (головной магазин) с фильтрами и поиском — для таблицы."""
     conds = [Order.merchant_id == HEAD_MERCHANT_ID]
-    if status:
+    if status == "manual":
+        # «Текущие» — заказы, упавшие на ручную обработку.
+        conds.append(Order.status.in_([OrderStatus.NEEDS_ACTION, OrderStatus.FAILED]))
+    elif status:
         conds.append(Order.status == status)
     if source in ("bot", "site"):
         conds.append(Order.source == source)

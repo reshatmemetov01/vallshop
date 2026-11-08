@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..db import get_session
 from ..deps import require_admin
 from ..security import create_admin_token, verify_admin_credentials
 from ..services import adminstats
+
+log = logging.getLogger("vallshop.web.admin")
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -21,6 +26,37 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 class LoginIn(BaseModel):
     username: str
     password: str
+
+
+class OrderActionIn(BaseModel):
+    action: str  # deliver | refund | close_silent
+
+
+async def _notify_customer(order, text: str) -> bool:
+    """Отправить покупателю сообщение в Telegram (если привязан). Best-effort."""
+    import httpx
+    from bot.db.models import WebAccount
+    from sqlalchemy import select
+    from ..db import database
+
+    token = settings.telegram_bot_token
+    if not token:
+        return False
+    async with database.session() as s:
+        acc = await s.scalar(select(WebAccount).where(WebAccount.wallet_user_id == order.user_id))
+    chat_id = (acc.telegram_user_id if acc else None) or (order.user_id if order.source == "bot" else None)
+    if not chat_id:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as cl:
+            r = await cl.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+            )
+            return r.status_code == 200
+    except Exception:  # noqa: BLE001 — уведомление не должно ломать действие
+        log.warning("Не удалось уведомить покупателя по заказу #%s", order.id)
+        return False
 
 
 @router.post("/login")
@@ -112,3 +148,45 @@ async def order_detail(
     if data is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     return data
+
+
+@router.post("/orders/{order_id}/action")
+async def order_action(
+    order_id: int,
+    body: OrderActionIn,
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Ручное управление заказом из админки: выдать / вернуть / тихо закрыть."""
+    from bot.db.models import Order, OrderStatus
+    from bot.services import orders as order_service
+
+    o = await session.get(Order, order_id)
+    if o is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+
+    action = (body.action or "").strip()
+    out: dict = {"ok": True}
+    notify_text = None
+
+    if action == "refund":
+        if o.status == OrderStatus.REFUNDED:
+            raise HTTPException(status_code=400, detail="Заказ уже возвращён")
+        refund = await order_service.cancel_order_manual(session, o)
+        await session.commit()
+        out["status"] = "refunded"
+        out["refund_rub"] = float(refund)
+        notify_text = f"↩️ Ваш заказ #{o.id} отменён. На баланс возвращено {refund:.0f} ₽."
+    elif action in ("deliver", "close_silent"):
+        if o.status == OrderStatus.COMPLETED:
+            raise HTTPException(status_code=400, detail="Заказ уже выполнен")
+        await order_service.deliver_topup_manual(session, o)
+        await session.commit()
+        out["status"] = "completed"
+        if action == "deliver":
+            notify_text = f"✅ Ваш заказ #{o.id} выполнен."
+    else:
+        raise HTTPException(status_code=400, detail="Неизвестное действие")
+
+    out["notified"] = await _notify_customer(o, notify_text) if notify_text else False
+    return out

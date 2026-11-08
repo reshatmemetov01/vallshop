@@ -141,6 +141,10 @@
   <div class="wrap" style="padding-bottom:50px;display:none" id="pageOrders">
     <div id="ordersListView">
       <h2>🧾 Заказы</h2>
+      <div class="presets" id="ordersMode">
+        <button class="on" data-mode="all" onclick="setOrdersMode('all')">Все заказы</button>
+        <button data-mode="manual" onclick="setOrdersMode('manual')">⏳ Текущие (ручная обработка)</button>
+      </div>
       <div class="srow" style="flex-wrap:wrap">
         <input id="oq" type="search" placeholder="Поиск: ID, email, ref, поставщик…" oninput="onOrdersSearch()" style="min-width:220px;flex:1">
         <select id="ofSource" onchange="loadOrders()">
@@ -333,10 +337,17 @@ const OST = {
 };
 function ostBadge(s){ const m=OST[s]||[s,"dim"]; return `<span class="st ${m[1]}">${_esc(m[0])}</span>`; }
 
-let _oOffset=0, _oLimit=50, _oTotal=0, _oSt=null;
+let _oOffset=0, _oLimit=50, _oTotal=0, _oSt=null, _oMode="all";
 function onOrdersSearch(){ clearTimeout(_oSt); _oSt=setTimeout(()=>{_oOffset=0;loadOrders();},300); }
+function setOrdersMode(m){
+  _oMode=m; _oOffset=0;
+  document.querySelectorAll("#ordersMode button").forEach(b=>b.classList.toggle("on", b.dataset.mode===m));
+  $("ofStatus").style.display = m==="manual"?"none":"";
+  loadOrders();
+}
 async function loadOrders(){
-  const q=$("oq").value.trim(), source=$("ofSource").value, status=$("ofStatus").value;
+  const q=$("oq").value.trim(), source=$("ofSource").value;
+  const status = _oMode==="manual" ? "manual" : $("ofStatus").value;
   const url=`/api/admin/orders?limit=${_oLimit}&offset=${_oOffset}`+
     `&q=${encodeURIComponent(q)}&source=${source}&status=${status}`;
   const tb=$("ordersTbl").querySelector("tbody");
@@ -416,7 +427,42 @@ function renderOrderDetail(d){
         ${a?drow("Аккаунт создан", _when(a.created_at)):""}
       </table></div>
       ${fieldsHtml?`<div class="dcard"><div class="dh">Данные покупки</div><table class="dtbl">${fieldsHtml}</table></div>`:""}
-    </div>`;
+    </div>
+    ${ACTIONABLE.has(d.status)?`
+    <div class="dcard" style="margin-top:14px">
+      <div class="dh">Управление заказом</div>
+      <div class="srow" style="flex-wrap:wrap;gap:10px">
+        <button class="btn" onclick="orderAction(${d.id},'deliver')">✅ Выдать товар</button>
+        <button class="btn ghost" onclick="orderAction(${d.id},'refund')">↩️ Вернуть средства</button>
+        <button class="btn ghost" onclick="orderAction(${d.id},'close_silent')">✓ Закрыть без уведомления</button>
+      </div>
+      <div class="dim" style="font-size:13px;margin-top:10px">
+        <b>Выдать товар</b> — статус «Выполнен» + уведомление покупателю в Telegram (если привязан).<br>
+        <b>Вернуть средства</b> — деньги на баланс покупателя + уведомление.<br>
+        <b>Закрыть без уведомления</b> — просто «Выполнен», покупателю ничего не шлётся.
+      </div>
+    </div>`:""}`;
+}
+
+const ACTIONABLE = new Set(["needs_action","failed","fulfilling"]);
+async function orderAction(id, action){
+  const names={deliver:"отметить заказ выполненным и уведомить покупателя",
+               refund:"вернуть средства покупателю на баланс",
+               close_silent:"закрыть заказ (статус «Выполнен») БЕЗ уведомления покупателя"};
+  if(!confirm(`Заказ #${id}: ${names[action]}?`)) return;
+  try{
+    const r=await api("/api/admin/orders/"+id+"/action",{
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action})
+    });
+    if(r && r.detail){ alert("Ошибка: "+r.detail); return; }
+    let msg = action==="refund"
+      ? ("↩️ Возврат выполнен"+(r.refund_rub?` (${r.refund_rub} ₽)`:""))
+      : (action==="deliver"?"✅ Заказ отмечен выполненным":"✓ Заказ закрыт (Выполнен)");
+    if(action!=="close_silent") msg += r.notified ? ". Покупатель уведомлён." : ". Уведомить не удалось (нет Telegram).";
+    alert(msg);
+    openOrder(id);
+    loadOrders();
+  }catch(e){ alert("Не удалось выполнить действие."); }
 }
 
 let _st=null;
