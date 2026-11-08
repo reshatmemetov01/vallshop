@@ -449,7 +449,11 @@ async def purchase(
         raise CheckoutError(str(e))
 
     # Для Звёзд/Премиум сохраняем получателя для показа в «Мои заказы».
-    if display_fields is not None:
+    # НО если заказ ушёл через Fragment — в fields_json уже лежит состояние
+    # оплаты (seqno_at_send), по которому поллер определяет завершение. Его НЕ
+    # затираем, иначе заказ навсегда зависнет в «обрабатывается», хотя звёзды
+    # отправлены. (Получателя/количество для показа берём из того же состояния.)
+    if display_fields is not None and order.supplier != "fragment":
         order.fields_json = json.dumps(display_fields, ensure_ascii=False)
         await session.flush()
 

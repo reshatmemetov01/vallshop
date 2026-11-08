@@ -163,10 +163,20 @@ async def order_detail(
     elif source == "vpnresellers":
         dto["vpn_link"] = await _vpn_link(session, order)
     else:
-        # Звёзды/Премиум (FazerCard): получатель хранится списком {label,value}.
-        info = _fields_list(order)
-        if info:
+        # Звёзды/Премиум: Fragment хранит состояние dict {username, stars_qty,
+        # seqno_at_send…}; FazerCard-фолбэк — список {label,value}. Поддерживаем оба.
+        f = _fields(order)
+        if f.get("username") or f.get("stars_qty"):
+            info = []
+            if f.get("username"):
+                info.append({"label": "Получатель", "value": "@" + str(f["username"]).lstrip("@")})
+            if f.get("stars_qty"):
+                info.append({"label": "Количество", "value": f"{f['stars_qty']} ⭐️"})
             dto["info"] = info
+        else:
+            info = _fields_list(order)
+            if info:
+                dto["info"] = info
         if status == OrderStatus.COMPLETED.value and order.delivery_code:
             dto["codes"] = order.delivery_code.splitlines()
 
