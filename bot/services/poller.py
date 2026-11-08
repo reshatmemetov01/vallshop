@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from aiogram import Bot
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from liogames import LioGamesClient
 from fazercard import FazerCardClient
@@ -98,34 +98,39 @@ async def _settle_smm(bot, db, panels, config, bots, order_id) -> None:
         )
 
 
-# Сколько ждём подтверждения оплаты Fragment, прежде чем считать сбоем и вернуть.
-_FRAGMENT_TIMEOUT = timedelta(minutes=20)
+# Через сколько минут незавершённый Fragment-заказ уводим на ручную обработку
+# (НЕ возврат!) и зовём админа. TON списываются в момент отправки, поэтому
+# автовозврат недопустим — Fragment может подтвердиться и через несколько часов.
+_FRAGMENT_STUCK_MINUTES = 30
 
 
 async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
-    """Опросить оплату Fragment (по seqno) и уведомить клиента при завершении."""
+    """Опросить оплату Fragment (по seqno) и довести заказ до финала.
+
+    TON списываются с нашего кошелька при отправке — поэтому АВТОВОЗВРАТА НЕТ.
+    Если Fragment долго не подтверждает (бывает, зависает на часы), заказ
+    переводится в «Не выполненные» (ручная обработка) и об этом уведомляется
+    админ, но опрос продолжается: подтвердится позже — заказ закроется сам.
+    """
     if fragment is None:
         return
+    escalated = False
     async with db.session() as session:
         fresh = await session.get(Order, order_id)
-        if not fresh or fresh.status != OrderStatus.FULFILLING:
+        # Опрашиваем и FULFILLING, и уже уведённые на ручную обработку (NEEDS_ACTION)
+        # Fragment-заказы: Fragment может подтвердиться позже — тогда выдаём сами.
+        if not fresh or fresh.status not in (OrderStatus.FULFILLING, OrderStatus.NEEDS_ACTION):
             return
         res = await order_service.settle_fragment(session, fresh, fragment)
-        # Таймаут: оплата не подтвердилась слишком долго (не ушла в сеть) → возврат.
-        if res.get("outcome") == "progress":
+        if res.get("outcome") == "progress" and fresh.status == OrderStatus.FULFILLING:
             age = datetime.utcnow() - (fresh.created_at or datetime.utcnow())
-            if age > _FRAGMENT_TIMEOUT:
-                refund = Decimal(fresh.price_usd)
-                await balance_service.credit(
-                    session, fresh.user_id, refund, merchant_id=fresh.merchant_id
+            if age > timedelta(minutes=_FRAGMENT_STUCK_MINUTES):
+                # НЕ возвращаем деньги (TON уже ушли). На ручную обработку.
+                fresh.status = OrderStatus.NEEDS_ACTION
+                fresh.fail_reason = (
+                    "Fragment не подтвердил оплату — TON списаны, проверьте вручную"
                 )
-                await referral_service.reverse_for_order(session, fresh)
-                await mprice_service.reverse_earnings(
-                    session, fresh.merchant_id, Decimal(fresh.merchant_margin or 0)
-                )
-                fresh.status = OrderStatus.REFUNDED
-                fresh.fail_reason = "Fragment: оплата не подтвердилась (таймаут)"
-                res = {"outcome": "failed"}
+                escalated = True
         user_id = fresh.user_id
         merchant_id = fresh.merchant_id
         oid = fresh.id
@@ -135,21 +140,20 @@ async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
         await session.commit()
 
     outcome = res.get("outcome")
-    if outcome == "progress":
-        return
     cbot = _pick_bot(bots, merchant_id, bot)
     admin_ids = list(config.admin_ids) if config else []
     if outcome == "completed":
         await _notify(cbot, user_id, f"✅ Заказ #{oid} «{item_name}» выполнен — звёзды отправлены.",
                       kb.order_done_kb(oid, variant_id))
-    elif outcome == "failed":
-        await _notify(
-            cbot, user_id,
-            f"↩️ Заказ #{oid} «{item_name}» не прошёл — средства возвращены на баланс.",
-        )
+    elif escalated:
         await notify_service.notify_admins(
             bot, admin_ids,
-            f"↩️ Fragment-заказ #{oid} (<b>{item_name}</b>) не подтвердился, покупателю возвращены средства.",
+            f"⏳ Fragment-заказ #{oid} (<b>{item_name}</b>) не подтверждён за "
+            f"{_FRAGMENT_STUCK_MINUTES} мин. TON уже списаны — автовозврата НЕТ.\n"
+            f"Заказ в «Админ-панель → Текущие заказы → Не выполненные».\n"
+            f"• звёзды дошли → «✅ Выдать вручную»;\n"
+            f"• точно не дошли → «🚫 Отмена (вернуть деньги)».\n"
+            f"Бот продолжит проверять Fragment: подтвердится сам — закроется автоматически.",
         )
 
 
@@ -189,9 +193,20 @@ async def _tick(
     fragment=None,
 ) -> None:
     async with db.session() as session:
+        # Опрашиваем все заказы «в обработке», плюс Fragment-заказы, уведённые на
+        # ручную обработку (NEEDS_ACTION): Fragment может подтвердиться позже —
+        # тогда заказ закроется сам и уйдёт из «Не выполненных».
         orders = list(
             await session.scalars(
-                select(Order).where(Order.status == OrderStatus.FULFILLING)
+                select(Order).where(
+                    or_(
+                        Order.status == OrderStatus.FULFILLING,
+                        and_(
+                            Order.status == OrderStatus.NEEDS_ACTION,
+                            Order.supplier == "fragment",
+                        ),
+                    )
+                )
             )
         )
 

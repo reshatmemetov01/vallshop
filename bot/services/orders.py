@@ -480,15 +480,9 @@ async def settle_fragment(session: AsyncSession, order: Order, fragment) -> dict
         await session.flush()
         await referral_service.accrue_for_order(session, order)
         out["outcome"] = "completed"
-    elif status == "failed":
-        refund = Decimal(order.price_usd)
-        await balance_service.credit(session, order.user_id, refund, merchant_id=order.merchant_id)
-        await referral_service.reverse_for_order(session, order)
-        await mprice_service.reverse_earnings(session, order.merchant_id, Decimal(order.merchant_margin or 0))
-        order.status = OrderStatus.REFUNDED
-        order.fail_reason = "Fragment: оплата не прошла"
-        await session.flush()
-        out["outcome"] = "failed"
+    # Иначе (pending / не подтверждено) — ждём. АВТОВОЗВРАТА НЕТ: TON уже списаны
+    # с нашего кошелька, решение о возврате — только ручное (поллер уводит такой
+    # заказ в «Не выполненные» по таймауту, см. _settle_fragment).
     return out
 
 
