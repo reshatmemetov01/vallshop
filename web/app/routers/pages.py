@@ -73,6 +73,42 @@ async def admin_page() -> FileResponse:
     return FileResponse(_ADMIN)
 
 
+@router.get("/notrack")
+async def notrack(off: str | None = None) -> HTMLResponse:
+    """Пометить браузер владельца, чтобы его визиты не считались (cookie).
+
+    Открой в каждом браузере/устройстве, с которого сам заходишь на сайт.
+    ?off — снять пометку (снова считать этот браузер).
+    """
+    if off is not None:
+        resp = HTMLResponse(_notrack_html(
+            "✅ Готово. Этот браузер снова считается в посещениях."))
+        resp.delete_cookie("vs_notrack", path="/")
+        return resp
+    resp = HTMLResponse(_notrack_html(
+        "🚫 Готово. Твои визиты с этого браузера больше не учитываются в статистике."))
+    resp.set_cookie(
+        "vs_notrack", "1", max_age=60 * 60 * 24 * 365 * 3,  # ~3 года
+        path="/", samesite="lax",
+    )
+    return resp
+
+
+def _notrack_html(msg: str) -> str:
+    return (
+        "<!doctype html><html lang='ru'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<meta name='robots' content='noindex'><title>VallShop</title>"
+        "<style>body{margin:0;min-height:100vh;display:flex;align-items:center;"
+        "justify-content:center;background:#0a0f1a;color:#eef4f8;font-family:"
+        "-apple-system,Segoe UI,Roboto,Arial,sans-serif;text-align:center;padding:24px}"
+        ".c{max-width:440px}a{color:#3ba3f0}</style></head><body><div class='c'>"
+        f"<div style='font-size:18px;font-weight:700;margin-bottom:10px'>{msg}</div>"
+        "<div style='color:#a3b4c2;font-size:14px'>Можно закрыть эту страницу. "
+        "<a href='/'>На сайт →</a></div></div></body></html>"
+    )
+
+
 @router.get("/verify")
 async def verify_page() -> FileResponse:
     return FileResponse(_VERIFY)

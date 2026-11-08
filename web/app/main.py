@@ -40,15 +40,45 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VallShop Web API", version="0.1.0", lifespan=lifespan)
 
 
+# Маркеры ботов/краулеров/скриптов в User-Agent (нижний регистр, подстрока).
+# Имена ботов обычно содержат "bot" (googlebot, yandexbot, telegrambot…) —
+# ловим его отдельно, кроме телефона Cubot (в его UA тоже есть 'bot').
+_BOT_MARKERS = (
+    "crawl", "spider", "slurp", "mediapartners", "facebookexternalhit", "facebot",
+    "embedly", "whatsapp", "telegram", "discord", "slack", "vkshare",
+    "skypeuripreview", "linkedin", "redditbot", "pinterest", "tumblr", "nuzzel",
+    "applebot", "duckduck", "baiduspider", "petal", "bytespider", "ahrefs",
+    "semrush", "mj12", "dotbot", "dataforseo", "blexbot", "seznam", "archive.org",
+    "ia_archiver", "python-", "go-http", "okhttp", "java/", "libwww", "scrapy",
+    "httpclient", "aiohttp", "node-fetch", "axios", "curl/", "wget", "headless",
+    "phantom", "puppeteer", "playwright", "uptimerobot", "pingdom", "statuscake",
+    "site24x7", "monitoring", "+http", "google-inspectiontool", "feedfetcher",
+)
+
+
+def _is_bot(ua: str) -> bool:
+    u = (ua or "").lower()
+    if not u:
+        return True  # пустой User-Agent — почти всегда скрипт/бот
+    probe = u.replace("cubot", "")  # Cubot — это телефон, а не бот
+    if "bot" in probe:
+        return True
+    return any(m in u for m in _BOT_MARKERS)
+
+
 @app.middleware("http")
 async def _count_visits(request: Request, call_next):
-    """Считать посещения публичных страниц (загрузки HTML). Лучший-эффорт."""
+    """Считать посещения живых людей (не боты, не владелец). Лучший-эффорт."""
     response = await call_next(request)
     try:
         if request.method == "GET" and response.status_code == 200:
             ct = response.headers.get("content-type", "")
             path = request.url.path
-            if "text/html" in ct and not path.startswith("/admin"):
+            if ("text/html" in ct
+                    and not path.startswith("/admin")
+                    and path != "/notrack"
+                    and not request.cookies.get("vs_notrack")      # исключить владельца
+                    and not _is_bot(request.headers.get("user-agent", ""))):
                 await _log_visit(request)
     except Exception:  # noqa: BLE001 — статистика не должна ломать ответ
         pass
@@ -59,6 +89,8 @@ async def _log_visit(request: Request) -> None:
     from sqlalchemy import select, update
     xff = request.headers.get("x-forwarded-for", "")
     ip = (xff.split(",")[0].strip() if xff else "") or (request.client.host if request.client else "")
+    if ip and ip in settings.owner_ips:
+        return  # заходы владельца (по IP) не считаем
     ua = request.headers.get("user-agent", "")
     visitor = hashlib.sha256(f"{ip}|{ua}|{settings.jwt_secret}".encode()).hexdigest()[:32]
     day = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%d")  # МСК

@@ -28,6 +28,10 @@ class Settings:
     # Админ-панель (admin.vallshop.com) — отдельный вход, не связан с аккаунтами.
     admin_user: str = _get("ADMIN_PANEL_USER", "")
     admin_password: str = _get("ADMIN_PANEL_PASSWORD", "")
+    # IP владельца, заходы с которых не считаются в посещениях (через запятую).
+    owner_ips: frozenset = frozenset(
+        p.strip() for p in _get("OWNER_IPS", "").replace(";", ",").split(",") if p.strip()
+    )
     # Имя бота (без @) для Telegram Login Widget. Домен сайта должен быть
     # привязан к этому боту через @BotFather → /setdomain.
     telegram_bot_username: str = _get("TELEGRAM_BOT_USERNAME", "")

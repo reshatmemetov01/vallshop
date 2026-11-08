@@ -97,6 +97,10 @@
     <div class="cards" id="siteCards"></div>
 
     <h2>👁 Посещения сайта</h2>
+    <div class="hint" style="color:var(--dim);font-size:13px;margin:-6px 0 12px">
+      Считаются только живые люди — боты и краулеры не учитываются.
+      <a href="#" id="notrackLink" target="_blank" style="color:var(--accent2)">Не считать мои визиты →</a>
+    </div>
     <div class="cards" id="visitCards"></div>
     <div class="chart" id="chart"></div>
 
@@ -212,6 +216,9 @@ function fmtDate(iso){ if(!iso) return "—"; try{ return new Date(iso).toLocale
 async function boot(){
   show("app");
   renderPresets();
+  // Ссылка «не считать мои визиты» ведёт на основной сайт (без поддомена admin.).
+  const site = location.origin.replace("://admin.", "://");
+  const nl = $("notrackLink"); if(nl) nl.href = site + "/notrack";
   await Promise.all([loadOverview(), loadVisits(), loadUsers()]);
 }
 
