@@ -271,13 +271,14 @@ async def cb_admin_reason(call: CallbackQuery, db: Database, config: BotConfig) 
         code = req.code
         expected = req.expected_price
         actual = req.actual_price
+        user_text = template.format(
+            expected=expected if expected is not None else "нужную",
+            actual=actual if actual is not None else "—",
+        )
         await act.set_free(s, code)  # вернуть код в свободные для повторной попытки
         await act.decide_request(s, rid, "rejected")
+        req.reason = user_text       # сохранить причину — показывается клиенту (в т.ч. на сайте)
         await s.commit()
-    user_text = template.format(
-        expected=expected if expected is not None else "нужную",
-        actual=actual if actual is not None else "—",
-    )
     try:
         await call.bot.send_message(uid, user_text, link_preview_options=_NOPREV)
     except Exception as e:  # noqa: BLE001

@@ -438,6 +438,9 @@ class ActivationRequest(Base):
     actual_price: Mapped[Optional[int]] = mapped_column(Integer)
     # "review" | "approved" | "rejected"
     status: Mapped[str] = mapped_column(String(16), default="review")
+    # Причина отклонения (тот же текст, что уходит клиенту) — показывается в
+    # «Мои активации» на сайте, чтобы клиент видел, почему заявку отклонили.
+    reason: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 

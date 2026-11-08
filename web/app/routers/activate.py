@@ -151,6 +151,7 @@ async def mine(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Список заявок текущего аккаунта со статусами («Мои активации»)."""
+    from ..textfmt import clean_plain
     rows = await act.list_for_account(session, acc.id)
     items = [{
         "id": r.id,
@@ -160,6 +161,8 @@ async def mine(
         "status": r.status,
         "status_label": _STATUS_LABEL.get(r.status, r.status),
         "expected_price": r.expected_price,
+        "actual_price": r.actual_price,
+        "reason": clean_plain(r.reason) if r.reason else None,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "decided_at": r.decided_at.isoformat() if r.decided_at else None,
     } for r in rows]

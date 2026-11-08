@@ -1627,10 +1627,37 @@ function topupRow(t){
 }
 function activationRow(a){
   const cls = a.status==="approved" ? "done" : (a.status==="review" ? "work" : "bad");
-  return `<div class="trow">
+  return `<div class="trow" style="cursor:pointer" onclick="openActivation(${a.id})">
     <div class="tt">${esc(a.product||"Активация")}<div class="td">Ник: ${esc(a.nickname||"—")} · код ${esc(a.code)} · ${esc(_fmtDate(a.created_at))}</div></div>
     <span class="st ${cls}">${esc(a.status_label)}</span>
   </div>`;
+}
+function openActivation(id){
+  const a = (_acc.activations||[]).find(x=>x.id===id);
+  if(!a) return;
+  const cls = a.status==="approved" ? "done" : (a.status==="review" ? "work" : "bad");
+  const kv = (k,v)=>`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  $("ordtitle").textContent = a.product || "Активация";
+  let h = "";
+  h += kv("Статус", `<span class="st ${cls}">${esc(a.status_label)}</span>`);
+  h += kv("Товар", esc(a.product||"—"));
+  h += kv("Ник Roblox", esc(a.nickname||"—"));
+  h += kv("Код", esc(a.code));
+  if(a.expected_price!=null) h += kv("Ожидаемая цена", esc(a.expected_price)+" R$");
+  if(a.actual_price!=null) h += kv("Фактическая цена", esc(a.actual_price)+" R$");
+  h += kv("Создана", esc(_fmtDate(a.created_at)));
+  if(a.decided_at) h += kv("Решение", esc(_fmtDate(a.decided_at)));
+  if(a.status==="rejected"){
+    h += a.reason
+      ? `<div class="okmsg warn" style="margin-top:14px">Причина отклонения:</div><div class="instrbox">${descHtml(a.reason)}</div>`
+      : `<div class="hint" style="margin-top:14px">Заявка отклонена. Если нужна помощь — напишите в поддержку.</div>`;
+  }else if(a.status==="review"){
+    h += `<div class="hint" style="margin-top:14px">Заявка на проверке. Статус обновится после решения администратора.</div>`;
+  }else if(a.status==="approved"){
+    h += `<div class="okmsg" style="margin-top:14px">✅ Активация выполнена — Робуксы начислены.</div>`;
+  }
+  $("ordbody").innerHTML = h;
+  $("ordovl").classList.add("show");
 }
 
 async function openOrder(id){

@@ -47,6 +47,21 @@ def ensure_web_accounts_nullable(conn: Connection) -> None:
     conn.exec_driver_sql("DROP TABLE _web_accounts_old")
 
 
+def ensure_activation_reason(conn: Connection) -> None:
+    """Добавить activation_requests.reason, если его ещё нет (идемпотентно).
+
+    Сайт читает причину отклонения в «Мои активации»; колонка обязана
+    существовать до запуска нового кода, независимо от деплоя бота.
+    """
+    from sqlalchemy import inspect
+    inspector = inspect(conn)
+    if "activation_requests" not in set(inspector.get_table_names()):
+        return  # create_all создаст таблицу уже с колонкой
+    cols = {c["name"] for c in inspector.get_columns("activation_requests")}
+    if "reason" not in cols:
+        conn.exec_driver_sql("ALTER TABLE activation_requests ADD COLUMN reason TEXT")
+
+
 def ensure_source_columns(conn: Connection) -> None:
     """Добавить orders.source / topups.source, если их ещё нет (идемпотентно).
 
