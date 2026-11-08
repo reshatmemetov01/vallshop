@@ -818,7 +818,7 @@ function renderCrumbs(){
   crumbs.innerHTML = parts.join(" ");
 }
 
-function esc(s){return (s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
 // Тосты (всплывающие уведомления)
 function toast(msg, type){
@@ -1643,8 +1643,8 @@ function openActivation(id){
   h += kv("Товар", esc(a.product||"—"));
   h += kv("Ник Roblox", esc(a.nickname||"—"));
   h += kv("Код", esc(a.code));
-  if(a.expected_price!=null) h += kv("Ожидаемая цена", esc(a.expected_price)+" R$");
-  if(a.actual_price!=null) h += kv("Фактическая цена", esc(a.actual_price)+" R$");
+  if(a.expected_price!=null) h += kv("Ожидаемая цена", esc(String(a.expected_price))+" R$");
+  if(a.actual_price!=null) h += kv("Фактическая цена", esc(String(a.actual_price))+" R$");
   h += kv("Создана", esc(_fmtDate(a.created_at)));
   if(a.decided_at) h += kv("Решение", esc(_fmtDate(a.decided_at)));
   if(a.status==="rejected"){
