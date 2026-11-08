@@ -16,6 +16,8 @@ from bot.db import models as _models  # noqa: F401 — регистрация м
 from bot.db.base import Base
 from bot.db.models import SiteVisit, SiteVisitLog
 
+from . import models as _web_models  # noqa: F401 — регистрация таблиц сайта (site_product_desc)
+
 from .config import settings
 from .db import database
 from .migrate import ensure_source_columns, ensure_web_accounts_nullable

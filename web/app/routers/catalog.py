@@ -65,11 +65,15 @@ async def product_detail(product_id: int,
     if not product:
         raise HTTPException(status_code=404, detail="Товар не найден")
 
+    from ..services import sitedesc as sitedesc_service
+    description = await sitedesc_service.get_one(session, product_id)
+
     children = await catalog_service.list_children(session, product_id)
     if children:
         return {
             "type": "category",
             "product": _product_dto(product),
+            "description": description,
             "children": [
                 {**_product_dto(c),
                  "has_children": await catalog_service.children_count(session, c.id) > 0}
@@ -79,7 +83,8 @@ async def product_detail(product_id: int,
 
     variants = await catalog_service.list_variants(session, product_id)
     items = await _variant_items(session, variants)
-    return {"type": "product", "product": _product_dto(product), "variants": items}
+    return {"type": "product", "product": _product_dto(product),
+            "description": description, "variants": items}
 
 
 async def _variant_items(session, variants, *, with_product: bool = False) -> list:

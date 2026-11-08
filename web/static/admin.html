@@ -54,6 +54,8 @@
   label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px;font-weight:600}
   input{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:11px;padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit}
   input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(42,171,238,.14)}
+  textarea{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:11px;padding:11px 13px;color:var(--text);font-size:14px;font-family:inherit;line-height:1.5;resize:vertical}
+  textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(42,171,238,.14)}
   .msg{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
   /* Дашборд */
   h2{font-size:17px;margin:26px 0 12px;display:flex;align-items:center;gap:8px}
@@ -104,6 +106,7 @@
     <nav class="nav" id="nav">
       <button class="on" data-page="dash" onclick="showPage('dash')">📊 Дашборд</button>
       <button data-page="orders" onclick="showPage('orders')">🧾 Заказы</button>
+      <button data-page="design" onclick="showPage('design')">🎨 Оформление</button>
       <button data-page="visits" onclick="showPage('visits')">👁 Журнал визитов</button>
     </nav>
     <div class="sp"></div>
@@ -171,6 +174,15 @@
       </div>
     </div>
     <div id="orderDetailView" style="display:none"></div>
+  </div>
+
+  <div class="wrap" style="padding-bottom:50px;display:none" id="pageDesign">
+    <h2>🎨 Оформление — описания разделов</h2>
+    <div class="hint" style="color:var(--dim);font-size:13px;margin:-6px 0 14px">
+      Описание показывается на сайте сверху при открытии раздела/товара. Пустое поле — описание не показывается.
+      Хранится отдельно для сайта (бота не затрагивает).
+    </div>
+    <div id="sectionsList"></div>
   </div>
 
   <div class="wrap" style="padding-bottom:50px;display:none" id="pageVisits">
@@ -277,14 +289,43 @@ async function resetVisits(e){
 
 // ── Страницы (Дашборд / Журнал визитов) ─────────────────────────────────────
 let _visitsLoaded=false;
-let _ordersLoaded=false;
+let _ordersLoaded=false, _designLoaded=false;
 function showPage(p){
   $("pageDash").style.display = p==="dash"?"":"none";
   $("pageOrders").style.display = p==="orders"?"":"none";
+  $("pageDesign").style.display = p==="design"?"":"none";
   $("pageVisits").style.display = p==="visits"?"":"none";
   document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on", b.dataset.page===p));
   if(p==="visits" && !_visitsLoaded){ loadVisitLog(); }
   if(p==="orders" && !_ordersLoaded){ _ordersLoaded=true; loadOrders(); }
+  if(p==="design" && !_designLoaded){ _designLoaded=true; loadSections(); }
+}
+
+async function loadSections(){
+  const box=$("sectionsList"); box.innerHTML='<div class="state">Загрузка…</div>';
+  try{
+    const d=await api("/api/admin/sections"); const items=d.items||[];
+    if(!items.length){ box.innerHTML='<div class="state">Каталог пуст.</div>'; return; }
+    box.innerHTML=items.map(s=>`
+      <div class="dcard" style="margin-bottom:10px;margin-left:${Math.min(s.depth,4)*18}px">
+        ${s.path?`<div class="dim" style="font-size:12px">${_esc(s.path)}</div>`:""}
+        <div style="font-weight:700;margin:2px 0 8px">${_esc(s.title)} ${s.has_desc?'<span class="st ok">есть описание</span>':''}</div>
+        <textarea id="sd_${s.id}" rows="3" placeholder="Описание раздела (покажется на сайте сверху). Пусто — не показывать.">${_esc(s.description||"")}</textarea>
+        <div class="srow" style="margin-top:8px">
+          <button class="btn" onclick="saveSection(${s.id})">Сохранить</button>
+          <span id="sdmsg_${s.id}" class="dim" style="align-self:center"></span>
+        </div>
+      </div>`).join("");
+  }catch(e){ box.innerHTML='<div class="state">Не удалось загрузить разделы.</div>'; }
+}
+async function saveSection(id){
+  const val=$("sd_"+id).value, msg=$("sdmsg_"+id); msg.textContent="Сохраняю…";
+  try{
+    const r=await api("/api/admin/sections/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({description:val})});
+    if(r&&r.detail){ msg.textContent="Ошибка: "+r.detail; return; }
+    msg.textContent = r.has_desc?"✅ Сохранено":"✅ Очищено";
+    setTimeout(()=>{ msg.textContent=""; },2500);
+  }catch(e){ msg.textContent="Ошибка сохранения"; }
 }
 
 function _browser(ua){

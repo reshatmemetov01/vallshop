@@ -150,6 +150,31 @@ async def order_detail(
     return data
 
 
+class DescIn(BaseModel):
+    description: str = ""
+
+
+@router.get("/sections")
+async def sections(
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from ..services import sitedesc as sitedesc_service
+    return {"items": await sitedesc_service.sections_tree(session)}
+
+
+@router.put("/sections/{product_id}")
+async def set_section_desc(
+    product_id: int,
+    body: DescIn,
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from ..services import sitedesc as sitedesc_service
+    await sitedesc_service.set_one(session, product_id, body.description)
+    return {"ok": True, "has_desc": bool((body.description or "").strip())}
+
+
 @router.post("/orders/{order_id}/action")
 async def order_action(
     order_id: int,

@@ -23,8 +23,10 @@ from bot.db.models import (
     VpnSubscription,
     WebAccount,
 )
+from bot.services import catalog as catalog_service
 from bot.services import smm as smm_service
 from bot.services import smm_panels
+from bot import texts
 
 # Человекочитаемый статус (данные, без HTML — оформление на фронте).
 _STATUS_RU = {
@@ -165,6 +167,18 @@ async def order_detail(
             dto["info"] = info
         if status == OrderStatus.COMPLETED.value and order.delivery_code:
             dto["codes"] = order.delivery_code.splitlines()
+
+    # Текст выдачи (инструкция) — настраивается в боте, наследуется номиналом.
+    # Показываем, когда заказ выполнен: в нём бывает важная инструкция по активации.
+    if status == OrderStatus.COMPLETED.value and variant is not None:
+        try:
+            dtext = await catalog_service.resolve_text(
+                session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
+            )
+            if dtext:
+                dto["delivered_text"] = dtext
+        except Exception:  # noqa: BLE001 — текст не критичен
+            pass
 
     if order.fail_reason and "note" not in dto:
         dto["fail_reason"] = order.fail_reason
