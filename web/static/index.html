@@ -959,11 +959,14 @@ async function _catalogNode(id, title){
   try{
     const data = await api("/api/catalog/" + id);
     const desc = data.description ? `<div class="pdesc reveal">${descHtml(data.description)}</div>` : "";
+    // Раздел «Звёзды»: показываем готовые пакеты + курс, как на главной.
+    const isStars = /звёзд|звезд/i.test((data.product && data.product.title) || "");
+    const starsHtml = isStars ? await starsSectionHtml() : "";
     if(data.type === "category"){
-      content.innerHTML = desc + `<div class="grid">${data.children.map(productCard).join("")}</div>`;
+      content.innerHTML = desc + starsHtml + `<div class="grid">${data.children.map(productCard).join("")}</div>`;
     } else {
       const cards = data.variants.map(variantCard).join("");
-      content.innerHTML = desc + (cards
+      content.innerHTML = desc + starsHtml + (cards
         ? `<div class="vgrid">${cards}</div>`
         : '<div class="state">Нет доступных номиналов.</div>');
     }
@@ -1756,6 +1759,32 @@ async function loadStarPackages(products){
     sec.style.display = "";
     revealScan();
   }catch(e){ sec.style.display="none"; }
+}
+
+// Готовые пакеты звёзд + курс — для раздела «Звёзды» в каталоге (как на главной).
+async function starsSectionHtml(){
+  try{
+    const lim = await api("/api/buy/stars-quote");
+    const pkgs = lim.packages || [];
+    if(!lim.variant_id || !pkgs.length) return "";
+    starsVid = lim.variant_id;
+    vmap[starsVid] = {id: starsVid, title: lim.variant_title || "Telegram Звёзды",
+                      buy_kind: "stars", source: "fazercard"};
+    const hitQ = 250;
+    const rate = (lim.rate_per_star != null)
+      ? `<div class="section-sub" style="font-weight:700;color:var(--accent);margin-top:-6px">Курс — ${rub(lim.rate_per_star)} за 1 звезду</div>`
+      : "";
+    const grid = pkgs.map(p => `
+      <div class="pkg${p.qty===hitQ?' hit':''}">
+        ${p.qty===hitQ?'<div class="hit-badge">ХИТ</div>':''}
+        <div class="q">${p.qty} <span class="star">★</span></div>
+        <div class="inst">⚡ Мгновенная выдача</div>
+        <div class="pp">${p.price_rub != null ? rub(p.price_rub) : "—"}</div>
+        <button onclick="openStars(${p.qty})">Купить</button>
+      </div>`).join("");
+    return `<div class="section-sub">Готовые пакеты с мгновенной выдачей. Нужно другое количество — откройте «Своё количество» ниже.</div>`
+      + rate + `<div class="pkgs">${grid}</div>`;
+  }catch(e){ return ""; }
 }
 // Курсы Steam на карточке каталога (вместо «—»): по валюте — ₽ за 1 единицу.
 let _steamCfg = null;
