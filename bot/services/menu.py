@@ -69,8 +69,8 @@ REGISTRY: List[Entry] = [
     Entry("main.activate", "main", "Активировать Код",   "5422711448914647622", "primary", "cb", "activate", 30, full_width=True, plain="🎟", head_only=True),
     Entry("main.faq",      "main", "FAQ / Правила",      "6030848053177486888", "danger",  "cb", "faq", 40, plain="❓"),
     Entry("main.reviews",  "main", "Отзывы",             "5890925363067886150", "primary", "cb", "reviews", 50, plain="⭐"),
-    Entry("main.earn",     "main", "Заработать",         "5904462880941545555", "success", "cb", "earn", 60, full_width=True, plain="💰"),
-    Entry("main.site",     "main", "🌐 Сайт",            None,                  "primary", "url", "site", 70, full_width=True, plain="🌐", head_only=True),
+    Entry("main.earn",     "main", "Заработать",         "5904462880941545555", "success", "cb", "earn", 60, plain="💰"),
+    Entry("main.site",     "main", "🌐 Сайт",            None,                  "primary", "url", "site", 70, plain="🌐", head_only=True),
     # Профиль (каждая на своей строке)
     Entry("profile.balance",  "profile", "Мой баланс",          "5778421276024509124", "danger",  "cb", "balance", 10, plain="💳"),
     Entry("profile.myorders", "profile", "Мои заказы",          "5904359114531675993", "primary", "cb", "myorders", 20, plain="🧾"),
