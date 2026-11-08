@@ -70,6 +70,7 @@ REGISTRY: List[Entry] = [
     Entry("main.faq",      "main", "FAQ / Правила",      "6030848053177486888", "danger",  "cb", "faq", 40, plain="❓"),
     Entry("main.reviews",  "main", "Отзывы",             "5890925363067886150", "primary", "cb", "reviews", 50, plain="⭐"),
     Entry("main.earn",     "main", "Заработать",         "5904462880941545555", "success", "cb", "earn", 60, full_width=True, plain="💰"),
+    Entry("main.site",     "main", "🌐 Сайт",            None,                  "primary", "url", "site", 70, full_width=True, plain="🌐", head_only=True),
     # Профиль (каждая на своей строке)
     Entry("profile.balance",  "profile", "Мой баланс",          "5778421276024509124", "danger",  "cb", "balance", 10, plain="💳"),
     Entry("profile.myorders", "profile", "Мои заказы",          "5904359114531675993", "primary", "cb", "myorders", 20, plain="🧾"),
@@ -93,6 +94,9 @@ _BY_KEY: Dict[str, Entry] = {e.key: e for e in REGISTRY}
 #   _captions[merchant_id][skey] -> текст экрана
 _overrides: Dict[int, Dict[str, dict]] = {}
 _captions: Dict[int, Dict[str, str]] = {}
+# Ссылка кнопки «Сайт» в разрезе магазина (редактируется в «Оформлении»).
+DEFAULT_SITE_URL = "https://vallshop.com"
+_site_urls: Dict[int, str] = {}
 # Названия магазинов франшиз (для нейтральных дефолт-текстов): merchant_id -> title.
 _titles: Dict[int, str] = {}
 
@@ -207,7 +211,7 @@ def caption(screen: str, default: str, merchant_id: int = HEAD_MERCHANT_ID, **fm
 
 # ── Загрузка/обновление кэша ────────────────────────────────────────────────
 async def load(db: Database) -> None:
-    global _overrides, _captions, _titles
+    global _overrides, _captions, _titles, _site_urls
     from ..db.models import Merchant
     try:
         async with db.session() as session:
@@ -228,6 +232,9 @@ async def load(db: Database) -> None:
             _captions = {
                 mid: {k: v for k, v in vals.items() if k.startswith("cap_")}
                 for mid, vals in grouped.items()
+            }
+            _site_urls = {
+                mid: vals["site_url"] for mid, vals in grouped.items() if vals.get("site_url")
             }
     except Exception:  # noqa: BLE001 — кэш не должен ронять бота
         log.exception("Не удалось загрузить оформление меню")
@@ -327,5 +334,20 @@ async def set_caption(
     """Задать/сбросить текст экрана (ключ cap_<screen>) для магазина."""
     async with db.session() as session:
         await msettings_service.set(session, merchant_id, f"cap_{screen}", text)
+        await session.commit()
+    await load(db)
+
+
+def site_url(merchant_id: int = HEAD_MERCHANT_ID) -> str:
+    """Ссылка кнопки «Сайт» для магазина (по умолчанию — наш сайт)."""
+    return _site_urls.get(merchant_id) or DEFAULT_SITE_URL
+
+
+async def set_site_url(
+    db: Database, url: Optional[str], merchant_id: int = HEAD_MERCHANT_ID
+) -> None:
+    """Задать ссылку кнопки «Сайт» (None/пусто — вернуть к значению по умолчанию)."""
+    async with db.session() as session:
+        await msettings_service.set(session, merchant_id, "site_url", (url or "").strip() or None)
         await session.commit()
     await load(db)

@@ -45,6 +45,7 @@ class APState(StatesGroup):
     set_pay_heading = State()
     set_stars_text = State()
     set_stars_emoji = State()
+    set_site_url = State()
 
 
 def _btn(text: str, data: str) -> InlineKeyboardButton:
@@ -173,6 +174,8 @@ async def _show_button(call: CallbackQuery, key: str) -> None:
     emoji_state = "🙂 есть" if r.emoji_id else "— нет"
     vis = "🟢 видна" if r.enabled else "🔴 скрыта"
     color_name = _MENU_COLOR_NAME.get(r.style, "без цвета")
+    is_site = e.kind == "url" and e.target == "site"
+    link_line = f"\nСсылка: <code>{menu_service.site_url()}</code>" if is_site else ""
     caption = (
         f"🔧 <b>Кнопка</b>\n"
         f"Меню: {menu_service.MENU_TITLES.get(e.menu, e.menu)}\n"
@@ -180,12 +183,15 @@ async def _show_button(call: CallbackQuery, key: str) -> None:
         f"Эмодзи: {emoji_state}\n"
         f"Цвет: {color_name}\n"
         f"Видимость: {vis}"
+        f"{link_line}"
     )
     kb = InlineKeyboardBuilder()
     kb.row(
         _btn("✏️ Текст", f"ap_lbl:{key}"),
         _btn("🙂 Эмодзи", f"ap_emo:{key}"),
     )
+    if is_site:
+        kb.row(_btn("🔗 Ссылка", f"ap_url:{key}"))
     kb.row(_btn(f"🎨 Цвет: {color_name}", f"ap_color:{key}"))
     kb.row(
         _btn("🔼 Вверх", f"ap_up:{key}"),
@@ -662,6 +668,38 @@ async def msg_label(message: Message, db: Database, state: FSMContext) -> None:
     await state.clear()
     kb = InlineKeyboardBuilder().row(_btn("⬅️ К кнопке", f"ap_btn:{key}")).as_markup()
     await message.answer("✅ Текст кнопки обновлён", reply_markup=kb)
+
+
+# ── Ссылка кнопки «Сайт» ─────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("ap_url:"))
+async def cb_siteurl_ask(call: CallbackQuery, state: FSMContext) -> None:
+    key = call.data.split(":", 1)[1]
+    await state.set_state(APState.set_site_url)
+    await state.update_data(key=key)
+    await call.message.edit_text(
+        f"🔗 Текущая ссылка: <code>{menu_service.site_url()}</code>\n\n"
+        "Пришлите новую ссылку (должна начинаться с http:// или https://).\n"
+        "<code>0</code> — вернуть по умолчанию.",
+        reply_markup=_cancel(f"ap_btn:{key}"),
+    )
+    await call.answer()
+
+
+@router.message(APState.set_site_url)
+async def msg_siteurl(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    key = data.get("key")
+    raw = (message.text or "").strip()
+    if raw == "0":
+        await menu_service.set_site_url(db, None)
+    elif raw.startswith("http://") or raw.startswith("https://"):
+        await menu_service.set_site_url(db, raw[:255])
+    else:
+        await message.answer("Ссылка должна начинаться с http:// или https:// (или 0 — по умолчанию).")
+        return
+    await state.clear()
+    kb = InlineKeyboardBuilder().row(_btn("⬅️ К кнопке", f"ap_btn:{key}")).as_markup()
+    await message.answer("✅ Ссылка кнопки «Сайт» обновлена", reply_markup=kb)
 
 
 # ── Эмодзи кнопки ────────────────────────────────────────────────────────────

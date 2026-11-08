@@ -141,7 +141,8 @@ def _render_menu(menu: str, url_map: Optional[dict] = None, merchant_id: int = 0
 def main_menu_kb(
     is_admin: bool = False, is_merchant_admin: bool = False, merchant_id: int = 0
 ) -> InlineKeyboardMarkup:
-    kb = _render_menu("main", merchant_id=merchant_id)
+    from .services import menu as menu_service
+    kb = _render_menu("main", {"site": menu_service.site_url(merchant_id)}, merchant_id=merchant_id)
     # Админ-панель платформы — только в головном боте (не в ботах франшиз).
     if is_admin and merchant_id == 0:
         kb.row(_b("Админ-панель", callback_data="admin", style="danger", icon=EMOJI["admin"]))
