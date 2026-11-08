@@ -106,6 +106,22 @@ class ChannelGateMiddleware(BaseMiddleware):
 
         sub = await channel_service.is_subscribed(bot, merchant_id, user.id)
         if sub is False:
+            # Регистрируем пользователя ДО блокировки: иначе новые люди,
+            # остановленные обязательной подпиской, не попадают в users
+            # и не считаются в статистике («Всего» не растёт, «Новых» = 0).
+            try:
+                from .services import orders as order_service
+                async with db.session() as s:
+                    await order_service.ensure_user(
+                        s,
+                        user_id=user.id,
+                        username=getattr(user, "username", None),
+                        full_name=getattr(user, "full_name", None),
+                        merchant_id=merchant_id,
+                    )
+                    await s.commit()
+            except Exception:  # noqa: BLE001 — учёт не должен ломать гейт
+                log.exception("ChannelGate: не удалось зарегистрировать пользователя %s", user.id)
             await _send_gate(event, cfg, kb)
             return None  # блокируем действие
         return await handler(event, data)

@@ -90,6 +90,15 @@ async def users_stats(
     return {"total": int(total), "new": int(new)}
 
 
+async def franchise_users_count(session: AsyncSession) -> int:
+    """Кол-во пользователей франшиз (merchant_id != головной) — для разделения
+    «мои» клиенты от франшизных в общей статистике."""
+    n = await session.scalar(
+        select(func.count()).select_from(User).where(User.merchant_id != HEAD_MERCHANT_ID)
+    )
+    return int(n or 0)
+
+
 async def activity_stats(
     session: AsyncSession, merchant_id: Optional[int] = None
 ) -> dict:

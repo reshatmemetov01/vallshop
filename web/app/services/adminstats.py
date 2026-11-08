@@ -70,9 +70,11 @@ async def bot_block(session: AsyncSession, preset: str = "7d") -> dict:
     balance = await bot_stats.total_balance(session, HEAD_MERCHANT_ID)
     orders_n, revenue = await _orders_sum(session, start, end, source="bot")
     tn, ts = await _topups_sum(session, start, end, source="bot")
+    franchise = await bot_stats.franchise_users_count(session)
     return {
         "preset": preset, "label": label,
         "users_total": users["total"], "users_new": users["new"],
+        "franchise_users": franchise,
         "active": activity["active"], "inactive": activity["inactive"],
         "balance_rub": float(balance),
         "orders": orders_n, "revenue_rub": float(revenue),

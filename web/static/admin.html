@@ -161,7 +161,8 @@ async function loadOverview(){
       card("Пополнения всего", rub(t.topups_rub), `${t.topups} шт.`) +
       card("Баланс клиентов", rub(t.balance_rub));
     $("botCards").innerHTML =
-      card("Пользователи", b.users_total, `+${b.users_new} за период`) +
+      card("Пользователи (мои)", b.users_total, `+${b.users_new} за период`) +
+      card("Франшизные", b.franchise_users!=null?b.franchise_users:"—", "клиенты франшиз") +
       card("Активные", b.active, `неактивных: ${b.inactive}`) +
       card("Заказы", b.orders, "завершённые") +
       card("Выручка", rub(b.revenue_rub)) +
