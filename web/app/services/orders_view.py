@@ -28,6 +28,8 @@ from bot.services import smm as smm_service
 from bot.services import smm_panels
 from bot import texts
 
+from ..textfmt import clean_plain
+
 # Человекочитаемый статус (данные, без HTML — оформление на фронте).
 _STATUS_RU = {
     "completed": "выполнен",
@@ -175,7 +177,8 @@ async def order_detail(
             dtext = await catalog_service.resolve_text(
                 session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
             )
-            if dtext:
+            dtext = clean_plain(dtext)   # убрать Telegram-разметку (<b>, <tg-emoji>…)
+            if dtext and dtext.strip():
                 dto["delivered_text"] = dtext
         except Exception:  # noqa: BLE001 — текст не критичен
             pass

@@ -679,6 +679,7 @@
     <div class="mmsg" id="buymsg"></div>
     <div class="row">
       <button class="cancel" onclick="closeBuy()" id="buycancel">Отмена</button>
+      <button class="cancel" id="buyorders" style="display:none" onclick="goBuyOrder()">Мои заказы</button>
       <button class="pay" id="buybtn" onclick="doBuy()">Купить</button>
     </div>
   </div>
@@ -1215,6 +1216,7 @@ function openBuy(id){
   $("buybtn").style.display = "";
   // вернуть видимость полей (могли быть скрыты после предыдущей покупки)
   $("buyprice").style.display = ""; $("buytotal").style.display = ""; $("buymsg").style.display = "";
+  $("buyorders").style.display = "none";
   // @username — для Звёзд/Премиум
   $("buyunamewrap").style.display = (kind==="stars"||kind==="premium") ? "" : "none";
   $("buyuname").value = "";
@@ -1416,7 +1418,8 @@ async function doBuy(){
 function descHtml(t){ return esc(t||"").replace(/\n/g,"<br>"); }
 
 // ── Обработка заказа в окне покупки: анимация → опрос статуса → выдача ──────────
-let _buyPollTimer=null, _buyPollTries=0;
+let _buyPollTimer=null, _buyPollTries=0, _buyOrderId=null;
+function goBuyOrder(){ const id=_buyOrderId; closeBuy(); if(id) openOrder(id); else showOrders(); }
 function _hideBuyInputs(){
   ["buyunamewrap","buylinkwrap","buysteamwrap","buytopupwrap","buyqtywrap","buyprice","buytotal","buymsg"]
     .forEach(id=>{ const e=$(id); if(e) e.style.display="none"; });
@@ -1425,6 +1428,8 @@ function _hideBuyInputs(){
 }
 function startPurchaseFlow(data){
   _hideBuyInputs();
+  _buyOrderId = data.order_id;
+  $("buyorders").style.display = "";     // «Мои заказы» рядом с «Закрыть» во время обработки
   _buyPollTries = 0;
   if(_buyPollTimer){ clearTimeout(_buyPollTimer); _buyPollTimer=null; }
   $("buyresult").innerHTML =
@@ -1457,6 +1462,7 @@ function _buyActionsHtml(oid){
     + `<button class="catbtn" onclick="closeBuy();goCatalog()">В Каталог</button>`;
 }
 function renderBuyFinal(o){
+  $("buyorders").style.display = "none";
   let html = "";
   if(o.status==="completed"){
     html += `<div class="buydone"><div class="bdcheck">✓</div><div class="bdtitle">Заказ выполнен</div></div>`;
@@ -1484,6 +1490,7 @@ function renderBuyFinal(o){
   $("buyresult").innerHTML = html;
 }
 function renderBuyPending(oid){
+  $("buyorders").style.display = "none";
   $("buyresult").innerHTML =
     `<div class="okmsg warn">⏳ Заказ обрабатывается дольше обычного. Он не потерян — выдача появится в «Мои заказы», и мы напишем в Telegram, когда будет готово.</div>`
     + _buyActionsHtml(oid);
