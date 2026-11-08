@@ -53,6 +53,13 @@ _BOT_MARKERS = (
     "httpclient", "aiohttp", "node-fetch", "axios", "curl/", "wget", "headless",
     "phantom", "puppeteer", "playwright", "uptimerobot", "pingdom", "statuscake",
     "site24x7", "monitoring", "+http", "google-inspectiontool", "feedfetcher",
+    # Сетевые сканеры/сборщики (часто без Accept-Language, но ловим и по имени).
+    "zgrab", "zmap", "masscan", "nmap", "nuclei", "scanner", "scanning", "probe",
+    "censys", "shodan", "binaryedge", "leakix", "palo alto", "paloalto",
+    "paloaltonetworks", "expanse", "cortex", "internet-measurement", "netsystems",
+    "stretchoid", "research", "domain-list", "backlink", "seranking", "modat",
+    "infrawat", "cyberconvoy", "coccocbot", "dataprovider", "tracker",
+    "(compatible)",  # «Mozilla/5.0 (compatible)» без имени движка — почти всегда бот
 )
 
 
@@ -77,6 +84,7 @@ async def _count_visits(request: Request, call_next):
             if ("text/html" in ct
                     and not path.startswith("/admin")
                     and path != "/notrack"
+                    and request.headers.get("accept-language")     # люди шлют его, сканеры почти никогда
                     and not request.cookies.get("vs_notrack")      # исключить владельца
                     and not _is_bot(request.headers.get("user-agent", ""))):
                 await _log_visit(request)
