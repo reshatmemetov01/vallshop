@@ -58,6 +58,15 @@ async def visits(
     }
 
 
+@router.post("/visits/reset")
+async def visits_reset(
+    _: bool = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    deleted = await adminstats.reset_visits(session)
+    return {"ok": True, "deleted": deleted}
+
+
 @router.get("/users")
 async def users(
     q: str = "",

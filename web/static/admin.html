@@ -98,8 +98,9 @@
 
     <h2>👁 Посещения сайта</h2>
     <div class="hint" style="color:var(--dim);font-size:13px;margin:-6px 0 12px">
-      Считаются только живые люди — боты и краулеры не учитываются.
+      Считаются только уникальные живые посетители — боты и краулеры не учитываются.
       <a href="#" id="notrackLink" target="_blank" style="color:var(--accent2)">Не считать мои визиты →</a>
+      · <a href="#" id="resetVisits" style="color:var(--dim)" onclick="resetVisits(event)">Обнулить статистику</a>
     </div>
     <div class="cards" id="visitCards"></div>
     <div class="chart" id="chart"></div>
@@ -172,9 +173,9 @@ async function loadOverview(){
       card("Пополнения", rub(s.topups_rub), `${s.topups} шт.`) +
       card("Активации кодов", s.activations);
     $("visitCards").innerHTML =
-      card("Сегодня", v.today.hits, `уникальных: ${v.today.unique}`) +
-      card("7 дней", v.d7.hits, `уникальных: ${v.d7.unique}`) +
-      card("Всего", v.all.hits, `уникальных: ${v.all.unique}`);
+      card("Сегодня", v.today.unique, `уникальных · ${v.today.hits} визитов`) +
+      card("7 дней", v.d7.unique, `уникальных · ${v.d7.hits} визитов`) +
+      card("Всего", v.all.unique, `уникальных · ${v.all.hits} визитов`);
   }catch(e){}
 }
 
@@ -182,13 +183,23 @@ async function loadVisits(){
   try{
     const d = await api("/api/admin/visits?days=30");
     const rows = d.daily||[];
-    const max = Math.max(1, ...rows.map(r=>r.hits));
+    const max = Math.max(1, ...rows.map(r=>r.unique));
     $("chart").innerHTML = rows.length ? rows.map(r=>`
-      <div class="col" title="${r.day}: ${r.hits} визитов, ${r.unique} уник.">
-        <div class="bar" style="height:${Math.round(r.hits/max*96)}px"></div>
+      <div class="col" title="${r.day}: ${r.unique} уник., ${r.hits} визитов">
+        <div class="bar" style="height:${Math.round(r.unique/max*96)}px"></div>
         <div class="lbl">${r.day.slice(5)}</div>
       </div>`).join("") : '<div class="state">Нет данных о посещениях.</div>';
   }catch(e){}
+}
+
+async function resetVisits(e){
+  if(e) e.preventDefault();
+  if(!confirm("Обнулить всю статистику посещений? Накопленные данные будут удалены без возможности восстановления.")) return;
+  try{
+    const d = await api("/api/admin/visits/reset", {method:"POST"});
+    loadOverview(); loadVisits();
+    alert("Готово. Удалено записей: "+(d.deleted||0)+". Счётчик начнётся заново.");
+  }catch(err){ alert("Не удалось обнулить статистику."); }
 }
 
 let _st=null;

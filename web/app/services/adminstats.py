@@ -160,6 +160,15 @@ async def visits_daily(session: AsyncSession, days: int = 30) -> list:
     return [{"day": r[0], "hits": int(r[1] or 0), "unique": int(r[2] or 0)} for r in rows]
 
 
+async def reset_visits(session: AsyncSession) -> int:
+    """Обнулить статистику посещений: удалить все записи SiteVisit."""
+    from sqlalchemy import delete
+    n = await session.scalar(select(func.count(SiteVisit.id))) or 0
+    await session.execute(delete(SiteVisit))
+    await session.commit()
+    return int(n)
+
+
 async def site_users(session: AsyncSession, q: str = "", limit: int = 50, offset: int = 0) -> dict:
     base = select(WebAccount)
     cnt = select(func.count()).select_from(WebAccount)
