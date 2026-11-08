@@ -196,130 +196,152 @@ async def _tick(
         )
 
     for order in orders:
-        # SMM (панели soc-proof / 1xpanel) — своя логика опроса/возврата.
-        if smm_panels.is_smm(order.supplier):
-            await _settle_smm(bot, db, panels, config, bots, order.id)
-            continue
-        # Fragment (Telegram Stars через TON) — подтверждение оплаты по seqno.
-        if order.supplier == "fragment":
-            await _settle_fragment(bot, db, fragment, config, bots, order.id)
-            continue
-        async with db.session() as session:
-            fresh = await session.get(Order, order.id)
-            if not fresh or fresh.status != OrderStatus.FULFILLING:
-                continue
+        # Каждый заказ изолирован: сбой одного не должен ронять весь тик и
+        # блокировать выдачу остальных (напр. битый Fragment-заказ не мешал бы
+        # завершиться заказам FazerCard).
+        try:
+            await _settle_order(bot, db, liog, fzr, config, bots, panels, fragment, order)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("Поллер: сбой при обработке заказа #%s — пропускаю", order.id)
 
-            refunded = False
-            needs_action = False
-            stuck = False
-            refund_text = None
-            if fresh.supplier == "fazercard":
-                if fzr is None:
-                    continue  # клиент не настроен — пропускаем
-                status = await order_service.poll_fazercard(session, fresh, fzr)
-                if status == OrderStatus.FULFILLING:
-                    # Поставщик не отдал финальный статус. Если заказ висит
-                    # слишком долго — один раз зовём админа (не трогаем деньги
-                    # автоматически: заказ может завершиться позже).
-                    age = datetime.utcnow() - (fresh.created_at or datetime.utcnow())
-                    if age >= timedelta(minutes=FULFILL_STUCK_MINUTES) and not fresh.fail_reason:
-                        fresh.fail_reason = _STUCK_SENTINEL
-                        stuck = True
-                if status == OrderStatus.FAILED:
-                    auto = await settings_service.get_bool(
-                        session, settings_service.AUTO_REFUND, True
+
+async def _settle_order(
+    bot: Bot,
+    db: Database,
+    liog: LioGamesClient,
+    fzr: FazerCardClient | None,
+    config: BotConfig | None,
+    bots: dict | None,
+    panels: dict | None,
+    fragment,
+    order,
+) -> None:
+    # SMM (панели soc-proof / 1xpanel) — своя логика опроса/возврата.
+    if smm_panels.is_smm(order.supplier):
+        await _settle_smm(bot, db, panels, config, bots, order.id)
+        return
+    # Fragment (Telegram Stars через TON) — подтверждение оплаты по seqno.
+    if order.supplier == "fragment":
+        await _settle_fragment(bot, db, fragment, config, bots, order.id)
+        return
+    async with db.session() as session:
+        fresh = await session.get(Order, order.id)
+        if not fresh or fresh.status != OrderStatus.FULFILLING:
+            return
+
+        refunded = False
+        needs_action = False
+        stuck = False
+        refund_text = None
+        if fresh.supplier == "fazercard":
+            if fzr is None:
+                return  # клиент не настроен — пропускаем
+            status = await order_service.poll_fazercard(session, fresh, fzr)
+            if status == OrderStatus.FULFILLING:
+                # Поставщик не отдал финальный статус. Если заказ висит
+                # слишком долго — один раз зовём админа (не трогаем деньги
+                # автоматически: заказ может завершиться позже).
+                age = datetime.utcnow() - (fresh.created_at or datetime.utcnow())
+                if age >= timedelta(minutes=FULFILL_STUCK_MINUTES) and not fresh.fail_reason:
+                    fresh.fail_reason = _STUCK_SENTINEL
+                    stuck = True
+            if status == OrderStatus.FAILED:
+                auto = await settings_service.get_bool(
+                    session, settings_service.AUTO_REFUND, True
+                )
+                if auto:
+                    # buy-on-demand оплачивался с баланса — возвращаем деньги.
+                    refund = Decimal(fresh.price_usd) * (fresh.quantity or 1)
+                    await balance_service.credit(
+                        session, fresh.user_id, refund, merchant_id=fresh.merchant_id
                     )
-                    if auto:
-                        # buy-on-demand оплачивался с баланса — возвращаем деньги.
-                        refund = Decimal(fresh.price_usd) * (fresh.quantity or 1)
-                        await balance_service.credit(
-                            session, fresh.user_id, refund, merchant_id=fresh.merchant_id
-                        )
-                        fresh.status = OrderStatus.REFUNDED
-                        status = OrderStatus.REFUNDED
-                        refunded = True
-                        await referral_service.reverse_for_order(session, fresh)
-                        await mprice_service.reverse_earnings(
-                            session, fresh.merchant_id, fresh.merchant_margin or Decimal(0)
-                        )
-                        refund_text = await settings_service.get(
-                            session, settings_service.REFUND_TEXT, texts.FULFILL_REFUNDED
-                        )
-                    else:
-                        # Автовозврат выключен — в ручную обработку, деньги остаются.
-                        fresh.status = OrderStatus.NEEDS_ACTION
-                        fresh.fail_reason = fresh.fail_reason or "поставщик отклонил заказ"
-                        status = OrderStatus.NEEDS_ACTION
-                        needs_action = True
-            else:
-                status = await order_service.poll_topup(session, fresh, liog)
-
-            user_id = fresh.user_id
-            merchant_id = fresh.merchant_id
-            code = fresh.delivery_code
-            ref = fresh.client_ref
-            order_id = fresh.id
-            variant_id = fresh.variant_id
-            reason = fresh.fail_reason or "—"
-            refund_amount = Decimal(fresh.price_usd) * (fresh.quantity or 1)
-            delivered_text = texts.TOPUP_ACCOUNT_DELIVERED
-            item_name = "—"
-            variant = await session.get(Variant, fresh.variant_id)
-            if variant is not None:
-                item_name = variant.title
-                if status == OrderStatus.COMPLETED and not code:
-                    delivered_text = await catalog_service.resolve_text(
-                        session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
+                    fresh.status = OrderStatus.REFUNDED
+                    status = OrderStatus.REFUNDED
+                    refunded = True
+                    await referral_service.reverse_for_order(session, fresh)
+                    await mprice_service.reverse_earnings(
+                        session, fresh.merchant_id, fresh.merchant_margin or Decimal(0)
                     )
-            await session.commit()
+                    refund_text = await settings_service.get(
+                        session, settings_service.REFUND_TEXT, texts.FULFILL_REFUNDED
+                    )
+                else:
+                    # Автовозврат выключен — в ручную обработку, деньги остаются.
+                    fresh.status = OrderStatus.NEEDS_ACTION
+                    fresh.fail_reason = fresh.fail_reason or "поставщик отклонил заказ"
+                    status = OrderStatus.NEEDS_ACTION
+                    needs_action = True
+        else:
+            status = await order_service.poll_topup(session, fresh, liog)
 
-        admin_ids = list(config.admin_ids) if config else []
-        amount_str = texts.rub(refund_amount)
-        done_kb = kb.order_done_kb(order_id, variant_id)
-        cbot = _pick_bot(bots, merchant_id, bot)  # уведомление клиенту — через бота его магазина
-        if status == OrderStatus.COMPLETED and code:
-            await _notify(
-                cbot, user_id, texts.DELIVERY_SUCCESS.format(code=code), done_kb
-            )
-        elif status == OrderStatus.COMPLETED:
-            # Доставка на аккаунт/username без кода (топап/Telegram) — настраиваемый текст.
-            if delivered_text:
-                await _notify(cbot, user_id, delivered_text, done_kb)
-        elif status == OrderStatus.REFUNDED and refunded:
-            await _notify(
-                cbot, user_id,
-                settings_service.fmt(
-                    refund_text or texts.FULFILL_REFUNDED, ref=ref, amount=amount_str
-                ),
-            )
-            await notify_service.notify_admins(
-                bot, admin_ids,
-                f"↩️ Заказ #{order_id} (<b>{item_name}</b>) провалился и "
-                f"возвращён покупателю (<b>{amount_str}</b>).\nПричина: {reason}",
-            )
-        elif status == OrderStatus.NEEDS_ACTION and needs_action:
-            await notify_service.notify_admins(
-                bot, admin_ids,
-                f"❗️ Заказ #{order_id} (<b>{item_name}</b>) требует ручной выдачи.\n"
-                f"Причина: {reason}\n"
-                "Откройте «Админ-панель → Текущие заказы → Не выполненные».",
-            )
-        elif status == OrderStatus.FAILED:
-            await _notify(cbot, user_id, texts.FULFILL_FAILED.format(ref=ref))
-            await notify_service.notify_admins(
-                bot, admin_ids,
-                f"⚠️ Заказ #{order_id} (<b>{item_name}</b>): ошибка выдачи.\n"
-                f"Причина: {reason}",
-            )
-        elif stuck:
-            await notify_service.notify_admins(
-                bot, admin_ids,
-                f"⏳ Заказ #{order_id} (<b>{item_name}</b>) висит в обработке у "
-                f"поставщика более {FULFILL_STUCK_MINUTES} мин — финального статуса нет.\n"
-                f"Сумма: <b>{amount_str}</b>. Проверьте вручную: «Админ-панель → "
-                f"Текущие заказы». Если поставщик вернул деньги — заказ можно "
-                f"отменить (возврат на баланс покупателя).",
-            )
+        user_id = fresh.user_id
+        merchant_id = fresh.merchant_id
+        code = fresh.delivery_code
+        ref = fresh.client_ref
+        order_id = fresh.id
+        variant_id = fresh.variant_id
+        reason = fresh.fail_reason or "—"
+        refund_amount = Decimal(fresh.price_usd) * (fresh.quantity or 1)
+        delivered_text = texts.TOPUP_ACCOUNT_DELIVERED
+        item_name = "—"
+        variant = await session.get(Variant, fresh.variant_id)
+        if variant is not None:
+            item_name = variant.title
+            if status == OrderStatus.COMPLETED and not code:
+                delivered_text = await catalog_service.resolve_text(
+                    session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
+                )
+        await session.commit()
+
+    admin_ids = list(config.admin_ids) if config else []
+    amount_str = texts.rub(refund_amount)
+    done_kb = kb.order_done_kb(order_id, variant_id)
+    cbot = _pick_bot(bots, merchant_id, bot)  # уведомление клиенту — через бота его магазина
+    if status == OrderStatus.COMPLETED and code:
+        await _notify(
+            cbot, user_id, texts.DELIVERY_SUCCESS.format(code=code), done_kb
+        )
+    elif status == OrderStatus.COMPLETED:
+        # Доставка на аккаунт/username без кода (топап/Telegram) — настраиваемый текст.
+        if delivered_text:
+            await _notify(cbot, user_id, delivered_text, done_kb)
+    elif status == OrderStatus.REFUNDED and refunded:
+        await _notify(
+            cbot, user_id,
+            settings_service.fmt(
+                refund_text or texts.FULFILL_REFUNDED, ref=ref, amount=amount_str
+            ),
+        )
+        await notify_service.notify_admins(
+            bot, admin_ids,
+            f"↩️ Заказ #{order_id} (<b>{item_name}</b>) провалился и "
+            f"возвращён покупателю (<b>{amount_str}</b>).\nПричина: {reason}",
+        )
+    elif status == OrderStatus.NEEDS_ACTION and needs_action:
+        await notify_service.notify_admins(
+            bot, admin_ids,
+            f"❗️ Заказ #{order_id} (<b>{item_name}</b>) требует ручной выдачи.\n"
+            f"Причина: {reason}\n"
+            "Откройте «Админ-панель → Текущие заказы → Не выполненные».",
+        )
+    elif status == OrderStatus.FAILED:
+        await _notify(cbot, user_id, texts.FULFILL_FAILED.format(ref=ref))
+        await notify_service.notify_admins(
+            bot, admin_ids,
+            f"⚠️ Заказ #{order_id} (<b>{item_name}</b>): ошибка выдачи.\n"
+            f"Причина: {reason}",
+        )
+    elif stuck:
+        await notify_service.notify_admins(
+            bot, admin_ids,
+            f"⏳ Заказ #{order_id} (<b>{item_name}</b>) висит в обработке у "
+            f"поставщика более {FULFILL_STUCK_MINUTES} мин — финального статуса нет.\n"
+            f"Сумма: <b>{amount_str}</b>. Проверьте вручную: «Админ-панель → "
+            f"Текущие заказы». Если поставщик вернул деньги — заказ можно "
+            f"отменить (возврат на баланс покупателя).",
+        )
 
 
 async def run_smartprice_poller(

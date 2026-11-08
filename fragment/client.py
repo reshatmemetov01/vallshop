@@ -235,12 +235,20 @@ class FragmentClient:
         """Проверить статус оплаты по seqno кошелька. {status: pending|completed}."""
         if self.mock:
             return {"status": "completed"}
+        # Состояние заказа должно быть словарём с seqno_at_send (записан при отправке).
+        # Если это не так (повреждённые/старые данные, напр. список) — не можем
+        # определить статус. Бросаем FragmentError: вызывающий код пропустит заказ,
+        # а поллер вернёт деньги покупателю по таймауту — и, главное, не упадёт весь
+        # цикл, блокируя остальные заказы.
+        seqno_at_send = state.get("seqno_at_send") if isinstance(state, dict) else None
+        if seqno_at_send is None:
+            raise FragmentError("некорректное состояние заказа Fragment (нет seqno_at_send)")
         try:
             wi = self._wallet_info()
             cur = self.tonapi.seqno(wi["address"])
         except Exception as e:  # noqa: BLE001 — сеть недоступна, попробуем позже
             raise FragmentError(str(e))
-        at_send = int(state.get("seqno_at_send") or 0)
+        at_send = int(seqno_at_send or 0)
         # seqno вырос → внешнее сообщение принято сетью → оплата ушла, звёзды зачислены
         return {"status": "completed" if cur > at_send else "pending"}
 

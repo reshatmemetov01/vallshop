@@ -465,6 +465,8 @@ async def settle_fragment(session: AsyncSession, order: Order, fragment) -> dict
         fields = json.loads(order.fields_json) if order.fields_json else {}
     except (ValueError, TypeError):
         fields = {}
+    if not isinstance(fields, dict):  # повреждённые данные (напр. список) — не падаем
+        fields = {}
     try:
         res = await asyncio.to_thread(fragment.poll, fields)
     except FragmentError:
