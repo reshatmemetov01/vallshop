@@ -101,7 +101,9 @@ async def _settle_smm(bot, db, panels, config, bots, order_id) -> None:
 # Через сколько минут незавершённый Fragment-заказ уводим на ручную обработку
 # (НЕ возврат!) и зовём админа. TON списываются в момент отправки, поэтому
 # автовозврат недопустим — Fragment может подтвердиться и через несколько часов.
-_FRAGMENT_STUCK_MINUTES = 30
+# Это лишь момент эскалации для админа: опрос продолжается, поздно подтвердится —
+# заказ закроется сам.
+_FRAGMENT_STUCK_MINUTES = 5
 
 
 async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
