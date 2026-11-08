@@ -223,6 +223,54 @@ async def _reorder_catalog_v1(db: Database) -> None:
     log.info("Каталог: кнопки переупорядочены (v1)")
 
 
+async def _games_variants_one_column_v1(db: Database) -> None:
+    """Разово выставить всем номиналам раздела «Игры и Сервисы» раскладку
+    «в один столбик» (full_width=True).
+
+    Не принудительно: это обычное значение флага у каждого варианта, которое
+    владелец потом может отредактировать в админке (вернуть в два столбика).
+    Гард по settings-флагу — выполняется один раз, последующие правки не
+    затираются.
+    """
+    from sqlalchemy import select, update
+    from .db.models import Product, Variant
+    from .services import settings as settings_service
+
+    async with db.session() as session:
+        if await settings_service.get(session, "games_variants_1col_v1"):
+            return
+        # Корень(ы) раздела «Игры и Сервисы».
+        root_ids = [
+            pid for pid, title in (
+                await session.execute(
+                    select(Product.id, Product.title).where(Product.parent_id.is_(None))
+                )
+            ).all()
+            if "игры и сервис" in (title or "").lower()
+        ]
+        if not root_ids:
+            await settings_service.set(session, "games_variants_1col_v1", "1")
+            await session.commit()
+            return
+        # BFS по дереву категорий: собрать все товары-потомки раздела.
+        all_ids: set[int] = set(root_ids)
+        frontier = list(root_ids)
+        while frontier:
+            children = list(await session.scalars(
+                select(Product.id).where(Product.parent_id.in_(frontier))
+            ))
+            new = [c for c in children if c not in all_ids]
+            all_ids.update(new)
+            frontier = new
+        # Все номиналы этих товаров — в один столбик.
+        await session.execute(
+            update(Variant).where(Variant.product_id.in_(all_ids)).values(full_width=True)
+        )
+        await settings_service.set(session, "games_variants_1col_v1", "1")
+        await session.commit()
+    log.info("Каталог: номиналы раздела «Игры и Сервисы» выставлены в один столбик (v1)")
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -244,6 +292,7 @@ async def main() -> None:
     await _seed_steam_category(db)  # разовое создание кнопки «Пополнить Steam»
     await _seed_stars_category(db)  # разовое создание кнопки «Телеграм Звёзды»
     await _reorder_catalog_v1(db)   # разовая раскладка кнопок каталога
+    await _games_variants_one_column_v1(db)  # разово: номиналы «Игры и Сервисы» в один столбик
 
     provider = build_provider(config)
     payhot = build_payhot(config)
