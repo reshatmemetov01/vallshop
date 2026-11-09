@@ -2765,6 +2765,12 @@ async def msg_set_markup(message: Message, db: Database, state: FSMContext) -> N
             except InvalidOperation:
                 await message.answer("Число или -")
                 return
+            # Для FazerCard-smart сразу поднимаем липкую цену (не ждём поллер).
+            if (v.price_mode == smartprice_service.MODE_SMART
+                    and v.cost_usd and Decimal(v.cost_usd) > 0):
+                v.price_rub = smartprice_service.target_rub(
+                    Decimal(v.cost_usd), Decimal(raw), rates_service.get_rate()
+                )
         await session.commit()
     await state.clear()
     kb = InlineKeyboardBuilder()

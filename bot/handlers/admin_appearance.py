@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from aiogram import F, Router
 from aiogram.filters import BaseFilter
@@ -48,6 +48,7 @@ class APState(StatesGroup):
     set_stars_text = State()
     set_stars_emoji = State()
     set_site_url = State()
+    bulk_margin = State()
 
 
 def _btn(text: str, data: str) -> InlineKeyboardButton:
@@ -91,21 +92,79 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "ap_pricescan")
 async def cb_pricescan(call: CallbackQuery, db: Database, config: BotConfig) -> None:
-    """Скан цен: товары с плавающей ценой (SMM + FazerCard) и наценкой ниже 7%."""
+    """Скан цен: товары с плавающей ценой (SMM + FazerCard) и наценкой ниже 7%.
+
+    Каждый товар — кнопка (тап → смена его наценки). Плюс «⚡ Поднять все до…».
+    """
     await call.answer("Сканирую цены…")
     from ..services import smartprice as smartprice_service
     threshold = Decimal("7")
     rows = await smartprice_service.low_margin_variants(
         db, config.default_markup_percent, threshold
     )
-    msgs = smartprice_service.format_low_margin(rows, threshold)
-    for i, msg in enumerate(msgs):
-        if i == len(msgs) - 1:
-            kb = InlineKeyboardBuilder()
-            kb.row(_btn("⬅️ К оформлению", "ap_home"))
-            await call.message.answer(msg, reply_markup=kb.as_markup())
-        else:
-            await call.message.answer(msg)
+    kb = InlineKeyboardBuilder()
+    if not rows:
+        kb.row(_btn("⬅️ К оформлению", "ap_home"))
+        await call.message.answer(
+            f"✅ Товаров с наценкой ниже {threshold:g}% среди плавающих "
+            "(SMM + FazerCard) нет.",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    kb.row(_btn("⚡ Поднять все до…", "ap_bulkmargin"))
+    shown = rows[:60]
+    for mk, ptitle, vtitle, src, vid in shown:
+        name = f"{ptitle} · {vtitle}" if ptitle and ptitle != vtitle else (vtitle or ptitle)
+        kb.row(_btn(f"{mk:g}% · {name}"[:64], f"a_setmarkup:{vid}"))
+    kb.row(_btn("🔄 Пересканировать", "ap_pricescan"))
+    kb.row(_btn("⬅️ К оформлению", "ap_home"))
+    extra = "" if len(rows) <= 60 else (
+        f"\n\nПоказаны первые 60 из {len(rows)} — для остальных используйте "
+        "«⚡ Поднять все до…»."
+    )
+    await call.message.answer(
+        f"⚠️ <b>Наценка ниже {threshold:g}%</b> (SMM + FazerCard) — {len(rows)} шт.\n"
+        "Риск продать в минус из-за комиссии платёжной системы.\n"
+        "Нажмите на товар, чтобы задать ему наценку, или «⚡ Поднять все до…»." + extra,
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "ap_bulkmargin")
+async def cb_bulk_margin_ask(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(APState.bulk_margin)
+    await call.message.answer(
+        "⚡ Введите наценку % — подниму всех из списка (ниже 7%) до неё.\n"
+        "У кого наценка уже выше — не трону.\n\nНапример: <b>10</b>",
+        reply_markup=_cancel("ap_home"),
+    )
+    await call.answer()
+
+
+@router.message(APState.bulk_margin)
+async def msg_bulk_margin(
+    message: Message, db: Database, config: BotConfig, state: FSMContext
+) -> None:
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        floor = Decimal(raw)
+    except InvalidOperation:
+        await message.answer("Введите число, например 10")
+        return
+    await state.clear()
+    from ..services import smartprice as smartprice_service
+    n = await smartprice_service.apply_markup_floor(
+        db, config.default_markup_percent, floor
+    )
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("🔄 Пересканировать", "ap_pricescan"))
+    kb.row(_btn("⬅️ К оформлению", "ap_home"))
+    await message.answer(
+        f"✅ Поднял наценку до <b>{floor:g}%</b> у <b>{n}</b> товаров "
+        "(у кого была ниже). Цены smart-товаров обновлены сразу.",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(F.data == "ap_migprices")

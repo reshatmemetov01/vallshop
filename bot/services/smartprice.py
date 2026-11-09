@@ -295,9 +295,40 @@ async def low_margin_variants(db: Database, default_markup, threshold) -> list:
                 p = await session.get(Product, v.product_id)
                 prod_titles[v.product_id] = (p.title if p else "") or ""
             src = "SMM" if smm_panels.is_smm(v.source) else "FazerCard"
-            rows.append((mk, prod_titles[v.product_id], v.title, src))
+            rows.append((mk, prod_titles[v.product_id], v.title, src, v.id))
     rows.sort(key=lambda r: r[0])
     return rows
+
+
+async def apply_markup_floor(db: Database, default_markup, floor) -> int:
+    """Поднять наценку до ``floor``% у плавающих товаров (SMM + FazerCard-smart),
+    у кого она ниже. У кого уже выше — не трогаем. Для smart сразу пересчитываем
+    липкую цену. Возвращает число обновлённых."""
+    from . import smm_panels
+    default_mk = Decimal(default_markup or 0)
+    floor = Decimal(floor)
+    rate = rates_service.get_rate()
+    n = 0
+    async with db.session() as session:
+        variants = list(
+            await session.scalars(select(Variant).where(Variant.is_active.is_(True)))
+        )
+        for v in variants:
+            floats = smm_panels.is_smm(v.source) or (
+                v.source == "fazercard" and v.price_mode == MODE_SMART
+            )
+            if not floats:
+                continue
+            mk = Decimal(v.markup_percent) if v.markup_percent is not None else default_mk
+            if mk >= floor:
+                continue
+            v.markup_percent = floor
+            # Для FazerCard-smart липкую цену поднимаем сразу (SMM считается на лету).
+            if v.price_mode == MODE_SMART and v.cost_usd and Decimal(v.cost_usd) > 0:
+                v.price_rub = target_rub(Decimal(v.cost_usd), floor, rate)
+            n += 1
+        await session.commit()
+    return n
 
 
 def format_low_margin(rows: list, threshold) -> list:
@@ -313,7 +344,8 @@ def format_low_margin(rows: list, threshold) -> list:
         f"{len(rows)} шт.\nРиск продать в минус из-за комиссии платёжной системы:\n"
     )
     lines = []
-    for mk, ptitle, vtitle, src in rows:
+    for row in rows:
+        mk, ptitle, vtitle, src = row[0], row[1], row[2], row[3]
         name = f"{ptitle} → {vtitle}" if ptitle and ptitle != vtitle else (vtitle or ptitle)
         lines.append(f"• <b>{mk:g}%</b> · {name} <i>({src})</i>")
     out, chunk, size, first = [], [], len(header), True
