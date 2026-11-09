@@ -12,6 +12,8 @@ import html
 from datetime import date
 
 SHOP_NAME = "VallShop"
+SUPPORT_PHONE = "+7 916 949-67-32"
+SUPPORT_PHONE_TEL = "+79169496732"
 
 _STYLE = """
 :root{color-scheme:light dark;--bg:#0f1115;--card:#171a21;--fg:#e8eaed;
@@ -37,6 +39,13 @@ a{color:var(--accent)}
 .muted{color:var(--muted)}
 footer{color:var(--muted);font-size:14px;margin-top:28px;text-align:center}
 code{background:rgba(127,127,127,.15);padding:1px 6px;border-radius:6px}
+.pays{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+.pay-badge{display:inline-flex;align-items:center;justify-content:center;
+min-width:64px;height:40px;padding:0 14px;border:1px solid #e6e8eb;
+border-radius:9px;background:#fff;font-weight:800;font-size:15px;
+letter-spacing:.3px;line-height:1}
+.pay-tbank{display:inline-flex;align-items:center;gap:10px;margin:10px 0 2px}
+.pay-tbank .pay-badge{background:#ffdd2d;color:#111;border-color:#ffdd2d}
 """
 
 
@@ -71,19 +80,32 @@ def _contacts_block(config) -> str:
 
 
 def landing_html(config) -> str:
-    bot_link = ""
+    tg = _tg_contact(config)
     body = (
         "<p class='sub'>Магазин цифровых товаров: игровые ключи, "
-        "подарочные карты и пополнения игр. Оплата в USDT.</p>"
+        "подарочные карты и пополнения игр. Оплата банковской картой, СБП "
+        "или USDT.</p>"
         "<div class='card'>"
         "<h2>Как это работает</h2>"
         "<ul>"
-        "<li>Пополняете баланс в USDT.</li>"
-        "<li>Покупаете товар — он приходит прямо в чат бота.</li>"
+        "<li>Выбираете товар и оплачиваете удобным способом.</li>"
+        "<li>Товар приходит прямо в чат бота.</li>"
         "<li>Выдача мгновенная из наличия или под заказ за пару минут.</li>"
         "</ul>"
-        f"{bot_link}"
-        "<p><a href='/offer'>Публичная оферта и условия покупки →</a></p>"
+        "<p>Цифровая доставка — по всему миру, включая РФ и страны СНГ.</p>"
+
+        + _payment_methods_html() +
+
+        "<h2>Контакты</h2>"
+        "<ul>"
+        f"<li>Телефон: <a href='tel:{SUPPORT_PHONE_TEL}'>{SUPPORT_PHONE}</a></li>"
+        "<li>Эл. почта: "
+        "<a href='mailto:reshatmemetov72@gmail.com'>reshatmemetov72@gmail.com</a></li>"
+        f"<li>Telegram: {tg}</li>"
+        "</ul>"
+        "<p><a href='/offer'>Публичная оферта и условия покупки →</a> · "
+        "<a href='/privacy'>Политика конфиденциальности</a> · "
+        "<a href='/agreement'>Пользовательское соглашение</a></p>"
         "</div>"
     )
     return _page(f"{SHOP_NAME} — цифровые товары", body)
@@ -98,6 +120,33 @@ def _tg_contact(config) -> str:
     if c:
         return html.escape(c)
     return "служба поддержки VallShop"
+
+
+def _payment_methods_html() -> str:
+    """Способы оплаты с логотипами платёжных систем, логотип банка-эквайера
+    (T-Bank / T-Pay) и ссылка на tbank.ru + пояснение о безопасной передаче
+    платёжных данных. Требования банка-эквайера к Интернет-магазину."""
+    return (
+        "<h2>Способы оплаты</h2>"
+        "<p>Оплата банковской картой и через СБП. К оплате принимаются карты "
+        "платёжных систем:</p>"
+        "<div class='pays'>"
+        "<span class='pay-badge' style='color:#1a1f71'>VISA</span>"
+        "<span class='pay-badge' style='color:#eb001b'>Mastercard</span>"
+        "<span class='pay-badge' style='color:#0f754e'>МИР</span>"
+        "<span class='pay-badge' style='color:#1f6feb'>СБП</span>"
+        "</div>"
+        "<p class='pay-tbank'>Приём платежей по картам и СБП выполняет "
+        "банк-эквайер <span class='pay-badge'>T-Bank</span> "
+        "<span class='pay-badge'>T-Pay</span></p>"
+        "<p>Официальный сайт банка: "
+        "<a href='https://tbank.ru' target='_blank' rel='noopener'>tbank.ru</a>.</p>"
+        "<p>Безопасность платежей: сайт работает по защищённому протоколу "
+        "HTTPS (TLS). Данные банковской карты вводятся на защищённой "
+        "платёжной странице банка-эквайера, обрабатываются в соответствии со "
+        "стандартом безопасности PCI DSS и <b>не передаются и не хранятся</b> "
+        "на стороне VallShop.</p>"
+    )
 
 
 def offer_html(config) -> str:
@@ -250,6 +299,9 @@ def offer_html(config) -> str:
         "Продавец может повторно выполнить доставку либо осуществить возврат "
         "денежных средств в случаях и порядке, предусмотренных настоящей "
         "Офертой и применимым законодательством.</p>"
+        "<p>6.12. Товары предоставляются в электронном (цифровом) виде без "
+        "физической отправки. Цифровая доставка доступна Покупателям по всему "
+        "миру, включая Российскую Федерацию и страны СНГ.</p>"
 
         "<h2>7. Обязанности Покупателя</h2>"
         "<p>7.1. Покупатель обязуется:</p>"
@@ -421,6 +473,8 @@ def offer_html(config) -> str:
         "стр. 2, 119072</li>"
         "<li>Адрес электронной почты: "
         "<a href='mailto:reshatmemetov72@gmail.com'>reshatmemetov72@gmail.com</a></li>"
+        f"<li>Телефон поддержки: <a href='tel:{SUPPORT_PHONE_TEL}'>"
+        f"{SUPPORT_PHONE}</a></li>"
         f"<li>Контактный Telegram: {tg}</li>"
         "<li>Наименование сервиса: VallShop («ВаллШоп»)</li>"
         "<li>Сайт / Telegram-бот: vallshop.com / "
@@ -430,6 +484,9 @@ def offer_html(config) -> str:
         "</ul>"
         "<p class='muted'>Канал связи: служба поддержки VallShop через "
         "предусмотренные Сервисом каналы.</p>"
+
+        + _payment_methods_html() +
+
         "</div>"
         f"<footer>© {date.today().year} {SHOP_NAME} («ВаллШоп»). "
         "Все права защищены.</footer>"
@@ -832,6 +889,13 @@ def privacy_html(config) -> str:
         "<p>5.4. Пользователь самостоятельно обязан принимать разумные меры "
         "для защиты своих аккаунтов, паролей, кодов доступа и иной "
         "информации, используемой для доступа к Сервису.</p>"
+        "<p>5.5. Передача конфиденциальной информации между Пользователем и "
+        "Сервисом осуществляется по защищённому каналу связи с использованием "
+        "протокола HTTPS (шифрование TLS). Оплата банковскими картами и через "
+        "СБП производится на защищённой платёжной странице банка-эквайера; "
+        "данные банковской карты обрабатываются банком в соответствии со "
+        "стандартом безопасности PCI DSS и не передаются Продавцу и не "
+        "хранятся на стороне VallShop.</p>"
 
         "<h2>6. Ответственность и отказ от гарантий</h2>"
         "<p>6.1. Пользователь понимает и соглашается с тем, что передача "
