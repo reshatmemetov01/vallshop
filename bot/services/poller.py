@@ -25,6 +25,7 @@ from ..db.models import Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..services import balance as balance_service
 from ..services import buynow as buynow_service
 from ..services import catalog as catalog_service
+from ..services import instant as instant_service
 from ..services import mprice as mprice_service
 from ..services import notify as notify_service
 from ..services import orders as order_service
@@ -391,6 +392,21 @@ async def run_smartprice_poller(
             raise
         except Exception:  # noqa: BLE001
             log.exception("Ошибка в поллере умных цен")
+        await asyncio.sleep(interval)
+
+
+async def run_instant_poller(
+    bot: Bot, db: Database, fzr, config: BotConfig, interval: float = 3600.0,
+) -> None:
+    """Фоновый поиск скидочных товаров FazerCard «Instant use» (раз в час)."""
+    await asyncio.sleep(60)  # дать боту прогреться после старта
+    while True:
+        try:
+            await instant_service.scan(db, fzr, bot, config)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("Ошибка в поллере скидочных товаров")
         await asyncio.sleep(interval)
 
 

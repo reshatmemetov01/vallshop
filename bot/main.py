@@ -21,6 +21,7 @@ from .payments import build_paydex, build_payhot, build_platega, build_provider,
 from .services.bcscheduler import run_bonus_cleaner, run_broadcast_scheduler
 from .services.poller import (
     run_fulfillment_poller,
+    run_instant_poller,
     run_smartprice_poller,
     run_topup_poller,
 )
@@ -416,6 +417,7 @@ async def main() -> None:
                              config=config, suppliers=suppliers)
         ),
         asyncio.create_task(run_smartprice_poller(bot, db, fzr, config, panels=panels)),
+        asyncio.create_task(run_instant_poller(bot, db, fzr, config)),
         asyncio.create_task(run_broadcast_scheduler(db, bots_by_merchant)),
         asyncio.create_task(run_bonus_cleaner(db, bots_by_merchant)),
     ]

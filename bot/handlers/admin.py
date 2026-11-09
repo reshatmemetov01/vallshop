@@ -13,13 +13,14 @@ from aiogram import F, Router
 from aiogram.filters import Command, BaseFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from sqlalchemy import func, select
 
 from ..config import BotConfig
 from ..db import Database
 from ..db.models import (
+    InstantCandidate,
     Order,
     OrderStatus,
     Product,
@@ -404,3 +405,56 @@ async def cmd_orders(message: Message, db: Database, config: BotConfig) -> None:
         )
     await message.answer("\n".join(lines))
 
+
+
+# ── Скидочные товары (FazerCard Instant use): включить / скрыть кандидата ─────
+@router.callback_query(F.data.startswith("inst_on:"))
+async def cb_instant_activate(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    if not (call.from_user and config.is_admin(call.from_user.id)):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    cand_id = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        cand = await session.get(InstantCandidate, cand_id)
+        if cand is None:
+            await call.answer("Кандидат не найден", show_alert=True)
+            return
+        v = await session.get(Variant, cand.variant_id) if cand.variant_id else None
+        if v is not None:
+            v.is_active = True
+        cand.status = "active"
+        await session.commit()
+    try:
+        await call.message.edit_text(
+            (call.message.text or "") + "\n\n✅ Активирован. Появится в разделе, "
+            "когда вы включите «🔥 Скидочные товары» в админке."
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    await call.answer("Активирован ✅")
+
+
+@router.callback_query(F.data.startswith("inst_off:"))
+async def cb_instant_dismiss(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    if not (call.from_user and config.is_admin(call.from_user.id)):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    cand_id = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        cand = await session.get(InstantCandidate, cand_id)
+        if cand is None:
+            await call.answer("Кандидат не найден", show_alert=True)
+            return
+        v = await session.get(Variant, cand.variant_id) if cand.variant_id else None
+        if v is not None and not v.is_active:
+            await session.delete(v)
+        cand.status = "dismissed"
+        cand.variant_id = None
+        await session.commit()
+    try:
+        await call.message.edit_text(
+            (call.message.text or "") + "\n\n🚫 Скрыто. Больше не предложу этот товар."
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    await call.answer("Скрыто")

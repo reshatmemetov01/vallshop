@@ -617,6 +617,28 @@ class TopUp(Base):
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Скидочные товары (FazerCard «Instant use»): найденные сканером кандидаты
+# ──────────────────────────────────────────────────────────────────────────
+class InstantCandidate(Base):
+    """Instant-use номинал FazerCard, найденный сканером под уже добавленный
+    обычный товар. status: pending (ждёт включения), active (включён),
+    dismissed (скрыт навсегда — не предлагать снова)."""
+
+    __tablename__ = "instant_candidates"
+    __table_args__ = (UniqueConstraint("fzr_a", "fzr_b", name="uq_instant_offer"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fzr_kind: Mapped[str] = mapped_column(String(16))       # giftcard | gamekey
+    fzr_a: Mapped[str] = mapped_column(String(64))          # instant category_id (…_instant_use)
+    fzr_b: Mapped[str] = mapped_column(String(64))          # instant offer/card/key id
+    # Обычный номинал, который этот instant удешевляет, и созданный instant-номинал.
+    regular_variant_id: Mapped[Optional[int]] = mapped_column(Integer)
+    variant_id: Mapped[Optional[int]] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Рассылки: запланированная/выполненная рассылка и клики по кнопкам поста
 # ──────────────────────────────────────────────────────────────────────────
 class Broadcast(Base):
