@@ -300,6 +300,48 @@ async def low_margin_variants(db: Database, default_markup, threshold) -> list:
     return rows
 
 
+async def all_markups(db: Database, default_markup) -> list:
+    """Все активные номиналы с реальной текущей наценкой, для экрана «Цены
+    товаров». Возвращает [(markup|None, product_title, title, vid)] в порядке:
+    сначала выбросы (наценка <8% или >13%), затем 8–13%, затем без закупа.
+
+    Наценка: для SMM — ``markup_percent``; для остальных с закупом — выводится
+    из текущей цены и закупа (реальная маржа); без закупа — None («—»)."""
+    from . import smm_panels
+    from .pricing import price_rub_value
+    default_mk = Decimal(default_markup or 0)
+    rate = rates_service.get_rate()
+    rows: list = []
+    async with db.session() as session:
+        variants = list(
+            await session.scalars(select(Variant).where(Variant.is_active.is_(True)))
+        )
+        ptitles: dict = {}
+        for v in variants:
+            if v.product_id not in ptitles:
+                p = await session.get(Product, v.product_id)
+                ptitles[v.product_id] = (p.title if p else "") or ""
+            if smm_panels.is_smm(v.source):
+                mk = Decimal(v.markup_percent) if v.markup_percent is not None else default_mk
+            else:
+                cost = Decimal(v.cost_usd or 0)
+                mk = derive_markup(price_rub_value(v, default_mk), cost, rate) if cost > 0 else None
+            rows.append((mk, ptitles[v.product_id], v.title, v.id))
+
+    def _key(r):
+        mk = r[0]
+        if mk is None:
+            group = 2
+        elif mk < 8 or mk > 13:
+            group = 0
+        else:
+            group = 1
+        return (group, mk if mk is not None else Decimal("99999"))
+
+    rows.sort(key=_key)
+    return rows
+
+
 async def apply_markup_floor(db: Database, default_markup, floor) -> int:
     """Поднять наценку до ``floor``% у плавающих товаров (SMM + FazerCard-smart),
     у кого она ниже. У кого уже выше — не трогаем. Для smart сразу пересчитываем

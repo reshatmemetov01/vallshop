@@ -76,6 +76,7 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
     kb.row(_btn("🛍 Кнопки каталога", "apc_home"))
     kb.row(_btn("⭐ Кнопки звёзд", "apst_home"))
     kb.row(_btn("💳 Способы оплаты", "pm_home"))
+    kb.row(_btn("💰 Цены товаров", "ap_prices:0"))
     kb.row(_btn("📊 Скан цен", "ap_pricescan"))
     kb.row(_btn("♻️ Перевести Цены", "ap_migprices"))
     kb.row(_btn("♻️ Сбросить к стандартному", "ap_reset"))
@@ -87,6 +88,52 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
         "Выберите меню:",
         reply_markup=kb.as_markup(),
     )
+    await call.answer()
+
+
+_PRICES_PER_PAGE = 40
+
+
+@router.callback_query(F.data.startswith("ap_prices:"))
+async def cb_prices(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    """Все товары с их наценками + редактирование (переход в карточку номинала).
+
+    Пагинация; сначала товары с наценкой ниже 8% и выше 13%, затем остальные.
+    """
+    try:
+        page = int(call.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        page = 0
+    from ..services import smartprice as smartprice_service
+    rows = await smartprice_service.all_markups(db, config.default_markup_percent)
+    total = len(rows)
+    pages = max(1, (total + _PRICES_PER_PAGE - 1) // _PRICES_PER_PAGE)
+    page = max(0, min(page, pages - 1))
+    chunk = rows[page * _PRICES_PER_PAGE:(page + 1) * _PRICES_PER_PAGE]
+
+    kb = InlineKeyboardBuilder()
+    for mk, ptitle, vtitle, vid in chunk:
+        name = f"{ptitle} · {vtitle}" if ptitle and ptitle != vtitle else (vtitle or ptitle)
+        mkstr = f"{mk:g}%" if mk is not None else "—"
+        kb.row(_btn(f"{mkstr} · {name}"[:64], f"a_var:{vid}"))
+    nav = []
+    if page > 0:
+        nav.append(_btn("⬅️ Назад", f"ap_prices:{page - 1}"))
+    if page < pages - 1:
+        nav.append(_btn("Вперёд ➡️", f"ap_prices:{page + 1}"))
+    if nav:
+        kb.row(*nav)
+    kb.row(_btn("⬅️ К оформлению", "ap_home"))
+
+    text = (
+        f"💰 <b>Цены товаров</b> — стр. {page + 1}/{pages} (всего {total}).\n"
+        "Сначала с наценкой <b>&lt;8%</b> и <b>&gt;13%</b>, затем остальные.\n"
+        "Нажмите на товар, чтобы изменить его цену или наценку."
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:  # noqa: BLE001 — если нельзя отредактировать, шлём новым
+        await call.message.answer(text, reply_markup=kb.as_markup())
     await call.answer()
 
 
