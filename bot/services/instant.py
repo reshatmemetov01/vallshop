@@ -239,7 +239,8 @@ async def _process_one(db, bot, config, kind, cat, instant_cat, vid,
             fzr_a=instant_cat, fzr_b=str(inst_id),
             icon_emoji_id=v.icon_emoji_id, description=v.description,
             pending_text=v.pending_text, delivered_text=v.delivered_text,
-            is_active=False,  # по-товарное включение
+            full_width=True,   # в разделе «Скидочные товары» — в один столбик
+            is_active=False,   # по-товарное включение
         )
         session.add(iv)
         await session.flush()
