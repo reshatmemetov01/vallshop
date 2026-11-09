@@ -31,7 +31,12 @@ from ..db.models import (
 from ..services import catalog as catalog_service
 from ..services import stock as stock_service
 from ..services.pricing import margin, sale_price
+from ..services import smm_panels
+from ..services.smartprice import MODE_SMART
 from .. import texts
+
+# Порог наценки для ручной проверки /lowmargin (ниже — риск продажи в минус).
+LOW_MARGIN_THRESHOLD = Decimal("7")
 
 router = Router()
 
@@ -458,3 +463,71 @@ async def cb_instant_dismiss(call: CallbackQuery, db: Database, config: BotConfi
     except Exception:  # noqa: BLE001
         pass
     await call.answer("Скрыто")
+
+
+# ── Ручная проверка низкой наценки у плавающих товаров (SMM + FazerCard) ──────
+@router.message(Command("lowmargin"))
+async def cmd_low_margin(message: Message, db: Database, config: BotConfig) -> None:
+    """Список товаров с плавающей ценой (SMM + FazerCard-smart) и наценкой ниже
+    порога (по умолчанию 7%). Запускается вручную.
+
+    Можно задать свой порог: /lowmargin 5
+    """
+    threshold = LOW_MARGIN_THRESHOLD
+    raw = (message.text or "").replace("/lowmargin", "", 1).strip()
+    if raw:
+        try:
+            threshold = Decimal(raw.replace(",", ".").split()[0])
+        except (InvalidOperation, IndexError):
+            threshold = LOW_MARGIN_THRESHOLD
+
+    default_mk = Decimal(config.default_markup_percent or 0)
+    rows: list = []
+    async with db.session() as session:
+        variants = list(
+            await session.scalars(select(Variant).where(Variant.is_active.is_(True)))
+        )
+        prod_titles: dict = {}
+        for v in variants:
+            floats = smm_panels.is_smm(v.source) or (
+                v.source == "fazercard" and v.price_mode == MODE_SMART
+            )
+            if not floats:
+                continue
+            mk = Decimal(v.markup_percent) if v.markup_percent is not None else default_mk
+            if mk >= threshold:
+                continue
+            if v.product_id not in prod_titles:
+                p = await session.get(Product, v.product_id)
+                prod_titles[v.product_id] = (p.title if p else "") or ""
+            src = "SMM" if smm_panels.is_smm(v.source) else "FazerCard"
+            rows.append((mk, prod_titles[v.product_id], v.title, src))
+
+    rows.sort(key=lambda r: r[0])
+    if not rows:
+        await message.answer(
+            f"✅ Товаров с наценкой ниже {threshold:g}% среди плавающих "
+            "(SMM + FazerCard) нет."
+        )
+        return
+
+    header = (
+        f"⚠️ <b>Наценка ниже {threshold:g}%</b> (плавающие SMM + FazerCard) — "
+        f"{len(rows)} шт.\nРиск продать в минус из-за комиссии платёжной системы:\n"
+    )
+    lines = []
+    for mk, ptitle, vtitle, src in rows:
+        name = f"{ptitle} → {vtitle}" if ptitle and ptitle != vtitle else (vtitle or ptitle)
+        lines.append(f"• <b>{mk:g}%</b> · {name} <i>({src})</i>")
+
+    # Отправляем частями, чтобы не упереться в лимит Telegram (4096).
+    chunk, size = [], len(header)
+    first = True
+    for ln in lines:
+        if size + len(ln) + 1 > 3800:
+            await message.answer((header if first else "") + "\n".join(chunk))
+            first, chunk, size = False, [], 0
+        chunk.append(ln)
+        size += len(ln) + 1
+    if chunk:
+        await message.answer((header if first else "") + "\n".join(chunk))
