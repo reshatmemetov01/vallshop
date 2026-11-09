@@ -548,6 +548,40 @@ def back_profile_kb() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+# ── «Купить сразу» (доплата под товар при нехватке баланса) ──────────────────
+def buynow_methods_kb(methods: list[dict] | None = None) -> InlineKeyboardMarkup:
+    """Выбор способа оплаты для доплаты под товар (callback bnm:<id>)."""
+    kb = InlineKeyboardBuilder()
+    for m in (methods or []):
+        emo = _PAY_EMOJI.get(m["id"])
+        kb.row(_b(m["label"], callback_data=f"bnm:{m['id']}", style="success", icon=emo))
+    kb.row(_b("Отмена", callback_data="bncancel", icon=EMOJI["back"]))
+    return kb.as_markup()
+
+
+def buynow_networks_kb(networks: list[str]) -> InlineKeyboardMarkup:
+    """Выбор сети USDT для доплаты (callback bnnet:<NET>)."""
+    kb = InlineKeyboardBuilder()
+    for net in networks:
+        kb.row(_b(net, callback_data=f"bnnet:{net}", style="primary"))
+    kb.row(_b("Отмена", callback_data="bncancel", icon=EMOJI["back"]))
+    return kb.as_markup()
+
+
+def buynow_payment_kb(
+    topup_id: int, checkout_url: str | None, address: str | None = None
+) -> InlineKeyboardMarkup:
+    """Сообщение со счётом под товар: оплата + проверка + отмена."""
+    kb = InlineKeyboardBuilder()
+    if address:
+        kb.row(_b("Скопировать адрес", icon=EMOJI["copy"], copy_text=CopyTextButton(text=address)))
+    if checkout_url:
+        kb.row(_b("Страница оплаты", url=checkout_url, icon=EMOJI["paylink"]))
+    kb.row(_b("Проверить оплату", callback_data=f"tucheck:{topup_id}", style="success", icon=EMOJI["check"]))
+    kb.row(_b("Отмена", callback_data=f"bncxl:{topup_id}", icon=EMOJI["back"]))
+    return kb.as_markup()
+
+
 def topup_cancel_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(_b("Отмена", callback_data="balance", icon=EMOJI["back"]))

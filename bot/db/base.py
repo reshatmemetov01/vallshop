@@ -110,6 +110,9 @@ class Database:
             ("variants", "smm_rate", "NUMERIC(12,4)"),
             # Описание номинала (показывается покупателю).
             ("variants", "description", "TEXT"),
+            # «Купить сразу»: доплата-пополнение под конкретный товар.
+            ("topups", "buy_json", "TEXT"),
+            ("topups", "buy_order_id", "INTEGER"),
         ]
         added_source = False
         for table, column, ddl in wanted:

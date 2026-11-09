@@ -23,6 +23,7 @@ from ..db import Database
 from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..payments import PaymentProvider
 from ..services import balance as balance_service
+from ..services import buynow as buynow_service
 from ..services import notify as notify_service
 from ..services import orders as order_service
 from ..services import paymethods as paymethods_service
@@ -385,9 +386,15 @@ async def msg_topup_amount(
 async def cb_topup_check(
     call: CallbackQuery, db: Database, config: BotConfig, provider: PaymentProvider,
     payhot: PaymentProvider = None, paydex: PaymentProvider = None,
+    platega: PaymentProvider = None, tbank: PaymentProvider = None,
+    liog=None, fzr=None, soc=None, panels=None, fragment=None, vpn=None,
     bots_by_merchant: dict = None, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     topup_id = int(call.data.split(":", 1)[1])
+    suppliers = {
+        "liog": liog, "fzr": fzr, "soc": soc, "panels": panels,
+        "fragment": fragment, "vpn": vpn,
+    }
     async with db.session() as session:
         topup = await session.get(TopUp, topup_id)
         if not topup or topup.user_id != call.from_user.id or topup.merchant_id != merchant_id:
@@ -395,7 +402,15 @@ async def cb_topup_check(
             return
 
         mid = topup.merchant_id
+        is_buy = bool(topup.buy_json) and topup.buy_order_id is None
         if topup.status == TopUpStatus.PAID:
+            if is_buy:
+                await call.answer("Оплата получена ✅")
+                await buynow_service.on_topup_paid_buy(
+                    db, call.message.bot, topup_id=topup_id,
+                    bots=bots_by_merchant, config=config, suppliers=suppliers,
+                )
+                return
             balance = await balance_service.get_balance(session, call.from_user.id, mid)
             await render(
                 call, banner="profile",
@@ -426,6 +441,10 @@ async def cb_topup_check(
             prov, ref = payhot, topup.provider_order_id
         elif topup.provider == "paydex" and paydex is not None:
             prov, ref = paydex, topup.provider_order_id
+        elif topup.provider == "platega" and platega is not None:
+            prov, ref = platega, topup.provider_order_id
+        elif topup.provider == "tbank" and tbank is not None:
+            prov, ref = tbank, topup.provider_order_id
         else:
             prov, ref = provider, topup.client_ref
         if not ref:
@@ -442,8 +461,17 @@ async def cb_topup_check(
         await balance_service.credit(session, call.from_user.id, topup.amount_usd, merchant_id=mid)
         await session.commit()
         credited = topup.amount_usd
-        balance = await balance_service.get_balance(session, call.from_user.id, mid)
 
+    if is_buy:
+        await call.answer("Оплата получена ✅")
+        await buynow_service.on_topup_paid_buy(
+            db, call.message.bot, topup_id=topup_id,
+            bots=bots_by_merchant, config=config, suppliers=suppliers,
+        )
+        return
+
+    async with db.session() as session:
+        balance = await balance_service.get_balance(session, call.from_user.id, mid)
     await render(
         call,
         banner="profile",

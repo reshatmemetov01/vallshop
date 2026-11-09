@@ -607,6 +607,14 @@ class TopUp(Base):
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
+    # «Купить сразу»: если пополнение сформировано как доплата под конкретный
+    # товар, здесь лежит JSON-намерение покупки (variant/qty/fields/цена...).
+    # После зачисления баланса поллер/вебхук сам докупает товар с баланса.
+    buy_json: Mapped[Optional[str]] = mapped_column(Text)
+    # id заказа, созданного авто-покупкой (или -1 = обработано, но товар не
+    # выдан, средства остались на балансе). None = ещё не обработано.
+    buy_order_id: Mapped[Optional[int]] = mapped_column(Integer)
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Рассылки: запланированная/выполненная рассылка и клики по кнопкам поста

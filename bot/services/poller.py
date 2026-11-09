@@ -23,6 +23,7 @@ from ..config import BotConfig
 from ..db import Database
 from ..db.models import Order, OrderStatus, TopUp, TopUpStatus, Variant
 from ..services import balance as balance_service
+from ..services import buynow as buynow_service
 from ..services import catalog as catalog_service
 from ..services import mprice as mprice_service
 from ..services import notify as notify_service
@@ -396,6 +397,7 @@ async def run_smartprice_poller(
 async def run_topup_poller(
     bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None, tbank=None,
     interval: float = 30.0, bots: dict | None = None, config: BotConfig | None = None,
+    suppliers: dict | None = None,
 ) -> None:
     """Фоновая авто-проверка пополнений (подстраховка вебхука).
 
@@ -404,7 +406,7 @@ async def run_topup_poller(
     идемпотентны (повтор с вебхуком безопасен)."""
     while True:
         try:
-            await _topup_tick(bot, db, provider, payhot, paydex, platega, tbank, bots, config)
+            await _topup_tick(bot, db, provider, payhot, paydex, platega, tbank, bots, config, suppliers)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -425,7 +427,7 @@ def _provider_and_ref(topup, provider, payhot, paydex=None, platega=None, tbank=
     return provider, topup.client_ref
 
 
-async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None, tbank=None, bots: dict | None = None, config: BotConfig | None = None) -> None:
+async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None, tbank=None, bots: dict | None = None, config: BotConfig | None = None, suppliers: dict | None = None) -> None:
     async with db.session() as session:
         pending = list(
             await session.scalars(
@@ -458,7 +460,17 @@ async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None
             await balance_service.credit(session, fresh.user_id, fresh.amount_usd, merchant_id=mid)
             await session.commit()
             user_id, credit = fresh.user_id, fresh.amount_usd
+            is_buy = bool(fresh.buy_json) and fresh.buy_order_id is None
+            topup_id = fresh.id
             balance = await balance_service.get_balance(session, user_id, merchant_id=mid)
+
+        # «Купить сразу»: вместо «баланс пополнен» — докупить и выдать товар.
+        if is_buy:
+            await buynow_service.on_topup_paid_buy(
+                db, bot, topup_id=topup_id, bots=bots, config=config,
+                suppliers=suppliers or {},
+            )
+            continue
 
         await _notify(
             _pick_bot(bots, mid, bot), user_id,
@@ -470,6 +482,11 @@ async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None
         await notify_service.notify_topup(
             db, config, bots, user_id=user_id, amount=credit, merchant_id=mid
         )
+
+    # Подстраховка: добить оплаченные buy-интенты, по которым покупка не прошла.
+    await buynow_service.settle_pending_buys(
+        db, bot, bots=bots, config=config, suppliers=suppliers or {}
+    )
 
 
 async def _notify(bot: Bot, user_id: int, text: str, reply_markup=None) -> None:

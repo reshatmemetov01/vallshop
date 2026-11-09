@@ -62,6 +62,21 @@ def ensure_activation_reason(conn: Connection) -> None:
         conn.exec_driver_sql("ALTER TABLE activation_requests ADD COLUMN reason TEXT")
 
 
+def ensure_topup_buy_columns(conn: Connection) -> None:
+    """Добавить topups.buy_json / topups.buy_order_id, если их ещё нет.
+
+    Нужно для «Купить сразу» (доплата под товар). Идемпотентно."""
+    from sqlalchemy import inspect
+    inspector = inspect(conn)
+    if "topups" not in set(inspector.get_table_names()):
+        return
+    cols = {c["name"] for c in inspector.get_columns("topups")}
+    if "buy_json" not in cols:
+        conn.exec_driver_sql("ALTER TABLE topups ADD COLUMN buy_json TEXT")
+    if "buy_order_id" not in cols:
+        conn.exec_driver_sql("ALTER TABLE topups ADD COLUMN buy_order_id INTEGER")
+
+
 def ensure_source_columns(conn: Connection) -> None:
     """Добавить orders.source / topups.source, если их ещё нет (идемпотентно).
 

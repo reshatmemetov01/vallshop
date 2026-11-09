@@ -20,7 +20,7 @@ from . import models as _web_models  # noqa: F401 — регистрация т�
 
 from .config import settings
 from .db import database
-from .migrate import ensure_activation_reason, ensure_source_columns, ensure_web_accounts_nullable
+from .migrate import ensure_activation_reason, ensure_source_columns, ensure_topup_buy_columns, ensure_web_accounts_nullable
 from .routers import activate, admin, auth, buy, catalog, orders, pages, reviews, topup
 
 
@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(ensure_source_columns)
         # activation_requests.reason — причина отклонения для «Мои активации».
         await conn.run_sync(ensure_activation_reason)
+        # topups.buy_json / buy_order_id — для «Купить сразу» (доплата под товар).
+        await conn.run_sync(ensure_topup_buy_columns)
     yield
 
 

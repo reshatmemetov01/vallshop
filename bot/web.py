@@ -32,7 +32,7 @@ def build_app(
     *, bot: Bot, db: Database, provider: PaymentProvider, liog: LioGamesClient,
     config=None, payhot: PaymentProvider = None, paydex: PaymentProvider = None,
     platega: PaymentProvider = None, tbank: PaymentProvider = None,
-    bots: dict | None = None,
+    bots: dict | None = None, suppliers: dict | None = None,
 ) -> web.Application:
     app = web.Application()
 
@@ -76,7 +76,7 @@ def build_app(
         update = provider.parse_webhook(raw)
         # Обработка идемпотентна. BoltUtil требует РОВНО {"status":"SUCCESS"},
         # иначе продолжит повторные попытки доставки.
-        await _apply_payment(bot, db, liog, update, bots, config)
+        await _apply_payment(bot, db, liog, update, bots, config, suppliers)
         return web.json_response({"status": "SUCCESS"})
 
     async def payhot_webhook(request: web.Request) -> web.Response:
@@ -87,7 +87,7 @@ def build_app(
             log.warning("PayHot: вебхук с неверной подписью отклонён")
             return web.json_response({"ok": False}, status=403)
         update = payhot.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update, bots, config)
+        await _apply_payment(bot, db, liog, update, bots, config, suppliers)
         return web.json_response({"ok": True})
 
     async def paydex_webhook(request: web.Request) -> web.Response:
@@ -99,7 +99,7 @@ def build_app(
             # Paydex: при неверной подписи ожидает 401.
             return web.json_response({"ok": False}, status=401)
         update = paydex.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update, bots, config)
+        await _apply_payment(bot, db, liog, update, bots, config, suppliers)
         return web.json_response({"ok": True})
 
     async def platega_webhook(request: web.Request) -> web.Response:
@@ -110,7 +110,7 @@ def build_app(
             log.warning("Platega: вебхук с неверными X-MerchantId/X-Secret отклонён")
             return web.json_response({"ok": False}, status=401)
         update = platega.parse_webhook(raw)
-        await _apply_payment(bot, db, liog, update, bots, config)
+        await _apply_payment(bot, db, liog, update, bots, config, suppliers)
         # Platega ждёт 200 OK (иначе будет повторять доставку).
         return web.json_response({"ok": True})
 
@@ -121,7 +121,7 @@ def build_app(
         raw = await request.read()
         if tbank.verify_webhook(raw, dict(request.headers)):
             update = tbank.parse_webhook(raw)
-            await _apply_payment(bot, db, liog, update, bots, config)
+            await _apply_payment(bot, db, liog, update, bots, config, suppliers)
         else:
             log.warning("T-Bank: вебхук с неверным Token — пропущен (сверит поллер)")
         return web.Response(text="OK")
@@ -151,20 +151,20 @@ def _pick_bot(bots, merchant_id, default):
     return default
 
 
-async def _apply_payment(bot, db: Database, liog, update, bots=None, config=None) -> None:
+async def _apply_payment(bot, db: Database, liog, update, bots=None, config=None, suppliers=None) -> None:
     if update.status != "paid":
         return
 
     # Пополнение баланса? (client_ref вида tu-...)
     ref = update.client_ref or ""
     if ref.startswith("tu-"):
-        await _apply_topup(bot, db, update, bots, config)
+        await _apply_topup(bot, db, update, bots, config, suppliers)
         return
 
     await _apply_order_payment(bot, db, liog, update, bots)
 
 
-async def _apply_topup(bot, db: Database, update, bots=None, config=None) -> None:
+async def _apply_topup(bot, db: Database, update, bots=None, config=None, suppliers=None) -> None:
     async with db.session() as session:
         topup = await balance_service.get_topup_by_ref(session, update.client_ref)
         if topup is None or topup.status == TopUpStatus.PAID:
@@ -179,8 +179,19 @@ async def _apply_topup(bot, db: Database, update, bots=None, config=None) -> Non
         await session.flush()
         user_id = topup.user_id
         credit = topup.amount_usd
+        is_buy = bool(topup.buy_json) and topup.buy_order_id is None
+        topup_id = topup.id
         await session.commit()
         balance = await balance_service.get_balance(session, user_id, merchant_id=merchant_id)
+
+    # «Купить сразу»: вместо «баланс пополнен» — докупить и выдать товар.
+    if is_buy:
+        from .services import buynow as buynow_service
+        await buynow_service.on_topup_paid_buy(
+            db, bot, topup_id=topup_id, bots=bots, config=config,
+            suppliers=suppliers or {},
+        )
+        return
 
     await _notify(
         _pick_bot(bots, merchant_id, bot),

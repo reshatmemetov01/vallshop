@@ -46,6 +46,7 @@ from ..db.models import HEAD_MERCHANT_ID, OrderStatus
 from fazercard import FazerCardClient
 from socproof import SocProofClient
 from ..ui import render
+from . import buynow as buynow_ui
 from .. import keyboards as kb
 from .. import texts
 
@@ -743,10 +744,12 @@ async def cb_topup_confirm(
         except InsufficientBalance:
             await session.rollback()
             await state.clear()
-            await call.message.answer(
-                texts.NOT_ENOUGH_BALANCE_MSG, reply_markup=kb.not_enough_balance_kb()
+            await buynow_ui.offer(
+                call, db, config, state,
+                variant_id=vid, unit_price=unit_price, owner_price=owner_price,
+                qty=1, merchant_id=merchant_id, user_id=call.from_user.id,
+                fields=answers,
             )
-            await call.answer()
             return
         except SupplierError:
             await session.rollback()
@@ -1033,10 +1036,15 @@ async def cb_steam_buy(
         except InsufficientBalance:
             await session.rollback()
             await state.clear()
-            await call.message.answer(
-                texts.NOT_ENOUGH_BALANCE_MSG, reply_markup=kb.not_enough_balance_kb()
+            await buynow_ui.offer(
+                call, db, config, state,
+                variant_id=vid, unit_price=price, owner_price=owner_price,
+                qty=1, merchant_id=merchant_id, user_id=call.from_user.id,
+                fields={
+                    "steam_login": login, "amount": amount,
+                    "currency": currency, "_cost_usd": cost_usd,
+                },
             )
-            await call.answer()
             return
         except SupplierError:
             await session.rollback()
@@ -1349,10 +1357,15 @@ async def cb_stars_buy(
         except InsufficientBalance:
             await session.rollback()
             await state.clear()
-            await call.message.answer(
-                texts.NOT_ENOUGH_BALANCE_MSG, reply_markup=kb.not_enough_balance_kb()
+            await buynow_ui.offer(
+                call, db, config, state,
+                variant_id=vid, unit_price=price, owner_price=owner_price,
+                qty=1, merchant_id=merchant_id, user_id=call.from_user.id,
+                fields={
+                    "telegram_username": uname, "stars_qty": qty,
+                    "_cost_usd": cost_usd,
+                },
             )
-            await call.answer()
             return
         except SupplierError:
             await session.rollback()
@@ -1532,10 +1545,12 @@ async def cb_smm_buy(
         except InsufficientBalance:
             await session.rollback()
             await state.clear()
-            await call.message.answer(
-                texts.NOT_ENOUGH_BALANCE_MSG, reply_markup=kb.not_enough_balance_kb()
+            await buynow_ui.offer(
+                call, db, config, state,
+                variant_id=vid, unit_price=client_total, owner_price=owner_total,
+                qty=1, merchant_id=merchant_id, user_id=call.from_user.id,
+                smm_link=link, smm_quantity=qty,
             )
-            await call.answer()
             return
         except SupplierError:
             await session.rollback()
@@ -1578,7 +1593,7 @@ async def cb_smm_buy(
 @router.callback_query(F.data.startswith("confirm:"))
 async def cb_confirm(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    vpn=None, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, vpn=None, merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     _, vid, n = call.data.split(":", 2)
     variant_id, qty = int(vid), int(n)
@@ -1617,10 +1632,11 @@ async def cb_confirm(
             )
         except InsufficientBalance:
             await session.rollback()
-            await call.message.answer(
-                texts.NOT_ENOUGH_BALANCE_MSG, reply_markup=kb.not_enough_balance_kb()
+            await buynow_ui.offer(
+                call, db, config, state,
+                variant_id=variant_id, unit_price=unit_price, owner_price=owner_price,
+                qty=qty, merchant_id=merchant_id, user_id=call.from_user.id,
             )
-            await call.answer()
             return
         except OutOfStock:
             await session.rollback()
