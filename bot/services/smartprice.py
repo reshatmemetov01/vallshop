@@ -22,7 +22,7 @@ from typing import List, Optional
 from sqlalchemy import select
 
 from ..db import Database
-from ..db.models import Variant
+from ..db.models import Product, Variant
 from . import catalog as catalog_service
 from . import rates as rates_service
 
@@ -266,3 +266,63 @@ async def stop_loss_violation(fzr, variant, price_rub, rate=None) -> bool:
         return False  # закуп неизвестен — не блокируем продажу
     cost_rub = (Decimal(cost) * Decimal(r)).quantize(_ONE, rounding=ROUND_CEILING)
     return Decimal(price_rub) < cost_rub
+
+
+# ── Проверка низкой наценки у плавающих товаров (SMM + FazerCard-smart) ───────
+async def low_margin_variants(db: Database, default_markup, threshold) -> list:
+    """Активные товары с плавающей от закупа ценой (SMM + FazerCard-smart) и
+    наценкой ниже ``threshold``. Возвращает [(markup, product_title, title, src)]
+    по возрастанию наценки."""
+    from . import smm_panels
+    default_mk = Decimal(default_markup or 0)
+    threshold = Decimal(threshold)
+    rows: list = []
+    async with db.session() as session:
+        variants = list(
+            await session.scalars(select(Variant).where(Variant.is_active.is_(True)))
+        )
+        prod_titles: dict = {}
+        for v in variants:
+            floats = smm_panels.is_smm(v.source) or (
+                v.source == "fazercard" and v.price_mode == MODE_SMART
+            )
+            if not floats:
+                continue
+            mk = Decimal(v.markup_percent) if v.markup_percent is not None else default_mk
+            if mk >= threshold:
+                continue
+            if v.product_id not in prod_titles:
+                p = await session.get(Product, v.product_id)
+                prod_titles[v.product_id] = (p.title if p else "") or ""
+            src = "SMM" if smm_panels.is_smm(v.source) else "FazerCard"
+            rows.append((mk, prod_titles[v.product_id], v.title, src))
+    rows.sort(key=lambda r: r[0])
+    return rows
+
+
+def format_low_margin(rows: list, threshold) -> list:
+    """Сообщения со списком низкой наценки (частями под лимит Telegram)."""
+    threshold = Decimal(threshold)
+    if not rows:
+        return [
+            f"✅ Товаров с наценкой ниже {threshold:g}% среди плавающих "
+            "(SMM + FazerCard) нет."
+        ]
+    header = (
+        f"⚠️ <b>Наценка ниже {threshold:g}%</b> (плавающие SMM + FazerCard) — "
+        f"{len(rows)} шт.\nРиск продать в минус из-за комиссии платёжной системы:\n"
+    )
+    lines = []
+    for mk, ptitle, vtitle, src in rows:
+        name = f"{ptitle} → {vtitle}" if ptitle and ptitle != vtitle else (vtitle or ptitle)
+        lines.append(f"• <b>{mk:g}%</b> · {name} <i>({src})</i>")
+    out, chunk, size, first = [], [], len(header), True
+    for ln in lines:
+        if size + len(ln) + 1 > 3800:
+            out.append((header if first else "") + "\n".join(chunk))
+            first, chunk, size = False, [], 0
+        chunk.append(ln)
+        size += len(ln) + 1
+    if chunk:
+        out.append((header if first else "") + "\n".join(chunk))
+    return out

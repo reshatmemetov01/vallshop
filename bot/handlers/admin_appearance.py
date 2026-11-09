@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from aiogram import F, Router
 from aiogram.filters import BaseFilter
 from aiogram.fsm.context import FSMContext
@@ -73,6 +75,7 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
     kb.row(_btn("🛍 Кнопки каталога", "apc_home"))
     kb.row(_btn("⭐ Кнопки звёзд", "apst_home"))
     kb.row(_btn("💳 Способы оплаты", "pm_home"))
+    kb.row(_btn("📊 Скан цен", "ap_pricescan"))
     kb.row(_btn("♻️ Перевести Цены", "ap_migprices"))
     kb.row(_btn("♻️ Сбросить к стандартному", "ap_reset"))
     kb.row(_btn("⬅️ Назад", "a_home"))
@@ -84,6 +87,25 @@ async def cb_home(call: CallbackQuery, state: FSMContext) -> None:
         reply_markup=kb.as_markup(),
     )
     await call.answer()
+
+
+@router.callback_query(F.data == "ap_pricescan")
+async def cb_pricescan(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+    """Скан цен: товары с плавающей ценой (SMM + FazerCard) и наценкой ниже 7%."""
+    await call.answer("Сканирую цены…")
+    from ..services import smartprice as smartprice_service
+    threshold = Decimal("7")
+    rows = await smartprice_service.low_margin_variants(
+        db, config.default_markup_percent, threshold
+    )
+    msgs = smartprice_service.format_low_margin(rows, threshold)
+    for i, msg in enumerate(msgs):
+        if i == len(msgs) - 1:
+            kb = InlineKeyboardBuilder()
+            kb.row(_btn("⬅️ К оформлению", "ap_home"))
+            await call.message.answer(msg, reply_markup=kb.as_markup())
+        else:
+            await call.message.answer(msg)
 
 
 @router.callback_query(F.data == "ap_migprices")
