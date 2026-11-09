@@ -326,6 +326,8 @@ async def all_markups(db: Database, default_markup) -> list:
             else:
                 cost = Decimal(v.cost_usd or 0)
                 mk = derive_markup(price_rub_value(v, default_mk), cost, rate) if cost > 0 else None
+            if mk is not None:
+                mk = mk.quantize(Decimal("0.1"))  # до десятых, без длинных хвостов
             rows.append((mk, ptitles[v.product_id], v.title, v.id))
 
     def _key(r):
