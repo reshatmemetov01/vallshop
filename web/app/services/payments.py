@@ -31,7 +31,7 @@ from . import wallet as wallet_service
 # Способы с редиректом на хостинговую страницу оплаты (подходят для сайта):
 # card (PayHot), sbp/sbp_ph (Paydex/PayHot), card_pg/sbp_pg (Platega — резерв),
 # tbank (T-Bank — hosted-страница эквайринга), usdt (BoltUtil — своя hosted-страница).
-_WEB_METHODS = {"card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "tbank", "usdt"}
+_WEB_METHODS = {"card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "tbank", "tbank_sbp", "usdt"}
 
 TOPUP_MIN = balance_service.TOPUP_MIN
 TOPUP_MAX = balance_service.TOPUP_MAX
