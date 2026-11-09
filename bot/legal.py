@@ -44,8 +44,6 @@ code{background:rgba(127,127,127,.15);padding:1px 6px;border-radius:6px}
 min-width:64px;height:40px;padding:0 14px;border:1px solid #e6e8eb;
 border-radius:9px;background:#fff;font-weight:800;font-size:15px;
 letter-spacing:.3px;line-height:1}
-.pay-tbank{display:inline-flex;align-items:center;gap:10px;margin:10px 0 2px}
-.pay-tbank .pay-badge{background:#ffdd2d;color:#111;border-color:#ffdd2d}
 """
 
 
@@ -123,9 +121,8 @@ def _tg_contact(config) -> str:
 
 
 def _payment_methods_html() -> str:
-    """Способы оплаты с логотипами платёжных систем, логотип банка-эквайера
-    (T-Bank / T-Pay) и ссылка на tbank.ru + пояснение о безопасной передаче
-    платёжных данных. Требования банка-эквайера к Интернет-магазину."""
+    """Способы оплаты с логотипами платёжных систем + пояснение о безопасной
+    передаче платёжных данных."""
     return (
         "<h2>Способы оплаты</h2>"
         "<p>Оплата банковской картой и через СБП. К оплате принимаются карты "
@@ -136,11 +133,6 @@ def _payment_methods_html() -> str:
         "<span class='pay-badge' style='color:#0f754e'>МИР</span>"
         "<span class='pay-badge' style='color:#1f6feb'>СБП</span>"
         "</div>"
-        "<p class='pay-tbank'>Приём платежей по картам и СБП выполняет "
-        "банк-эквайер <span class='pay-badge'>T-Bank</span> "
-        "<span class='pay-badge'>T-Pay</span></p>"
-        "<p>Официальный сайт банка: "
-        "<a href='https://tbank.ru' target='_blank' rel='noopener'>tbank.ru</a>.</p>"
         "<p>Безопасность платежей: сайт работает по защищённому протоколу "
         "HTTPS (TLS). Данные банковской карты вводятся на защищённой "
         "платёжной странице банка-эквайера, обрабатываются в соответствии со "
@@ -469,8 +461,8 @@ def offer_html(config) -> str:
         "<li>Наименование: ВаллШоп</li>"
         "<li>ИНН: 910906834461</li>"
         "<li>ОГРНИП / ОГРН: 325911200064962</li>"
-        "<li>Юридический адрес: г. Москва, Барсеневская набережная, 6 "
-        "стр. 2, 119072</li>"
+        "<li>Юридический адрес: 107564, РОССИЯ, г Москва, г Москва, "
+        "ул Краснобогатырская, д 21</li>"
         "<li>Адрес электронной почты: "
         "<a href='mailto:reshatmemetov72@gmail.com'>reshatmemetov72@gmail.com</a></li>"
         f"<li>Телефон поддержки: <a href='tel:{SUPPORT_PHONE_TEL}'>"
