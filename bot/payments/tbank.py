@@ -32,6 +32,8 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import ssl
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Mapping, Optional
 
@@ -43,6 +45,22 @@ except ImportError:  # pragma: no cover
 from .base import Invoice, PaymentProvider, PaymentUpdate
 
 log = logging.getLogger("vallshop.tbank")
+
+# securepay.tinkoff.ru подписан «Russian Trusted Root CA» (Минцифры), которого НЕТ
+# в certifi/системном bundle питон-образа. Поэтому доверяем системным CA + этому
+# корню (лежит рядом с модулем). Иначе — CERTIFICATE_VERIFY_FAILED на каждом вызове.
+_RU_CA = os.path.join(os.path.dirname(__file__), "russian_trusted_ca.pem")
+
+
+def _ssl_context(extra_ca: Optional[str] = None) -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    for path in (_RU_CA, extra_ca):
+        if path and os.path.exists(path):
+            try:
+                ctx.load_verify_locations(path)
+            except Exception:  # noqa: BLE001 — не валим провайдер из-за одного CA
+                log.warning("T-Bank: не удалось загрузить CA %s", path)
+    return ctx
 
 # Статусы T-Bank → наши (pending | paid | failed).
 _PAID = {"CONFIRMED"}
@@ -78,12 +96,14 @@ class TBankProvider(PaymentProvider):
         password: Optional[str] = None,
         timeout: float = 30.0,
         mock: bool = False,
+        ca_bundle: Optional[str] = None,
     ) -> None:
         self.base_url = (base_url or "https://securepay.tinkoff.ru/v2").rstrip("/")
         self.terminal_key = terminal_key or ""
         self.password = password or ""
         self.timeout = timeout
         self.mock = mock
+        self._ssl = _ssl_context(ca_bundle)
 
     # ── Подпись ────────────────────────────────────────────────────────────────
     def token(self, params: Mapping) -> str:
@@ -101,7 +121,7 @@ class TBankProvider(PaymentProvider):
         if httpx is None:
             raise RuntimeError("Пакет 'httpx' не установлен")
         url = self.base_url + path
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self._ssl) as client:
             resp = await client.post(
                 url,
                 content=json.dumps(body, ensure_ascii=False).encode("utf-8"),
