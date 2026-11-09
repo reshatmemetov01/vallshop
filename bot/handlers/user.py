@@ -507,6 +507,23 @@ async def _render_quantity(
             await call.answer("Недоступно", show_alert=True)
             return
         price = await _client_price(session, merchant_id, variant, config)
+        # Скидочный номинал (Instant use): зачёркнутая цена обычного товара.
+        old_price = None
+        if variant.fzr_a and variant.fzr_a.endswith("_instant_use"):
+            from sqlalchemy import select as _sel
+            from ..db.models import InstantCandidate, Variant as _V
+            cand = await session.scalar(
+                _sel(InstantCandidate).where(
+                    InstantCandidate.fzr_a == variant.fzr_a,
+                    InstantCandidate.fzr_b == variant.fzr_b,
+                )
+            )
+            if cand and cand.regular_variant_id:
+                reg = await session.get(_V, cand.regular_variant_id)
+                if reg is not None:
+                    rp = await _client_price(session, merchant_id, reg, config)
+                    if rp and rp > price:
+                        old_price = rp
         in_stock = await stock_service.available_count(session, variant_id)
         balance = await get_balance(session, call.from_user.id, merchant_id)
         ondemand = variant.source == "fazercard"
@@ -545,7 +562,8 @@ async def _render_quantity(
         banner="catalog",
         caption=texts.CHOOSE_QUANTITY.format(
             item=variant.title,
-            price=texts.rub(price),
+            price=(f"<s>{texts.rub(old_price)}</s> {texts.rub(price)}"
+                   if old_price else texts.rub(price)),
             stock=stock_label,
             balance=texts.rub(balance),
         ),
