@@ -6,6 +6,7 @@ from .mock import MockProvider
 from .paydex import PaydexProvider
 from .payhot import PayHotProvider
 from .platega import PlategaProvider
+from .tbank import TBankProvider
 
 
 def build_payhot(config):
@@ -42,6 +43,18 @@ def build_platega(config):
         merchant_id=config.platega_merchant_id,
         secret=config.platega_secret,
         mock=config.platega_mock,
+    )
+
+
+def build_tbank(config):
+    """Собрать T-Bank-провайдера (₽: карта/СБП через hosted-страницу) или None."""
+    if not getattr(config, "tbank_enabled", False):
+        return None
+    return TBankProvider(
+        base_url=config.tbank_base_url,
+        terminal_key=config.tbank_terminal_key,
+        password=config.tbank_password,
+        mock=config.tbank_mock,
     )
 
 

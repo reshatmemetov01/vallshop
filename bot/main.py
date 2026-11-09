@@ -17,7 +17,7 @@ from fazercard import FazerCardClient
 from .config import BotConfig
 from .db import Database
 from .handlers import build_root_router
-from .payments import build_paydex, build_payhot, build_platega, build_provider
+from .payments import build_paydex, build_payhot, build_platega, build_provider, build_tbank
 from .services.bcscheduler import run_bonus_cleaner, run_broadcast_scheduler
 from .services.poller import (
     run_fulfillment_poller,
@@ -28,7 +28,7 @@ from .services.poller import (
 log = logging.getLogger("vallshop")
 
 
-async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, paydex=None, platega=None, bots=None) -> None:
+async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, paydex=None, platega=None, tbank=None, bots=None) -> None:
     """Запустить aiohttp-сервер вебхуков, если задан PUBLIC_BASE_URL."""
     from aiohttp import web
 
@@ -36,7 +36,7 @@ async def _run_web(config: BotConfig, bot, db, provider, liog, payhot=None, payd
 
     app = build_app(
         bot=bot, db=db, provider=provider, liog=liog, config=config,
-        payhot=payhot, paydex=paydex, platega=platega, bots=bots,
+        payhot=payhot, paydex=paydex, platega=platega, tbank=tbank, bots=bots,
     )
     runner = web.AppRunner(app)
     await runner.setup()
@@ -298,6 +298,7 @@ async def main() -> None:
     payhot = build_payhot(config)
     paydex = build_paydex(config)
     platega = build_platega(config)
+    tbank = build_tbank(config)
     liog = LioGamesClient.from_env()
     fzr = FazerCardClient.from_env()
     from .services import smm_panels
@@ -357,6 +358,7 @@ async def main() -> None:
     dp["payhot"] = payhot
     dp["paydex"] = paydex
     dp["platega"] = platega
+    dp["tbank"] = tbank
     dp["liog"] = liog
     dp["fzr"] = fzr
     dp["soc"] = soc
@@ -404,14 +406,14 @@ async def main() -> None:
         ),
         asyncio.create_task(
             run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex,
-                             platega=platega, bots=bots_by_merchant, config=config)
+                             platega=platega, tbank=tbank, bots=bots_by_merchant, config=config)
         ),
         asyncio.create_task(run_smartprice_poller(bot, db, fzr, config, panels=panels)),
         asyncio.create_task(run_broadcast_scheduler(db, bots_by_merchant)),
         asyncio.create_task(run_bonus_cleaner(db, bots_by_merchant)),
     ]
     if config.public_base_url:
-        await _run_web(config, bot, db, provider, liog, payhot, paydex, platega, bots=bots_by_merchant)
+        await _run_web(config, bot, db, provider, liog, payhot, paydex, platega, tbank, bots=bots_by_merchant)
 
     log.info(
         "Старт. Ботов: %s (франшиз: %s). Провайдер оплаты: %s. Админы: %s",

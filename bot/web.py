@@ -31,7 +31,8 @@ log = logging.getLogger("vallshop.web")
 def build_app(
     *, bot: Bot, db: Database, provider: PaymentProvider, liog: LioGamesClient,
     config=None, payhot: PaymentProvider = None, paydex: PaymentProvider = None,
-    platega: PaymentProvider = None, bots: dict | None = None,
+    platega: PaymentProvider = None, tbank: PaymentProvider = None,
+    bots: dict | None = None,
 ) -> web.Application:
     app = web.Application()
 
@@ -113,6 +114,18 @@ def build_app(
         # Platega ждёт 200 OK (иначе будет повторять доставку).
         return web.json_response({"ok": True})
 
+    async def tbank_webhook(request: web.Request) -> web.Response:
+        # T-Bank требует тело ответа ровно "OK" (иначе повторяет доставку).
+        if tbank is None:
+            return web.Response(text="OK")
+        raw = await request.read()
+        if tbank.verify_webhook(raw, dict(request.headers)):
+            update = tbank.parse_webhook(raw)
+            await _apply_payment(bot, db, liog, update, bots, config)
+        else:
+            log.warning("T-Bank: вебхук с неверным Token — пропущен (сверит поллер)")
+        return web.Response(text="OK")
+
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/", landing_page)
     app.router.add_get("/offer", offer_page)
@@ -127,6 +140,7 @@ def build_app(
     app.router.add_post("/payhot/webhook", payhot_webhook)
     app.router.add_post("/paydex/webhook", paydex_webhook)
     app.router.add_post("/platega/webhook", platega_webhook)
+    app.router.add_post("/tbank/webhook", tbank_webhook)
     return app
 
 

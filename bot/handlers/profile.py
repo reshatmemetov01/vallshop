@@ -141,13 +141,14 @@ def _provider_availability(config: BotConfig) -> dict:
         "payhot": config.payhot_enabled,
         "paydex": config.paydex_enabled,
         "platega": config.platega_enabled,
+        "tbank": config.tbank_enabled,
         "bolt": True,  # крипта всегда доступна (реальный провайдер или mock)
     }
 
 
-def _rub_provider(method_id: str, payhot, paydex, platega=None):
+def _rub_provider(method_id: str, payhot, paydex, platega=None, tbank=None):
     """Платёжный провайдер для рублёвого способа (card → PayHot, sbp → Paydex,
-    резерв card_pg/sbp_pg → Platega)."""
+    резерв card_pg/sbp_pg → Platega, tbank → T-Bank)."""
     prov_name = paymethods_service.PROVIDER_OF.get(method_id)
     if prov_name == "payhot":
         return payhot
@@ -155,6 +156,8 @@ def _rub_provider(method_id: str, payhot, paydex, platega=None):
         return paydex
     if prov_name == "platega":
         return platega
+    if prov_name == "tbank":
+        return tbank
     return None
 
 
@@ -182,13 +185,13 @@ async def cb_topup(
 async def cb_topup_rub(
     call: CallbackQuery, db: Database, config: BotConfig, state: FSMContext,
     payhot: PaymentProvider = None, paydex: PaymentProvider = None,
-    platega: PaymentProvider = None,
+    platega: PaymentProvider = None, tbank: PaymentProvider = None,
 ) -> None:
     method = call.data.split(":", 1)[1].lower()
     available = _provider_availability(config)
     async with db.session() as session:
         methods = {m["id"]: m for m in await paymethods_service.client_methods(session, available=available)}
-    if method not in methods or _rub_provider(method, payhot, paydex, platega) is None:
+    if method not in methods or _rub_provider(method, payhot, paydex, platega, tbank) is None:
         await call.answer("Способ недоступен", show_alert=True)
         return
     await state.set_state(TopUpFlow.waiting_amount)
@@ -243,6 +246,7 @@ async def msg_topup_amount(
     payhot: PaymentProvider = None,
     paydex: PaymentProvider = None,
     platega: PaymentProvider = None,
+    tbank: PaymentProvider = None,
     merchant_id: int = HEAD_MERCHANT_ID,
 ) -> None:
     data = await state.get_data()
@@ -261,7 +265,7 @@ async def msg_topup_amount(
     # ── ₽ (карта → PayHot / СБП → Paydex) ────────────────────────────────────
     if kind == "rub":
         method = (data.get("method") or "").lower()
-        pay = _rub_provider(method, payhot, paydex, platega)
+        pay = _rub_provider(method, payhot, paydex, platega, tbank)
         if pay is None:
             await state.clear()
             await message.answer("Способ оплаты недоступен, начните пополнение заново.")
@@ -281,6 +285,8 @@ async def msg_topup_amount(
                 notify_url = config.paydex_notify_url
             elif pay.name == "platega":
                 notify_url = config.platega_notify_url
+            elif pay.name == "tbank":
+                notify_url = config.tbank_notify_url
             else:
                 notify_url = config.payhot_notify_url
             try:

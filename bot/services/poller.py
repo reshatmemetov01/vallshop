@@ -394,7 +394,7 @@ async def run_smartprice_poller(
 
 
 async def run_topup_poller(
-    bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None,
+    bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None, tbank=None,
     interval: float = 30.0, bots: dict | None = None, config: BotConfig | None = None,
 ) -> None:
     """Фоновая авто-проверка пополнений (подстраховка вебхука).
@@ -404,7 +404,7 @@ async def run_topup_poller(
     идемпотентны (повтор с вебхуком безопасен)."""
     while True:
         try:
-            await _topup_tick(bot, db, provider, payhot, paydex, platega, bots, config)
+            await _topup_tick(bot, db, provider, payhot, paydex, platega, tbank, bots, config)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -412,7 +412,7 @@ async def run_topup_poller(
         await asyncio.sleep(interval)
 
 
-def _provider_and_ref(topup, provider, payhot, paydex=None, platega=None):
+def _provider_and_ref(topup, provider, payhot, paydex=None, platega=None, tbank=None):
     """Выбрать провайдера и ключ для проверки статуса по topup.provider."""
     if topup.provider == "payhot" and payhot is not None:
         return payhot, topup.provider_order_id
@@ -420,10 +420,12 @@ def _provider_and_ref(topup, provider, payhot, paydex=None, platega=None):
         return paydex, topup.provider_order_id
     if topup.provider == "platega" and platega is not None:
         return platega, topup.provider_order_id
+    if topup.provider == "tbank" and tbank is not None:
+        return tbank, topup.provider_order_id
     return provider, topup.client_ref
 
 
-async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None, bots: dict | None = None, config: BotConfig | None = None) -> None:
+async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None, platega=None, tbank=None, bots: dict | None = None, config: BotConfig | None = None) -> None:
     async with db.session() as session:
         pending = list(
             await session.scalars(
@@ -440,7 +442,7 @@ async def _topup_tick(bot: Bot, db: Database, provider, payhot=None, paydex=None
                 fresh.status = TopUpStatus.EXPIRED
                 await session.commit()
                 continue
-            prov, ref = _provider_and_ref(fresh, provider, payhot, paydex, platega)
+            prov, ref = _provider_and_ref(fresh, provider, payhot, paydex, platega, tbank)
             if prov is None or not ref:
                 continue
             try:

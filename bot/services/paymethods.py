@@ -20,17 +20,17 @@ from . import settings as settings_service
 # Порядок = порядок показа кнопок клиенту.
 # ``sbp_ph`` — резервная СБП через PayHot (по умолчанию скрыта).
 # ``card_pg`` / ``sbp_pg`` — резерв через Platega (по умолчанию скрыты).
-METHOD_IDS: List[str] = ["card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "usdt"]
+METHOD_IDS: List[str] = ["card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "tbank", "usdt"]
 
 PROVIDER_OF = {
     "card": "payhot", "sbp": "paydex", "sbp_ph": "payhot",
-    "card_pg": "platega", "sbp_pg": "platega", "usdt": "bolt",
+    "card_pg": "platega", "sbp_pg": "platega", "tbank": "tbank", "usdt": "bolt",
 }
 
 # Код способа, который уходит провайдеру (у PayHot и Paydex СБП = "sbp").
 CODE_OF = {
     "card": "card", "sbp": "sbp", "sbp_ph": "sbp",
-    "card_pg": "card", "sbp_pg": "sbp", "usdt": "usdt",
+    "card_pg": "card", "sbp_pg": "sbp", "tbank": "tbank", "usdt": "usdt",
 }
 
 DEFAULT_LABEL = {
@@ -39,11 +39,12 @@ DEFAULT_LABEL = {
     "sbp_ph": "СБП (резерв)",
     "card_pg": "Банковская карта",
     "sbp_pg": "СБП",
+    "tbank": "Карта / СБП (T-Bank)",
     "usdt": "USDT (крипта)",
 }
 
 # Видимость по умолчанию (резервы скрыты, пока их не включат в админке).
-DEFAULT_ENABLED = {"sbp_ph": False, "card_pg": False, "sbp_pg": False}
+DEFAULT_ENABLED = {"sbp_ph": False, "card_pg": False, "sbp_pg": False, "tbank": False}
 
 # Человеческие названия для админки.
 TITLE = {
@@ -52,6 +53,7 @@ TITLE = {
     "sbp_ph": "⚡ СБП — резерв (PayHot)",
     "card_pg": "💳 Карта — резерв (Platega)",
     "sbp_pg": "⚡ СБП — резерв (Platega)",
+    "tbank": "🏦 T-Bank (карта/СБП) — резерв",
     "usdt": "₮ USDT-крипта (BoltUtil)",
 }
 

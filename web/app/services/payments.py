@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import BotConfig
 from bot.db.models import TopUp, WebAccount
-from bot.payments import build_paydex, build_payhot, build_platega, build_provider
+from bot.payments import build_paydex, build_payhot, build_platega, build_provider, build_tbank
 from bot.payments.boltutil import MIN_PAYMENT_USDT
 from bot.services import balance as balance_service
 from bot.services import paymethods as paymethods_service
@@ -30,8 +30,8 @@ from . import wallet as wallet_service
 
 # Способы с редиректом на хостинговую страницу оплаты (подходят для сайта):
 # card (PayHot), sbp/sbp_ph (Paydex/PayHot), card_pg/sbp_pg (Platega — резерв),
-# usdt (BoltUtil — своя hosted-страница).
-_WEB_METHODS = {"card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "usdt"}
+# tbank (T-Bank — hosted-страница эквайринга), usdt (BoltUtil — своя hosted-страница).
+_WEB_METHODS = {"card", "sbp", "sbp_ph", "card_pg", "sbp_pg", "tbank", "usdt"}
 
 TOPUP_MIN = balance_service.TOPUP_MIN
 TOPUP_MAX = balance_service.TOPUP_MAX
@@ -65,6 +65,7 @@ def _provs() -> dict:
             "payhot": build_payhot(cfg),
             "paydex": build_paydex(cfg),
             "platega": build_platega(cfg),
+            "tbank": build_tbank(cfg),
             # BoltUtil — только если реально настроен (иначе mock с фейковой ссылкой).
             "bolt": build_provider(cfg) if _bolt_configured(cfg) else None,
         }
@@ -82,6 +83,7 @@ async def available_methods(session: AsyncSession) -> List[dict]:
         "payhot": provs.get("payhot") is not None,
         "paydex": provs.get("paydex") is not None,
         "platega": provs.get("platega") is not None,
+        "tbank": provs.get("tbank") is not None,
         "bolt": provs.get("bolt") is not None,
     }
     methods = await paymethods_service.client_methods(session, available=avail)
@@ -128,6 +130,8 @@ async def create_topup(
             notify_url = cfg.paydex_notify_url
         elif provider_name == "platega":
             notify_url = cfg.platega_notify_url  # у Platega callback задаётся в кабинете
+        elif provider_name == "tbank":
+            notify_url = cfg.tbank_notify_url  # NotificationURL уходит в T-Bank в Init
         else:
             notify_url = cfg.payhot_notify_url
 

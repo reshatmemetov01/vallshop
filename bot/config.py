@@ -87,6 +87,12 @@ class BotConfig:
     platega_secret: Optional[str] = None       # X-Secret (API-ключ; им же колбэк)
     platega_mock: bool = False
 
+    # ── T-Bank (резерв, приём ₽: карта/СБП через hosted-страницу эквайринга) ─────
+    tbank_base_url: str = "https://securepay.tinkoff.ru/v2"
+    tbank_terminal_key: Optional[str] = None   # TerminalKey терминала
+    tbank_password: Optional[str] = None        # пароль терминала (для подписи Token)
+    tbank_mock: bool = False
+
     # Контакт поддержки (Telegram @username, ссылка или email) — для оферты/FAQ.
     support_contact: Optional[str] = None
     # Юр. данные для оферты (ИП/самозанятый/компания и т.п.) — опционально.
@@ -156,6 +162,15 @@ class BotConfig:
     def platega_enabled(self) -> bool:
         return self.platega_mock or bool(self.platega_merchant_id and self.platega_secret)
 
+    @property
+    def tbank_notify_url(self) -> Optional[str]:
+        # NotificationURL уходит в T-Bank прямо в запросе Init.
+        return self._pub("/tbank/webhook")
+
+    @property
+    def tbank_enabled(self) -> bool:
+        return self.tbank_mock or bool(self.tbank_terminal_key and self.tbank_password)
+
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
 
@@ -199,6 +214,10 @@ class BotConfig:
             platega_merchant_id=_get("PLATEGA_MERCHANT_ID"),
             platega_secret=_get("PLATEGA_SECRET"),
             platega_mock=_truthy(_get("PLATEGA_MOCK")),
+            tbank_base_url=_get("TBANK_BASE_URL", "https://securepay.tinkoff.ru/v2"),
+            tbank_terminal_key=_get("TBANK_TERMINAL_KEY"),
+            tbank_password=_get("TBANK_PASSWORD"),
+            tbank_mock=_truthy(_get("TBANK_MOCK")),
             mock_payments=_truthy(_get("MOCK_PAYMENTS")),
             support_contact=_get("SUPPORT_CONTACT"),
             legal_entity=_get("LEGAL_ENTITY"),
