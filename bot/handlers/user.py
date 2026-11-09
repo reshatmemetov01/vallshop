@@ -407,6 +407,28 @@ async def cb_product(
     await call.answer()
 
 
+async def _instant_old_price(session, variant, merchant_id, config, price):
+    """Для скидочного (Instant use) номинала — цена обычного товара (для
+    зачёркивания), если обычный дороже. Иначе None."""
+    if not (variant.fzr_a and variant.fzr_a.endswith("_instant_use")):
+        return None
+    from sqlalchemy import select as _sel
+    from ..db.models import InstantCandidate, Variant as _V
+    cand = await session.scalar(
+        _sel(InstantCandidate).where(
+            InstantCandidate.fzr_a == variant.fzr_a,
+            InstantCandidate.fzr_b == variant.fzr_b,
+        )
+    )
+    if not (cand and cand.regular_variant_id):
+        return None
+    reg = await session.get(_V, cand.regular_variant_id)
+    if reg is None:
+        return None
+    rp = await _client_price(session, merchant_id, reg, config)
+    return rp if (rp and rp > price) else None
+
+
 @router.callback_query(F.data.startswith("var:"))
 async def cb_variant(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
@@ -443,6 +465,7 @@ async def cb_variant(
         smm_min = int(variant.smm_min or 1)
         smm_max = int(variant.smm_max or 0)
         back = f"prod:{variant.product_id}"
+        old_price = await _instant_old_price(session, variant, merchant_id, config, client_price)
         if ondemand:
             fz = await catalog_service.fazercard_stock(fzr, [variant])
             in_stock = fz.get(variant.id)  # int (реальный сток) или None (неизвестно)
@@ -485,7 +508,10 @@ async def cb_variant(
     else:
         note = texts.OUT_OF_STOCK_NOTE
         out = True
-    price_str = texts.rub(client_price) if client_price > 0 else "—"
+    if client_price > 0 and old_price:
+        price_str = f"<s>{texts.rub(old_price)}</s> {texts.rub(client_price)}"
+    else:
+        price_str = texts.rub(client_price) if client_price > 0 else "—"
     caption = (
         f"<b>{v_title}</b>\n"
         f"Цена: <b>{price_str}</b>\n"
@@ -508,22 +534,7 @@ async def _render_quantity(
             return
         price = await _client_price(session, merchant_id, variant, config)
         # Скидочный номинал (Instant use): зачёркнутая цена обычного товара.
-        old_price = None
-        if variant.fzr_a and variant.fzr_a.endswith("_instant_use"):
-            from sqlalchemy import select as _sel
-            from ..db.models import InstantCandidate, Variant as _V
-            cand = await session.scalar(
-                _sel(InstantCandidate).where(
-                    InstantCandidate.fzr_a == variant.fzr_a,
-                    InstantCandidate.fzr_b == variant.fzr_b,
-                )
-            )
-            if cand and cand.regular_variant_id:
-                reg = await session.get(_V, cand.regular_variant_id)
-                if reg is not None:
-                    rp = await _client_price(session, merchant_id, reg, config)
-                    if rp and rp > price:
-                        old_price = rp
+        old_price = await _instant_old_price(session, variant, merchant_id, config, price)
         in_stock = await stock_service.available_count(session, variant_id)
         balance = await get_balance(session, call.from_user.id, merchant_id)
         ondemand = variant.source == "fazercard"
