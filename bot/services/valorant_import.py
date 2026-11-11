@@ -202,13 +202,15 @@ async def run_import(db: Database, fzr, config: BotConfig) -> str:
                 oid = off.get("id")
                 if oid is None:
                     continue
-                exists = await session.scalar(
-                    select(Variant.id).where(
+                existing = await session.scalar(
+                    select(Variant).where(
                         Variant.source == "fazercard",
                         Variant.fzr_a == cat_id, Variant.fzr_b == str(oid),
                     )
                 )
-                if exists is not None:
+                if existing is not None:
+                    if not existing.full_width:   # номиналы — в один столбик
+                        existing.full_width = True
                     n_skipped += 1
                     continue
                 try:
@@ -227,6 +229,7 @@ async def run_import(db: Database, fzr, config: BotConfig) -> str:
                     price_mode=smartprice_service.MODE_SMART,
                     source="fazercard", fzr_kind="giftcard",
                     fzr_a=cat_id, fzr_b=str(oid), is_active=True,
+                    full_width=True,   # номиналы — в один столбик
                 )
                 session.add(v)
                 n_nominals += 1
