@@ -485,3 +485,21 @@ async def cmd_low_margin(message: Message, db: Database, config: BotConfig) -> N
     )
     for msg in smartprice_service.format_low_margin(rows, threshold):
         await message.answer(msg)
+
+
+# ── Импорт Valorant VP (гифт-карты FazerCard по странам) ─────────────────────
+@router.message(Command("import_valorant"))
+async def cmd_import_valorant(
+    message: Message, db: Database, config: BotConfig, fzr=None,
+) -> None:
+    """Импортировать все категории Valorant VP из FazerCard в каталог по странам
+    (раздел «Valorant VP» в «Игры и Сервисы», наценка 9%, создаётся скрытым).
+    Идемпотентно — можно запускать повторно."""
+    from ..services import valorant_import
+    await message.answer("⏳ Импортирую Valorant VP из FazerCard… это займёт до минуты.")
+    try:
+        report = await valorant_import.run_import(db, fzr, config)
+    except Exception:  # noqa: BLE001
+        await message.answer("⚠️ Ошибка импорта. Проверьте логи.")
+        raise
+    await message.answer(report)

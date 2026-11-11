@@ -1,0 +1,209 @@
+"""Импорт Valorant VP (гифт-карты FazerCard) в каталог по странам.
+
+Структура, которую строит импортёр:
+
+    Игры и Сервисы
+      └ Valorant VP                 (раздел в конце, создаётся СКРЫТЫМ)
+          └ 🇷🇺 Россия               (страна = категория «Valorant VP (RU)»)
+              └ 240 VP              (номиналы категории)
+              └ 475 VP …
+
+Берёт все гифт-кард категории FazerCard с названием «Valorant VP (XX)», XX —
+код страны. Наценка 9% (режим smart). Идемпотентно: повторный запуск добавляет
+только новое (по (fzr_a, fzr_b) и по названию страны).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from decimal import Decimal
+from typing import Optional
+
+from sqlalchemy import func, select
+
+from ..config import BotConfig
+from ..db import Database
+from ..db.models import HEAD_MERCHANT_ID, Product, Variant
+from . import rates as rates_service
+from . import smartprice as smartprice_service
+
+log = logging.getLogger("vallshop.valorant")
+
+SECTION_TITLE = "Valorant VP"
+PARENT_TITLE = "Игры и Сервисы"
+MARKUP = Decimal("9")                 # наценка 9% на все номиналы Valorant VP
+_CODE_RE = re.compile(r"\(([A-Za-z]{2,5})\)")
+
+# Код региона → (флаг, русское название). Что не распознаем — оставим код.
+COUNTRY = {
+    "AE": ("🇦🇪", "ОАЭ"), "AR": ("🇦🇷", "Аргентина"), "AU": ("🇦🇺", "Австралия"),
+    "BH": ("🇧🇭", "Бахрейн"), "BR": ("🇧🇷", "Бразилия"), "CA": ("🇨🇦", "Канада"),
+    "CL": ("🇨🇱", "Чили"), "CO": ("🇨🇴", "Колумбия"), "EU": ("🇪🇺", "Европа"),
+    "GB": ("🇬🇧", "Великобритания"), "UK": ("🇬🇧", "Великобритания"),
+    "HK": ("🇭🇰", "Гонконг"), "ID": ("🇮🇩", "Индонезия"), "IN": ("🇮🇳", "Индия"),
+    "JP": ("🇯🇵", "Япония"), "KR": ("🇰🇷", "Корея"), "KW": ("🇰🇼", "Кувейт"),
+    "MX": ("🇲🇽", "Мексика"), "MY": ("🇲🇾", "Малайзия"), "NZ": ("🇳🇿", "Новая Зеландия"),
+    "OM": ("🇴🇲", "Оман"), "PE": ("🇵🇪", "Перу"), "PH": ("🇵🇭", "Филиппины"),
+    "PK": ("🇵🇰", "Пакистан"), "QA": ("🇶🇦", "Катар"), "RU": ("🇷🇺", "Россия"),
+    "SA": ("🇸🇦", "Саудовская Аравия"), "SG": ("🇸🇬", "Сингапур"),
+    "TH": ("🇹🇭", "Таиланд"), "TR": ("🇹🇷", "Турция"), "TW": ("🇹🇼", "Тайвань"),
+    "US": ("🇺🇸", "США"), "VN": ("🇻🇳", "Вьетнам"), "ZA": ("🇿🇦", "ЮАР"),
+    "EG": ("🇪🇬", "Египет"), "NG": ("🇳🇬", "Нигерия"), "SE": ("🇸🇪", "Швеция"),
+}
+
+
+def _country_title(code: str, raw_name: str) -> str:
+    c = (code or "").upper()
+    flag, name = COUNTRY.get(c, ("", ""))
+    if name:
+        return f"{flag} {name}".strip()
+    return raw_name or c or "—"   # незнакомый код → оставим как есть
+
+
+async def _games_services_id(session) -> Optional[int]:
+    p = await session.scalar(
+        select(Product).where(Product.title == PARENT_TITLE, Product.parent_id.is_(None)).limit(1)
+    )
+    return p.id if p else None
+
+
+async def _ensure_section(session) -> Product:
+    parent_id = await _games_services_id(session)
+    sec = await session.scalar(
+        select(Product).where(
+            Product.title == SECTION_TITLE,
+            (Product.parent_id == parent_id) if parent_id is not None else Product.parent_id.is_(None),
+        ).limit(1)
+    )
+    if sec is not None:
+        return sec
+    # В конце раздела «Игры и Сервисы».
+    max_sort = await session.scalar(
+        select(func.max(Product.sort_order)).where(
+            (Product.parent_id == parent_id) if parent_id is not None else Product.parent_id.is_(None)
+        )
+    )
+    sec = Product(
+        game=SECTION_TITLE[:64], title=SECTION_TITLE[:255], parent_id=parent_id,
+        sort_order=int(max_sort or 0) + 1, is_active=False,  # раздел скрыт до проверки
+    )
+    session.add(sec)
+    await session.flush()
+    return sec
+
+
+async def _ensure_country(session, section: Product, title: str) -> Product:
+    child = await session.scalar(
+        select(Product).where(Product.parent_id == section.id, Product.title == title).limit(1)
+    )
+    if child is not None:
+        return child
+    max_sort = await session.scalar(
+        select(func.max(Product.sort_order)).where(Product.parent_id == section.id)
+    )
+    child = Product(
+        game=title[:64], title=title[:255], parent_id=section.id,
+        sort_order=int(max_sort or 0) + 1, is_active=True,
+    )
+    session.add(child)
+    await session.flush()
+    return child
+
+
+async def run_import(db: Database, fzr, config: BotConfig) -> str:
+    """Импорт/досоздание дерева Valorant VP. Возвращает текст-отчёт."""
+    if fzr is None or not (getattr(fzr, "mock", False) or getattr(fzr, "api_key", None)):
+        return "FazerCard не настроен — импорт недоступен."
+    try:
+        cats = await asyncio.to_thread(fzr.all_categories, "giftcard")
+    except Exception:  # noqa: BLE001
+        log.exception("valorant: не удалось получить категории")
+        return "Не удалось получить категории FazerCard. Попробуйте позже."
+
+    val_cats = [
+        c for c in cats
+        if isinstance(c, dict) and str(c.get("name", "")).strip().lower().startswith("valorant vp")
+    ]
+    if not val_cats:
+        return "Категории «Valorant VP» у FazerCard не найдены."
+
+    rate = rates_service.get_rate()
+    n_countries = n_new_countries = n_nominals = n_skipped = 0
+    unknown: list = []
+
+    async with db.session() as session:
+        section = await _ensure_section(session)
+        await session.commit()
+
+    for c in val_cats:
+        cat_id = str(c.get("id"))
+        raw_name = str(c.get("name") or "")
+        m = _CODE_RE.search(raw_name)
+        code = (m.group(1).upper() if m else "")
+        if code and code not in COUNTRY:
+            unknown.append(code)
+        title = _country_title(code, raw_name)
+        try:
+            offers = await asyncio.to_thread(fzr.offers_for, "giftcard", cat_id)
+        except Exception:  # noqa: BLE001
+            continue
+        if not offers:
+            continue
+
+        async with db.session() as session:
+            section = await _ensure_section(session)
+            before = await session.scalar(
+                select(func.count()).select_from(Product).where(Product.parent_id == section.id, Product.title == title)
+            )
+            country = await _ensure_country(session, section, title)
+            n_countries += 1
+            if not before:
+                n_new_countries += 1
+            for off in offers:
+                oid = off.get("id")
+                if oid is None:
+                    continue
+                exists = await session.scalar(
+                    select(Variant.id).where(
+                        Variant.source == "fazercard",
+                        Variant.fzr_a == cat_id, Variant.fzr_b == str(oid),
+                    )
+                )
+                if exists is not None:
+                    n_skipped += 1
+                    continue
+                try:
+                    cost = Decimal(str(off.get("price_usd")))
+                except Exception:  # noqa: BLE001
+                    continue
+                price = smartprice_service.target_rub(cost, MARKUP, rate)
+                min_vid = await session.scalar(
+                    select(func.min(Variant.liog_variation_id)).where(Variant.product_id == country.id)
+                )
+                new_lvid = min(0, int(min_vid or 0)) - 1
+                v = Variant(
+                    product_id=country.id, title=(off.get("name") or "VP")[:255],
+                    liog_product_id=0, liog_variation_id=new_lvid,
+                    cost_usd=cost, markup_percent=MARKUP, price_rub=price,
+                    price_mode=smartprice_service.MODE_SMART,
+                    source="fazercard", fzr_kind="giftcard",
+                    fzr_a=cat_id, fzr_b=str(oid), is_active=True,
+                )
+                session.add(v)
+                n_nominals += 1
+            await session.commit()
+
+    lines = [
+        "✅ <b>Импорт Valorant VP завершён</b>",
+        f"Стран: <b>{n_countries}</b> (новых: {n_new_countries})",
+        f"Номиналов добавлено: <b>{n_nominals}</b>, пропущено (уже были): {n_skipped}",
+        "",
+        "Раздел «Valorant VP» создан <b>скрытым</b> — проверьте дерево/цены и "
+        "включите его в админке каталога.",
+    ]
+    if unknown:
+        uniq = ", ".join(sorted(set(unknown)))
+        lines.append(f"\n⚠️ Неизвестные коды стран (оставлены как есть, переименуйте): {uniq}")
+    return "\n".join(lines)
