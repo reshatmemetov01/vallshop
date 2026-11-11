@@ -79,11 +79,21 @@ async def _fetch_valorant_cats(fzr) -> list:
 
 
 def _country_title(code: str, raw_name: str) -> str:
+    """Название страны БЕЗ флага: «Россия»."""
+    c = (code or "").upper()
+    _flag, name = COUNTRY.get(c, ("", ""))
+    if name:
+        return name
+    return raw_name or c or "—"   # незнакомый код → оставим как есть
+
+
+def _country_flagged(code: str, raw_name: str) -> str:
+    """Старый формат с флагом: «🇷🇺 Россия» — для поиска уже созданных."""
     c = (code or "").upper()
     flag, name = COUNTRY.get(c, ("", ""))
     if name:
         return f"{flag} {name}".strip()
-    return raw_name or c or "—"   # незнакомый код → оставим как есть
+    return raw_name or c or "—"
 
 
 async def _games_services_id(session) -> Optional[int]:
@@ -118,22 +128,31 @@ async def _ensure_section(session) -> Product:
     return sec
 
 
-async def _ensure_country(session, section: Product, title: str) -> Product:
+async def _ensure_country(session, section: Product, name: str, old: str) -> tuple:
+    """Найти/создать страну. Матчит по новому (без флага) ИЛИ старому (с флагом)
+    названию; старое переименовывает в новое. Возвращает (product, created)."""
     child = await session.scalar(
-        select(Product).where(Product.parent_id == section.id, Product.title == title).limit(1)
+        select(Product).where(
+            Product.parent_id == section.id,
+            Product.title.in_([name, old]),
+        ).limit(1)
     )
     if child is not None:
-        return child
+        if child.title != name:        # был с флагом → убираем флаг
+            child.title = name[:255]
+            child.game = name[:64]
+            await session.flush()
+        return child, False
     max_sort = await session.scalar(
         select(func.max(Product.sort_order)).where(Product.parent_id == section.id)
     )
     child = Product(
-        game=title[:64], title=title[:255], parent_id=section.id,
+        game=name[:64], title=name[:255], parent_id=section.id,
         sort_order=int(max_sort or 0) + 1, is_active=True,
     )
     session.add(child)
     await session.flush()
-    return child
+    return child, True
 
 
 async def run_import(db: Database, fzr, config: BotConfig) -> str:
@@ -164,7 +183,8 @@ async def run_import(db: Database, fzr, config: BotConfig) -> str:
         code = (m.group(1).upper() if m else "")
         if code and code not in COUNTRY:
             unknown.append(code)
-        title = _country_title(code, raw_name)
+        name = _country_title(code, raw_name)
+        old = _country_flagged(code, raw_name)
         try:
             offers = await asyncio.to_thread(fzr.offers_for, "giftcard", cat_id)
         except Exception:  # noqa: BLE001
@@ -174,12 +194,9 @@ async def run_import(db: Database, fzr, config: BotConfig) -> str:
 
         async with db.session() as session:
             section = await _ensure_section(session)
-            before = await session.scalar(
-                select(func.count()).select_from(Product).where(Product.parent_id == section.id, Product.title == title)
-            )
-            country = await _ensure_country(session, section, title)
+            country, created = await _ensure_country(session, section, name, old)
             n_countries += 1
-            if not before:
+            if created:
                 n_new_countries += 1
             for off in offers:
                 oid = off.get("id")
