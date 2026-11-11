@@ -54,6 +54,30 @@ COUNTRY = {
 }
 
 
+async def _fetch_valorant_cats(fzr) -> list:
+    """Собрать категории «Valorant VP (…)» из гифт-карт FazerCard.
+
+    Пагинируем сами безопасным размером страницы (у некоторых эндпоинтов
+    limit=500 из all_categories отклоняется), фильтруем по названию.
+    """
+    out: list = []
+    cursor = None
+    for _ in range(80):  # защита от бесконечного цикла
+        data = await asyncio.to_thread(fzr.list_giftcards, limit=200, cursor=cursor)
+        items = data.get("items") if isinstance(data, dict) else None
+        for it in items or []:
+            name = str(it.get("name") or "")
+            if name.strip().lower().startswith("valorant vp"):
+                cid = it.get("category_id") or it.get("id") or it.get("slug")
+                if cid:
+                    out.append({"id": cid, "name": name})
+        meta = (data.get("meta") if isinstance(data, dict) else None) or {}
+        cursor = meta.get("next_cursor")
+        if not cursor or not meta.get("has_more"):
+            break
+    return out
+
+
 def _country_title(code: str, raw_name: str) -> str:
     c = (code or "").upper()
     flag, name = COUNTRY.get(c, ("", ""))
@@ -117,15 +141,11 @@ async def run_import(db: Database, fzr, config: BotConfig) -> str:
     if fzr is None or not (getattr(fzr, "mock", False) or getattr(fzr, "api_key", None)):
         return "FazerCard не настроен — импорт недоступен."
     try:
-        cats = await asyncio.to_thread(fzr.all_categories, "giftcard")
-    except Exception:  # noqa: BLE001
+        val_cats = await _fetch_valorant_cats(fzr)
+    except Exception as e:  # noqa: BLE001
         log.exception("valorant: не удалось получить категории")
-        return "Не удалось получить категории FazerCard. Попробуйте позже."
+        return f"Не удалось получить категории FazerCard:\n<code>{type(e).__name__}: {e}</code>"
 
-    val_cats = [
-        c for c in cats
-        if isinstance(c, dict) and str(c.get("name", "")).strip().lower().startswith("valorant vp")
-    ]
     if not val_cats:
         return "Категории «Valorant VP» у FazerCard не найдены."
 
