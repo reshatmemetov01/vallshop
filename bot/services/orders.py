@@ -733,6 +733,27 @@ def stars_recipient_qty(order: Order) -> tuple[Optional[str], Optional[str]]:
     return uname, qty
 
 
+def delivery_message(order: Order, variant) -> Optional[str]:
+    """Детальный текст выдачи клиенту для Звёзд / Telegram Premium.
+
+    Возвращает None, если товар не из этих двух — тогда вызывающий код берёт
+    свой общий текст. Используется во всех точках уведомления о выдаче (авто,
+    поллеры, ручная выдача в бот- и веб-админке) — чтобы текст был единым.
+    """
+    from .. import texts
+    fzr_a = getattr(variant, "fzr_a", None) if variant is not None else None
+    if fzr_a == "telegram_stars":
+        uname, qty = stars_recipient_qty(order)
+        if uname and qty:
+            return texts.STARS_DELIVERED_MANUAL.format(username=uname, qty=qty)
+    elif fzr_a == "telegram_premium":
+        uname, _ = stars_recipient_qty(order)
+        months = _first_int(variant.title) if variant is not None else None
+        if uname and months:
+            return texts.PREMIUM_DELIVERED.format(username=uname, months=months)
+    return None
+
+
 async def deliver_topup_manual(session: AsyncSession, order: Order) -> None:
     """Пометить топап вручную выполненным (без кода, зачислено на аккаунт)."""
     order.status = OrderStatus.COMPLETED

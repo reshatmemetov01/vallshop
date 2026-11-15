@@ -196,7 +196,6 @@ async def order_action(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Ручное управление заказом из админки: выдать / вернуть / тихо закрыть."""
-    from bot import texts
     from bot.db.models import Order, OrderStatus, Variant
     from bot.services import orders as order_service
 
@@ -220,18 +219,14 @@ async def order_action(
     elif action in ("deliver", "close_silent"):
         if o.status == OrderStatus.COMPLETED:
             raise HTTPException(status_code=400, detail="Заказ уже выполнен")
-        # Для звёзд — отдельный текст с получателем и количеством.
+        # Детальный текст для Звёзд / Premium (получатель + кол-во/срок).
         variant = await session.get(Variant, o.variant_id) if o.variant_id else None
-        is_stars = variant is not None and getattr(variant, "fzr_a", None) == "telegram_stars"
+        detailed = order_service.delivery_message(o, variant)
         await order_service.deliver_topup_manual(session, o)
         await session.commit()
         out["status"] = "completed"
         if action == "deliver":
-            notify_text = f"✅ Ваш заказ #{o.id} выполнен."
-            if is_stars:
-                uname, qty = order_service.stars_recipient_qty(o)
-                if uname and qty:
-                    notify_text = texts.STARS_DELIVERED_MANUAL.format(username=uname, qty=qty)
+            notify_text = detailed or f"✅ Ваш заказ #{o.id} выполнен."
             # Кнопки как в обычной выдаче: отзыв / купить ещё / меню.
             notify_markup = _done_markup(o)
     else:

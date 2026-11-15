@@ -370,18 +370,16 @@ async def cb_topup_paid(call: CallbackQuery, db: Database) -> None:
             await call.answer("Не найдено", show_alert=True)
             return
         variant = await session.get(Variant, order.variant_id)
-        delivered_text = texts.TOPUP_ACCOUNT_DELIVERED
-        if variant is not None and getattr(variant, "fzr_a", None) == "telegram_stars":
-            # Звёзды — отдельный текст с получателем и количеством.
-            uname, qty = order_service.stars_recipient_qty(order)
-            delivered_text = (
-                texts.STARS_DELIVERED_MANUAL.format(username=uname, qty=qty)
-                if uname and qty else texts.TOPUP_ACCOUNT_DELIVERED
-            )
+        # Детальный текст для Звёзд / Premium, иначе — настраиваемый общий.
+        detailed = order_service.delivery_message(order, variant)
+        if detailed:
+            delivered_text = detailed
         elif variant is not None:
             delivered_text = await catalog_service.resolve_text(
                 session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
             )
+        else:
+            delivered_text = texts.TOPUP_ACCOUNT_DELIVERED
         await order_service.deliver_topup_manual(session, order)
         user_id = order.user_id
         order_id = order.id

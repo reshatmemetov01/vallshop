@@ -141,18 +141,14 @@ async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
         variant_id = fresh.variant_id
         variant = await session.get(Variant, fresh.variant_id)
         item_name = variant.title if variant else "звёзды"
-        is_stars = variant is not None and getattr(variant, "fzr_a", None) == "telegram_stars"
-        stars_u, stars_q = order_service.stars_recipient_qty(fresh) if is_stars else (None, None)
+        detailed = order_service.delivery_message(fresh, variant)
         await session.commit()
 
     outcome = res.get("outcome")
     cbot = _pick_bot(bots, merchant_id, bot)
     admin_ids = list(config.admin_ids) if config else []
     if outcome == "completed":
-        if is_stars and stars_u and stars_q:
-            done_text = texts.STARS_DELIVERED_MANUAL.format(username=stars_u, qty=stars_q)
-        else:
-            done_text = f"✅ Заказ #{oid} «{item_name}» выполнен — звёзды отправлены."
+        done_text = detailed or f"✅ Заказ #{oid} «{item_name}» выполнен — звёзды отправлены."
         await _notify(cbot, user_id, done_text, kb.order_done_kb(oid, variant_id))
     elif escalated:
         await notify_service.notify_admins(
@@ -309,6 +305,7 @@ async def _settle_order(
         reason = fresh.fail_reason or "—"
         refund_amount = Decimal(fresh.price_usd) * (fresh.quantity or 1)
         delivered_text = texts.TOPUP_ACCOUNT_DELIVERED
+        delivered_detailed = None
         item_name = "—"
         variant = await session.get(Variant, fresh.variant_id)
         if variant is not None:
@@ -317,6 +314,8 @@ async def _settle_order(
                 delivered_text = await catalog_service.resolve_text(
                     session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
                 )
+                # Детальный текст для Звёзд / Premium (получатель + кол-во/срок).
+                delivered_detailed = order_service.delivery_message(fresh, variant)
         await session.commit()
 
     admin_ids = list(config.admin_ids) if config else []
@@ -329,8 +328,9 @@ async def _settle_order(
         )
     elif status == OrderStatus.COMPLETED:
         # Доставка на аккаунт/username без кода (топап/Telegram) — настраиваемый текст.
-        if delivered_text:
-            await _notify(cbot, user_id, delivered_text, done_kb)
+        msg = delivered_detailed or delivered_text
+        if msg:
+            await _notify(cbot, user_id, msg, done_kb)
     elif status == OrderStatus.REFUNDED and refunded:
         await _notify(
             cbot, user_id,

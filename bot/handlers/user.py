@@ -805,6 +805,8 @@ async def cb_topup_confirm(
         delivered_text = await catalog_service.resolve_text(
             session, variant, "delivered_text", texts.TOPUP_ACCOUNT_DELIVERED
         )
+        # Детальный текст для Звёзд / Premium (получатель + кол-во/срок).
+        delivered_detailed = order_service.delivery_message(order, variant)
         await session.commit()
         total = unit_price
         balance = await get_balance(session, call.from_user.id, merchant_id)
@@ -830,8 +832,9 @@ async def cb_topup_confirm(
             reply_markup=done_kb,
         )
     elif status == OrderStatus.COMPLETED:
-        if delivered_text:
-            await call.message.answer(delivered_text, reply_markup=done_kb)
+        msg = delivered_detailed or delivered_text
+        if msg:
+            await call.message.answer(msg, reply_markup=done_kb)
         else:
             await call.message.answer("✅ Заказ выполнен!", reply_markup=done_kb)
     else:  # FULFILLING

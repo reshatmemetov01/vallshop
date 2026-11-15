@@ -199,6 +199,13 @@ STARS_DELIVERED_MANUAL = (
     "Количество: {qty} ⭐️\n\n"
     "Спасибо за покупку 💚"
 )
+# Текст клиенту при выдаче Telegram Premium (простой текст, без HTML).
+PREMIUM_DELIVERED = (
+    "✅ Telegram Premium активирован!\n"
+    "Получатель: {username}\n"
+    "Срок: {months} мес.\n\n"
+    "Спасибо за покупку 💚"
+)
 STARS_INTRO = (
     "⭐️ <b>Telegram Звёзды</b>\n\n"
     "{rate_line}\n\n"
