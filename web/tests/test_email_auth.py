@@ -37,6 +37,16 @@ async def _token_of(db, purpose) -> str:
         return row.token if row else None
 
 
+async def _code_of(db, purpose) -> str:
+    async with db.session() as s:
+        row = await s.scalar(
+            select(EmailToken).where(EmailToken.purpose == purpose,
+                                     EmailToken.used_at.is_(None))
+            .order_by(EmailToken.id.desc())
+        )
+        return row.code if row else None
+
+
 @pytest.mark.asyncio
 async def test_verify_email_flow(db):
     async with _client() as c:
@@ -54,6 +64,90 @@ async def test_verify_email_flow(db):
         me = await c.get("/api/auth/me",
                          headers={"Authorization": f"Bearer {login.json()['token']}"})
         assert me.json()["email_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_verify_by_code(db):
+    async with _client() as c:
+        reg = await c.post("/api/auth/register", json={"email": "c@c.com", "password": "secret12"})
+        assert reg.status_code == 200
+        tok = reg.json()["token"]
+        hdr = {"Authorization": f"Bearer {tok}"}
+        code = await _code_of(db, token_service.VERIFY)
+        assert code and len(code) == 6 and code.isdigit()
+        # неверный код — 400
+        assert (await c.post("/api/auth/verify-code", json={"code": "000000"}, headers=hdr)).status_code == 400
+        # верный код — 200 и email подтверждён
+        r = await c.post("/api/auth/verify-code", json={"code": code}, headers=hdr)
+        assert r.status_code == 200
+        me = await c.get("/api/auth/me", headers=hdr)
+        assert me.json()["email_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_code_brute_force_burns(db):
+    async with _client() as c:
+        reg = await c.post("/api/auth/register", json={"email": "bf@bf.com", "password": "secret12"})
+        hdr = {"Authorization": f"Bearer {reg.json()['token']}"}
+        code = await _code_of(db, token_service.VERIFY)
+        # 5 неверных попыток сжигают код
+        for _ in range(token_service.MAX_CODE_ATTEMPTS):
+            assert (await c.post("/api/auth/verify-code", json={"code": "111111"}, headers=hdr)).status_code == 400
+        # теперь даже верный код не сработает — нужно запросить новый
+        assert (await c.post("/api/auth/verify-code", json={"code": code}, headers=hdr)).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_unverified_blocked_from_topup(db):
+    async with _client() as c:
+        reg = await c.post("/api/auth/register", json={"email": "b@b.com", "password": "secret12"})
+        hdr = {"Authorization": f"Bearer {reg.json()['token']}"}
+        # пополнение заблокировано до подтверждения email
+        blocked = await c.post("/api/topup", json={"amount": "500", "method": "card"}, headers=hdr)
+        assert blocked.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_verified_account_dependency():
+    """Правило блокировки: email без подтверждения — 403; Telegram и подтверждённые — ок."""
+    from fastapi import HTTPException
+    from web.app.deps import verified_account
+
+    # email-аккаунт без подтверждения → 403
+    unverified = WebAccount(email="x@x.com", email_verified=False, telegram_user_id=None)
+    with pytest.raises(HTTPException) as ei:
+        await verified_account(acc=unverified)
+    assert ei.value.status_code == 403
+
+    # подтверждённый email → пропускаем
+    verified = WebAccount(email="x@x.com", email_verified=True, telegram_user_id=None)
+    assert await verified_account(acc=verified) is verified
+
+    # вошёл через Telegram (даже без подтверждения email) → пропускаем
+    tg = WebAccount(email="x@x.com", email_verified=False, telegram_user_id=123)
+    assert await verified_account(acc=tg) is tg
+
+    # Telegram без email → пропускаем
+    tg_only = WebAccount(email=None, email_verified=False, telegram_user_id=123)
+    assert await verified_account(acc=tg_only) is tg_only
+
+
+@pytest.mark.asyncio
+async def test_reset_by_code(db):
+    async with _client() as c:
+        await c.post("/api/auth/register", json={"email": "rc@rc.com", "password": "oldpass12"})
+        assert (await c.post("/api/auth/forgot", json={"email": "rc@rc.com"})).status_code == 200
+        code = await _code_of(db, token_service.RESET)
+        assert code
+        # неверный код — 400
+        assert (await c.post("/api/auth/reset-code",
+                json={"email": "rc@rc.com", "code": "000000", "password": "newpass99"})).status_code == 400
+        # верный код — пароль меняется, аккаунт логинится
+        r = await c.post("/api/auth/reset-code",
+                         json={"email": "rc@rc.com", "code": code, "password": "newpass99"})
+        assert r.status_code == 200 and r.json()["token"]
+        assert (await c.post("/api/auth/login", json={"email": "rc@rc.com", "password": "newpass99"})).status_code == 200
+        assert (await c.post("/api/auth/login", json={"email": "rc@rc.com", "password": "oldpass12"})).status_code == 401
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import WebAccount
@@ -13,6 +15,25 @@ from . import tokens as token_service
 
 def _link(path: str, token: str) -> str:
     return f"{settings.base_url.rstrip('/')}{path}?token={token}"
+
+
+def _wrap_code(heading: str, intro: str, code: str, note: str) -> str:
+    """Письмо с крупным 6-значным кодом (без ссылок)."""
+    spaced = " ".join(code)  # визуально разреженный код
+    return f"""\
+<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0e1116;
+  padding:24px;color:#e8edf3">
+  <div style="max-width:480px;margin:0 auto;background:#171b22;border:1px solid #2a303a;
+    border-radius:14px;padding:28px">
+    <div style="font-weight:800;font-size:22px;margin-bottom:18px">Vall<span style="color:#ff7a2f">Shop</span></div>
+    <h2 style="margin:0 0 12px;font-size:19px">{heading}</h2>
+    <p style="color:#c3ccd8;line-height:1.5;margin:0 0 18px">{intro}</p>
+    <div style="font-size:34px;font-weight:800;letter-spacing:8px;color:#ff7a2f;
+      background:#0e1116;border:1px solid #2a303a;border-radius:12px;padding:16px 10px;
+      text-align:center;margin:0 0 18px" aria-label="{code}">{spaced}</div>
+    <p style="color:#8b96a5;font-size:13px;margin:0;line-height:1.5">{note}</p>
+  </div>
+</div>"""
 
 
 def _wrap(heading: str, intro: str, button_label: str, url: str, note: str) -> str:
@@ -47,6 +68,40 @@ async def send_verification(session: AsyncSession, account: WebAccount) -> bool:
         "Ссылка действует 2 дня. Если вы не регистрировались — просто игнорируйте письмо.",
     )
     return await email_service.send(account.email, "Подтверждение email — VallShop", html)
+
+
+async def send_verification_code(
+    session: AsyncSession, account: WebAccount
+) -> Optional[str]:
+    """Отправить 6-значный код подтверждения email. Возвращает код (или None)."""
+    if not account.email:
+        return None
+    code = await token_service.issue_code(session, account.id, token_service.VERIFY)
+    html = _wrap_code(
+        "Подтверждение email",
+        "Ваш код для подтверждения email на VallShop:",
+        code,
+        "Код действует 15 минут. Если вы не регистрировались — просто игнорируйте письмо.",
+    )
+    await email_service.send(account.email, f"Код подтверждения {code} — VallShop", html)
+    return code
+
+
+async def send_password_reset_code(
+    session: AsyncSession, account: WebAccount
+) -> Optional[str]:
+    """Отправить 6-значный код для сброса пароля. Возвращает код (или None)."""
+    if not account.email:
+        return None
+    code = await token_service.issue_code(session, account.id, token_service.RESET)
+    html = _wrap_code(
+        "Сброс пароля",
+        "Ваш код для сброса пароля на VallShop:",
+        code,
+        "Код действует 15 минут. Если вы не запрашивали сброс — просто игнорируйте письмо.",
+    )
+    await email_service.send(account.email, f"Код сброса пароля {code} — VallShop", html)
+    return code
 
 
 async def send_password_reset(session: AsyncSession, account: WebAccount) -> bool:

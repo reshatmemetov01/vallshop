@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db.models import TopUpStatus, WebAccount
 
 from ..db import get_session
-from ..deps import current_account
+from ..deps import current_account, verified_account
 from ..services import payments as payments_service
 from ..services import wallet as wallet_service
 
@@ -73,7 +73,7 @@ async def methods(session: AsyncSession = Depends(get_session)) -> dict:
 @router.post("")
 async def create(
     body: TopupIn,
-    acc: WebAccount = Depends(current_account),
+    acc: WebAccount = Depends(verified_account),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:

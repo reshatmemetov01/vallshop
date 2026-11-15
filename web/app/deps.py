@@ -29,6 +29,22 @@ async def current_account(
     return acc
 
 
+async def verified_account(
+    acc: WebAccount = Depends(current_account),
+) -> WebAccount:
+    """Как current_account, но требует подтверждённого email для денежных действий.
+
+    Аккаунты, вошедшие через Telegram (есть telegram_user_id), считаем
+    подтверждёнными. Блокируем только email-аккаунт с неподтверждённой почтой.
+    """
+    if acc.email and not acc.email_verified and acc.telegram_user_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Подтвердите email, чтобы совершать покупки и пополнения",
+        )
+    return acc
+
+
 async def require_admin(authorization: Optional[str] = Header(None)) -> bool:
     """Доступ только с валидным админ-токеном (панель управления)."""
     if not authorization or not authorization.lower().startswith("bearer "):

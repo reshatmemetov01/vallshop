@@ -810,6 +810,10 @@ class EmailToken(Base):
     account_id: Mapped[int] = mapped_column(Integer, index=True)
     purpose: Mapped[str] = mapped_column(String(16))  # "verify" | "reset"
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # 6-значный код подтверждения (если письмо идёт по коду, а не по ссылке).
+    code: Mapped[Optional[str]] = mapped_column(String(8), index=True)
+    # Число неверных попыток ввода кода (для защиты от перебора).
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

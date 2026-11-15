@@ -162,9 +162,10 @@ async def test_buy_endpoint_end_to_end(db):
     async with _client() as c:
         reg = await c.post("/api/auth/register", json={"email": "e@e.com", "password": "secret12"})
         token = reg.json()["token"]
-        # пополним баланс вручную (как бы после оплаты)
+        # пополним баланс вручную (как бы после оплаты) + подтвердим email
         async with db.session() as s:
             acc = await account_service.get_by_email(s, "e@e.com")
+            acc.email_verified = True
             wid = await wallet_service.ensure_wallet(s, acc)
             w = await s.get(User, {"id": wid, "merchant_id": HEAD_MERCHANT_ID})
             w.balance = Decimal("500"); await s.commit()

@@ -40,9 +40,14 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _register(c) -> str:
-    r = await c.post("/api/auth/register", json={"email": "u@u.com", "password": "secret12"})
+async def _register(c, db, email: str = "u@u.com") -> str:
+    r = await c.post("/api/auth/register", json={"email": email, "password": "secret12"})
     assert r.status_code == 200, r.text
+    # Пополнения/покупки доступны только с подтверждённым email — отмечаем подтверждение.
+    async with db.session() as s:
+        acc = await account_service.get_by_email(s, email)
+        acc.email_verified = True
+        await s.commit()
     return r.json()["token"]
 
 
@@ -59,7 +64,7 @@ async def test_methods_available(db):
 @pytest.mark.asyncio
 async def test_create_topup_returns_checkout(db):
     async with _client() as c:
-        token = await _register(c)
+        token = await _register(c, db)
         r = await c.post("/api/topup", json={"amount": "500", "method": "card"},
                           headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200, r.text
@@ -75,7 +80,7 @@ async def test_create_topup_returns_checkout(db):
 @pytest.mark.asyncio
 async def test_topup_below_min_rejected(db):
     async with _client() as c:
-        token = await _register(c)
+        token = await _register(c, db)
         r = await c.post("/api/topup", json={"amount": "10", "method": "card"},
                          headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 400
@@ -93,7 +98,7 @@ async def test_topup_requires_auth(db):
 async def test_settlement_credits_account_balance(db):
     """Эмуляция того, что делает поллер бота: PAID → credit. Баланс виден на сайте."""
     async with _client() as c:
-        token = await _register(c)
+        token = await _register(c, db)
         await c.post("/api/topup", json={"amount": "500", "method": "card"},
                      headers={"Authorization": f"Bearer {token}"})
     # «оплачиваем» (как бот): помечаем PAID и зачисляем
@@ -174,7 +179,7 @@ async def test_usdt_hidden_when_bolt_not_configured(db):
 @pytest.mark.asyncio
 async def test_cannot_see_other_accounts_topup(db):
     async with _client() as c:
-        t1 = await _register(c)
+        t1 = await _register(c, db)
         r = await c.post("/api/topup", json={"amount": "500", "method": "card"},
                          headers={"Authorization": f"Bearer {t1}"})
         tid = r.json()["topup_id"]
@@ -189,7 +194,7 @@ async def test_cannot_see_other_accounts_topup(db):
 async def test_topup_history(db):
     from bot.db.models import TopUp, TopUpStatus
     async with _client() as c:
-        token = await _register(c)
+        token = await _register(c, db)
         async with db.session() as s:
             acc = await account_service.get_by_email(s, "u@u.com")
             wid = await wallet_service.ensure_wallet(s, acc)

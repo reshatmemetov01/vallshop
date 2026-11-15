@@ -1023,8 +1023,12 @@ async function initAuth(){
     const vb = $("verifybar");
     if(me.email && !me.email_verified){
       vb.style.display = "";
-      vb.innerHTML = `<div class="vbar">✉️ Подтвердите email <b>${esc(me.email)}</b> — письмо со ссылкой отправлено.`
-        + ` <button onclick="resendVerify(this)">Отправить ещё раз</button></div>`;
+      vb.innerHTML = `<div class="vbar">✉️ Подтвердите email <b>${esc(me.email)}</b> кодом из письма, чтобы покупать и пополнять баланс.`
+        + ` <input id="vbcode" inputmode="numeric" maxlength="6" placeholder="Код"`
+        + ` style="width:92px;letter-spacing:4px;text-align:center">`
+        + ` <button onclick="submitVerifyCode(this)">Подтвердить</button>`
+        + ` <button onclick="resendVerify(this)">Отправить код</button>`
+        + `<span id="vbmsg" style="margin-left:8px"></span></div>`;
     }else{ vb.style.display = "none"; vb.innerHTML = ""; }
   }catch(e){
     localStorage.removeItem("vs_token");
@@ -1035,12 +1039,32 @@ function logout(){ localStorage.removeItem("vs_token"); location.reload(); }
 async function resendVerify(btn){
   const token = localStorage.getItem("vs_token");
   if(!token) return;
-  btn.disabled = true; btn.textContent = "Отправляем…";
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Отправляем…";
   try{
     await fetch("/api/auth/resend", {method:"POST", headers:{Authorization:"Bearer "+token}});
-    btn.textContent = "Письмо отправлено ✓";
-    toast("Письмо отправлено — проверьте почту", "ok");
+    toast("Код отправлен — проверьте почту (и «Спам»)", "ok");
+    let s = 30;
+    const iv = setInterval(()=>{ btn.textContent = "Отправить ещё раз ("+s+")";
+      if(--s < 0){ clearInterval(iv); btn.textContent = t; btn.disabled = false; } }, 1000);
   }catch(e){ btn.textContent = "Ошибка, повторите"; btn.disabled = false; }
+}
+async function submitVerifyCode(btn){
+  const token = localStorage.getItem("vs_token");
+  if(!token) return;
+  const inp = $("vbcode"); const vm = $("vbmsg");
+  const code = (inp ? inp.value : "").trim();
+  if(!/^\d{6}$/.test(code)){ if(vm){ vm.textContent = "Введите 6 цифр"; vm.style.color = "#ffb3b5"; } return; }
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Проверяем…";
+  try{
+    const r = await fetch("/api/auth/verify-code", {method:"POST",
+      headers:{"Content-Type":"application/json", Authorization:"Bearer "+token},
+      body: JSON.stringify({code})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ if(vm){ vm.textContent = data.detail || "Неверный код"; vm.style.color = "#ffb3b5"; }
+      btn.disabled = false; btn.textContent = t; return; }
+    toast("Email подтверждён ✓", "ok");
+    initAuth();   // перерисовать шапку/баннер
+  }catch(e){ if(vm){ vm.textContent = "Нет связи"; vm.style.color = "#ffb3b5"; } btn.disabled = false; btn.textContent = t; }
 }
 
 // ── Пополнение баланса ───────────────────────────────────────────────────────

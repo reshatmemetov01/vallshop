@@ -55,30 +55,73 @@
 <header><div class="bar"><a href="/" class="logo">Vall<span>Shop</span></a></div></header>
 <main>
   <div class="card">
-    <div class="tabs">
-      <button id="tab-login" class="active" onclick="setTab('login')">Вход</button>
-      <button id="tab-reg" onclick="setTab('reg')">Регистрация</button>
+    <!-- Вход / Регистрация -->
+    <div id="view-auth">
+      <div class="tabs">
+        <button id="tab-login" class="active" onclick="setTab('login')">Вход</button>
+        <button id="tab-reg" onclick="setTab('reg')">Регистрация</button>
+      </div>
+
+      <form id="form" onsubmit="return submitForm(event)">
+        <label>Email</label>
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+        <label>Пароль</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+        <div id="pwhint" class="hint" style="display:none">Минимум 8 символов</div>
+        <button id="submit" class="btn" type="submit">Войти</button>
+      </form>
+
+      <div class="orline"><span>или</span></div>
+      <div id="tgwrap" class="tgwrap">
+        <div id="tgbtn"></div>
+        <button class="tg" id="tgsoon" disabled style="display:none">Войти через Telegram · скоро</button>
+      </div>
+
+      <div id="msg" class="msg"></div>
+      <div class="foot">
+        <a href="#" id="forgot" onclick="return forgotPassword()">Забыли пароль?</a>
+        &nbsp;·&nbsp; <a href="/">← на витрину</a>
+      </div>
     </div>
 
-    <form id="form" onsubmit="return submitForm(event)">
-      <label>Email</label>
-      <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
-      <label>Пароль</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
-      <div id="pwhint" class="hint" style="display:none">Минимум 8 символов</div>
-      <button id="submit" class="btn" type="submit">Войти</button>
-    </form>
-
-    <div class="orline"><span>или</span></div>
-    <div id="tgwrap" class="tgwrap">
-      <div id="tgbtn"></div>
-      <button class="tg" id="tgsoon" disabled style="display:none">Войти через Telegram · скоро</button>
+    <!-- Подтверждение email по коду -->
+    <div id="view-verify" style="display:none">
+      <h2 style="margin:0 0 6px;font-size:19px">Подтвердите email</h2>
+      <p class="hint" style="margin:0 0 4px">Мы отправили 6-значный код на <b id="v-email"></b>. Введите его ниже.</p>
+      <form onsubmit="return submitVerify(event)">
+        <label>Код из письма</label>
+        <input id="v-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+          placeholder="______" style="letter-spacing:8px;text-align:center;font-size:20px" required>
+        <button id="v-submit" class="btn" type="submit">Подтвердить</button>
+      </form>
+      <div id="v-msg" class="msg"></div>
+      <div class="foot">
+        <a href="#" id="v-resend" onclick="return resendCode()">Отправить код заново</a>
+        &nbsp;·&nbsp; <a href="/">← на витрину</a>
+      </div>
     </div>
 
-    <div id="msg" class="msg"></div>
-    <div class="foot">
-      <a href="#" id="forgot" onclick="return forgotPassword()">Забыли пароль?</a>
-      &nbsp;·&nbsp; <a href="/">← на витрину</a>
+    <!-- Сброс пароля по коду -->
+    <div id="view-reset" style="display:none">
+      <h2 style="margin:0 0 6px;font-size:19px">Сброс пароля</h2>
+      <p class="hint" style="margin:0 0 4px" id="r-hint">Укажите email — пришлём код для смены пароля.</p>
+      <form onsubmit="return submitReset(event)">
+        <label>Email</label>
+        <input id="r-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+        <div id="r-code-wrap" style="display:none">
+          <label>Код из письма</label>
+          <input id="r-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+            placeholder="______" style="letter-spacing:8px;text-align:center;font-size:20px">
+          <label>Новый пароль</label>
+          <input id="r-password" type="password" autocomplete="new-password" placeholder="••••••••">
+          <div class="hint">Минимум 8 символов</div>
+        </div>
+        <button id="r-submit" class="btn" type="submit">Получить код</button>
+      </form>
+      <div id="r-msg" class="msg"></div>
+      <div class="foot">
+        <a href="#" onclick="return showAuth()">← ко входу</a>
+      </div>
     </div>
   </div>
 </main>
@@ -97,6 +140,13 @@ function setTab(t){
   msg("");
 }
 function msg(text, ok){ const m=$("msg"); m.textContent=text||""; m.className="msg"+(text?(ok?" ok":" err"):""); }
+function vmsg(text, ok){ const m=$("v-msg"); m.textContent=text||""; m.className="msg"+(text?(ok?" ok":" err"):""); }
+function rmsg(text, ok){ const m=$("r-msg"); m.textContent=text||""; m.className="msg"+(text?(ok?" ok":" err"):""); }
+
+// переключение экранов карточки
+function _view(id){ ["view-auth","view-verify","view-reset"].forEach(v=>$(v).style.display = v===id?"":"none"); }
+function showAuth(){ _view("view-auth"); return false; }
+function showVerify(email){ $("v-email").textContent = email||""; _view("view-verify"); setTimeout(()=>$("v-code").focus(),50); }
 
 async function submitForm(e){
   e.preventDefault();
@@ -110,22 +160,101 @@ async function submitForm(e){
     const data = await r.json().catch(()=>({}));
     if(!r.ok){ msg(data.detail || "Ошибка. Попробуйте ещё раз."); $("submit").disabled=false; return false; }
     localStorage.setItem("vs_token", data.token);
+    const acc = data.account || {};
+    $("submit").disabled = false;
+    // email не подтверждён → экран ввода кода (при регистрации код уже отправлен)
+    if(acc.email && !acc.email_verified){
+      if(tab==="login"){ await resendCode(true); }   // при входе отправим свежий код
+      showVerify(acc.email);
+      vmsg("Код отправлен на почту. Проверьте входящие и «Спам».", true);
+      return false;
+    }
     msg(tab==="login" ? "Вход выполнен. Перенаправляем…" : "Аккаунт создан. Перенаправляем…", true);
     setTimeout(()=>{ location.href = "/"; }, 600);
   }catch(err){ msg("Нет связи с сервером."); $("submit").disabled=false; }
   return false;
 }
 
-// сброс пароля: отправить письмо со ссылкой
-async function forgotPassword(){
-  let email = $("email").value.trim();
-  if(!email){ email = (prompt("Укажите email вашего аккаунта:") || "").trim(); }
-  if(!email){ return false; }
+// подтверждение email по коду
+async function submitVerify(e){
+  e.preventDefault();
+  const code = $("v-code").value.trim();
+  const token = localStorage.getItem("vs_token");
+  if(!token){ showAuth(); return false; }
+  $("v-submit").disabled = true; vmsg("");
   try{
-    await fetch("/api/auth/forgot", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
-    msg("Если такой email зарегистрирован, мы отправили на него ссылку для сброса пароля.", true);
-  }catch(e){ msg("Нет связи с сервером."); }
+    const r = await fetch("/api/auth/verify-code", {method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body: JSON.stringify({code})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ vmsg(data.detail || "Неверный код."); $("v-submit").disabled=false; return false; }
+    vmsg("Email подтверждён. Перенаправляем…", true);
+    setTimeout(()=>{ location.href = "/"; }, 600);
+  }catch(err){ vmsg("Нет связи с сервером."); $("v-submit").disabled=false; }
+  return false;
+}
+
+async function resendCode(silent){
+  const token = localStorage.getItem("vs_token");
+  if(!token) return false;
+  const link = $("v-resend");
+  try{
+    await fetch("/api/auth/resend", {method:"POST", headers:{"Authorization":"Bearer "+token}});
+    if(!silent){ vmsg("Код отправлен заново. Проверьте почту.", true); }
+    if(link){ link.style.pointerEvents="none"; link.style.opacity=".5";
+      let s=30; const t=link.textContent;
+      const iv=setInterval(()=>{ link.textContent = "Отправить ещё раз через "+s+"с"; if(--s<0){
+        clearInterval(iv); link.textContent=t; link.style.pointerEvents=""; link.style.opacity=""; } }, 1000); }
+  }catch(e){ if(!silent) vmsg("Нет связи с сервером."); }
+  return false;
+}
+
+// сброс пароля по коду: сначала запрос кода, затем код + новый пароль
+let resetStage = "email";
+function forgotPassword(){
+  resetStage = "email";
+  $("r-email").value = $("email").value.trim();
+  $("r-code-wrap").style.display = "none";
+  $("r-hint").textContent = "Укажите email — пришлём код для смены пароля.";
+  $("r-submit").textContent = "Получить код";
+  rmsg("");
+  _view("view-reset");
+  return false;
+}
+
+async function submitReset(e){
+  e.preventDefault();
+  const email = $("r-email").value.trim();
+  if(resetStage === "email"){
+    $("r-submit").disabled = true; rmsg("");
+    try{
+      await fetch("/api/auth/forgot", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
+      resetStage = "code";
+      $("r-code-wrap").style.display = "";
+      $("r-hint").textContent = "Если такой email зарегистрирован, мы отправили на него 6-значный код.";
+      $("r-submit").textContent = "Сменить пароль";
+      $("r-email").setAttribute("readonly","readonly");
+      rmsg("Код отправлен. Введите его и новый пароль.", true);
+      setTimeout(()=>$("r-code").focus(),50);
+    }catch(e){ rmsg("Нет связи с сервером."); }
+    $("r-submit").disabled = false;
+    return false;
+  }
+  // stage code → смена пароля
+  const code = $("r-code").value.trim();
+  const password = $("r-password").value;
+  if(password.length < 8){ rmsg("Пароль — минимум 8 символов."); return false; }
+  $("r-submit").disabled = true; rmsg("");
+  try{
+    const r = await fetch("/api/auth/reset-code", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({email, code, password})});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ rmsg(data.detail || "Неверный код."); $("r-submit").disabled=false; return false; }
+    localStorage.setItem("vs_token", data.token);
+    rmsg("Пароль изменён. Перенаправляем…", true);
+    setTimeout(()=>{ location.href = "/"; }, 600);
+  }catch(err){ rmsg("Нет связи с сервером."); $("r-submit").disabled=false; }
   return false;
 }
 

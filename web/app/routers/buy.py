@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db.models import WebAccount
 
 from ..db import get_session
-from ..deps import current_account
+from ..deps import current_account, verified_account
 from ..services import checkout as checkout_service
 
 router = APIRouter(prefix="/api/buy", tags=["buy"])
@@ -24,7 +24,7 @@ class BuyIn(BaseModel):
 @router.post("")
 async def buy(
     body: BuyIn,
-    acc: WebAccount = Depends(current_account),
+    acc: WebAccount = Depends(verified_account),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:

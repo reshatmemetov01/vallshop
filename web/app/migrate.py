@@ -77,6 +77,25 @@ def ensure_topup_buy_columns(conn: Connection) -> None:
         conn.exec_driver_sql("ALTER TABLE topups ADD COLUMN buy_order_id INTEGER")
 
 
+def ensure_email_token_columns(conn: Connection) -> None:
+    """Добавить email_tokens.code / attempts (подтверждение по коду). Идемпотентно.
+
+    Нужно для подтверждения email и сброса пароля 6-значным кодом. ALTER TABLE
+    ADD COLUMN безопасен и в SQLite, и в Postgres.
+    """
+    from sqlalchemy import inspect
+    inspector = inspect(conn)
+    if "email_tokens" not in set(inspector.get_table_names()):
+        return  # create_all создаст таблицу уже с колонками
+    cols = {c["name"] for c in inspector.get_columns("email_tokens")}
+    if "code" not in cols:
+        conn.exec_driver_sql("ALTER TABLE email_tokens ADD COLUMN code VARCHAR(8)")
+    if "attempts" not in cols:
+        conn.exec_driver_sql(
+            "ALTER TABLE email_tokens ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+        )
+
+
 def ensure_source_columns(conn: Connection) -> None:
     """Добавить orders.source / topups.source, если их ещё нет (идемпотентно).
 
