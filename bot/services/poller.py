@@ -141,14 +141,19 @@ async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
         variant_id = fresh.variant_id
         variant = await session.get(Variant, fresh.variant_id)
         item_name = variant.title if variant else "звёзды"
+        is_stars = variant is not None and getattr(variant, "fzr_a", None) == "telegram_stars"
+        stars_u, stars_q = order_service.stars_recipient_qty(fresh) if is_stars else (None, None)
         await session.commit()
 
     outcome = res.get("outcome")
     cbot = _pick_bot(bots, merchant_id, bot)
     admin_ids = list(config.admin_ids) if config else []
     if outcome == "completed":
-        await _notify(cbot, user_id, f"✅ Заказ #{oid} «{item_name}» выполнен — звёзды отправлены.",
-                      kb.order_done_kb(oid, variant_id))
+        if is_stars and stars_u and stars_q:
+            done_text = texts.STARS_DELIVERED_MANUAL.format(username=stars_u, qty=stars_q)
+        else:
+            done_text = f"✅ Заказ #{oid} «{item_name}» выполнен — звёзды отправлены."
+        await _notify(cbot, user_id, done_text, kb.order_done_kb(oid, variant_id))
     elif escalated:
         await notify_service.notify_admins(
             bot, admin_ids,
