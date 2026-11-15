@@ -128,6 +128,7 @@ async def purchase_from_balance(
     smm_link: Optional[str] = None,
     smm_quantity: Optional[int] = None,
     source: str = "bot",
+    rate: Optional[Decimal] = None,
 ) -> tuple[Order, list[str]]:
     """Купить quantity единиц с баланса и выдать коды.
 
@@ -141,10 +142,12 @@ async def purchase_from_balance(
     коммитит при успехе и откатывает при исключении (откат возвращает баланс).
     """
     # Стоп-лосс для «умной» цены: не продаём ниже живого закупа поставщика.
+    # ``rate`` обязателен из веба: кэш курса бота живёт в другом процессе, и без
+    # него get_rate() вернул бы DEFAULT (95) и ложно заблокировал продажу.
     if getattr(variant, "price_mode", None) == "smart" and variant.source == "fazercard":
         from . import smartprice as smartprice_service
         try:
-            if await smartprice_service.stop_loss_violation(fzr, variant, unit_price):
+            if await smartprice_service.stop_loss_violation(fzr, variant, unit_price, rate=rate):
                 raise SupplierError("Цена ниже закупа — продажа остановлена (стоп-лосс)")
         except SupplierError:
             raise

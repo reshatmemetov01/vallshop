@@ -437,6 +437,7 @@ async def purchase(
             topup_fields=topup_fields,
             public_base_url=cfg.public_base_url,
             source="site",            # заказ оформлен через сайт (для статистики)
+            rate=await _db_rate(session),  # курс из БД — у веба свой процесс
         )
     except order_service.InsufficientBalance:
         await session.rollback()

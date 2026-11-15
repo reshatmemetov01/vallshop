@@ -140,6 +140,26 @@ async def test_stop_loss(db):
 
 
 @pytest.mark.asyncio
+async def test_stop_loss_uses_passed_rate(db):
+    """Переданный курс важнее глобального кэша: у веб-процесса свой кэш, и без
+    явного курса get_rate() вернул бы DEFAULT (95) и ложно заблокировал продажу."""
+    fzr = FazerCardClient(mock=True)  # закуп $1.00
+    async with db.session() as s:
+        p = Product(game="X", title="T"); s.add(p); await s.flush()
+        v = Variant(product_id=p.id, title="v", liog_product_id=0, liog_variation_id=-1,
+                    cost_usd=Decimal("1.00"), source="fazercard", fzr_kind="topup",
+                    fzr_a="free_fire", fzr_b="o1", price_mode="smart")
+        s.add(v); await s.commit()
+        vid = v.id
+    async with db.session() as s:
+        v = await s.get(Variant, vid)
+        # курс 85: закуп = 85 ₽, цена 90 ≥ 85 → продаём
+        assert await smartprice.stop_loss_violation(fzr, v, Decimal("90"), rate=Decimal("85")) is False
+        # без курса берётся дефолт (95): 90 < 95 → ложная блокировка (баг сайта)
+        assert await smartprice.stop_loss_violation(fzr, v, Decimal("90")) is True
+
+
+@pytest.mark.asyncio
 async def test_migrate_supplier_to_smart(db):
     fzr = FazerCardClient(mock=True)
     # float-номинал: price_usd=1.50 → текущая ₽-цена = ceil(1.50×95)=143

@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request
 from bot.db import models as _models  # noqa: F401 — регистрация моделей (web_accounts)
 from bot.db.base import Base
 from bot.db.models import SiteVisit, SiteVisitLog
+from bot.services import rates as rates_service
 
 from . import models as _web_models  # noqa: F401 — регистрация таблиц сайта (site_product_desc)
 
@@ -42,6 +43,9 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(ensure_topup_buy_columns)
         # email_tokens.code / attempts — подтверждение email и сброс по коду.
         await conn.run_sync(ensure_email_token_columns)
+    # Курс USDT→₽ в глобальный кэш веб-процесса (у бота он в своём процессе).
+    # Иначе get_rate() вернул бы DEFAULT=95 и ломал бы стоп-лосс на сайте.
+    await rates_service.load(database)
     yield
 
 
