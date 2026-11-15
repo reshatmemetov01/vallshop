@@ -1407,13 +1407,19 @@ async def cb_stars_buy(
                 "😔 Поставщик временно недоступен, деньги не списаны.", show_alert=True
             )
             return
-        order.fields_json = json.dumps(
-            [
-                {"label": "Получатель", "value": "@" + uname},
-                {"label": "Количество", "value": f"{qty} ⭐️"},
-            ],
-            ensure_ascii=False,
-        )
+        # ВАЖНО: если заказ ушёл через Fragment — в fields_json уже лежит состояние
+        # оплаты (seqno_at_send), по которому поллер подтверждает выдачу. НЕ затираем
+        # его витринными полями, иначе заказ навсегда зависнет в «Ждёт ручной».
+        # (Веб-checkout делает такую же проверку.) Получателя/количество для показа
+        # в этом случае берём из dict-состояния.
+        if order.supplier != "fragment":
+            order.fields_json = json.dumps(
+                [
+                    {"label": "Получатель", "value": "@" + uname},
+                    {"label": "Количество", "value": f"{qty} ⭐️"},
+                ],
+                ensure_ascii=False,
+            )
         status = order.status
         order_id = order.id
         pending_note = await catalog_service.resolve_text(
