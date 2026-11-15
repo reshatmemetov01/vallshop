@@ -26,6 +26,7 @@ from ..services import catalog as catalog_service
 from ..services import notify as notify_service
 from ..services import orders as order_service
 from ..services import settings as settings_service
+from .. import keyboards as kb
 from .. import texts
 
 log = logging.getLogger("vallshop.admin_orders")
@@ -383,17 +384,23 @@ async def cb_topup_paid(call: CallbackQuery, db: Database) -> None:
             )
         await order_service.deliver_topup_manual(session, order)
         user_id = order.user_id
+        order_id = order.id
+        variant_id = order.variant_id
         await session.commit()
     if delivered_text:
         try:
-            await call.message.bot.send_message(user_id, delivered_text)
+            # Кнопки как в обычной выдаче: отзыв / купить ещё / меню.
+            await call.message.bot.send_message(
+                user_id, delivered_text,
+                reply_markup=kb.order_done_kb(order_id, variant_id),
+            )
         except Exception:  # noqa: BLE001
             log.warning("Не удалось уведомить покупателя %s", user_id)
-    kb = InlineKeyboardBuilder()
-    kb.row(_btn("⬅️ К не выполненным", "co_list"))
+    nav = InlineKeyboardBuilder()
+    nav.row(_btn("⬅️ К не выполненным", "co_list"))
     await call.message.edit_text(
         "✅ Пополнение отмечено выполненным, покупатель уведомлён.",
-        reply_markup=kb.as_markup(),
+        reply_markup=nav.as_markup(),
     )
     await call.answer("Готово")
 

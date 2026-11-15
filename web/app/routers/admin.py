@@ -32,7 +32,17 @@ class OrderActionIn(BaseModel):
     action: str  # deliver | refund | close_silent
 
 
-async def _notify_customer(order, text: str) -> bool:
+def _done_markup(order) -> dict:
+    """Кнопки под сообщением о выдаче — как в обычной выдаче бота
+    (те же callback'и: отзыв / купить ещё / меню)."""
+    return {"inline_keyboard": [
+        [{"text": "⭐ Оставить отзыв", "callback_data": f"review:{order.id}"},
+         {"text": "🛒 Купить ещё", "callback_data": f"var:{order.variant_id}"}],
+        [{"text": "☰ Меню", "callback_data": "menu"}],
+    ]}
+
+
+async def _notify_customer(order, text: str, reply_markup: dict | None = None) -> bool:
     """Отправить покупателю сообщение в Telegram (если привязан). Best-effort."""
     import httpx
     from bot.db.models import WebAccount
@@ -48,10 +58,13 @@ async def _notify_customer(order, text: str) -> bool:
     if not chat_id:
         return False
     try:
+        payload = {"chat_id": chat_id, "text": text}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         async with httpx.AsyncClient(timeout=10) as cl:
             r = await cl.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
+                json=payload,
             )
             return r.status_code == 200
     except Exception:  # noqa: BLE001 — уведомление не должно ломать действие
@@ -194,6 +207,7 @@ async def order_action(
     action = (body.action or "").strip()
     out: dict = {"ok": True}
     notify_text = None
+    notify_markup = None
 
     if action == "refund":
         if o.status == OrderStatus.REFUNDED:
@@ -218,8 +232,12 @@ async def order_action(
                 uname, qty = order_service.stars_recipient_qty(o)
                 if uname and qty:
                     notify_text = texts.STARS_DELIVERED_MANUAL.format(username=uname, qty=qty)
+            # Кнопки как в обычной выдаче: отзыв / купить ещё / меню.
+            notify_markup = _done_markup(o)
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 
-    out["notified"] = await _notify_customer(o, notify_text) if notify_text else False
+    out["notified"] = (
+        await _notify_customer(o, notify_text, notify_markup) if notify_text else False
+    )
     return out
