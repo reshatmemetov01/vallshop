@@ -183,6 +183,9 @@
     object-fit:cover;background:var(--panel2);border-bottom:1px solid rgba(140,175,225,.12)}
   .card .cover.flag{box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
   .card.hascover:hover .cover{filter:brightness(1.05)}
+  /* Значок бренда поверх флага (угол обложки) */
+  .card .brandbadge{position:absolute;top:10px;left:10px;width:38px;height:38px;border-radius:10px;
+    object-fit:cover;border:2px solid rgba(255,255,255,.9);box-shadow:0 3px 10px rgba(0,0,0,.45);background:#0d1420}
 
   /* ── Поиск ── */
   .searchbar{margin:6px 0 14px}
@@ -973,14 +976,24 @@ function countryFlag(title){
   return iso ? "/img/flags/" + iso + ".svg" : null;
 }
 
-function productCard(p){
+// Значок бренда на карточках стран — выбирается по родительской категории.
+// Ключ — название родителя (в нижнем регистре), значение — картинка значка.
+const BRAND_BADGE = {
+  "пополнение playstation": "/img/cat/badge-playstation.webp",
+  // "valorant vp": "/img/cat/badge-valorant.webp",
+};
+function brandBadge(parentTitle){ return BRAND_BADGE[_catKey(parentTitle)] || null; }
+
+function productCard(p, parentTitle){
   const sub = p.has_children ? "открыть →" : "выбрать →";
   const t = esc(p.title).replace(/'/g,"\\'");
   const img = catImage(p.title);
   const flag = img ? null : countryFlag(p.title);
   const src = img || flag;
+  const badge = (flag && parentTitle) ? brandBadge(parentTitle) : null;
   const top = src
     ? `<img class="cover${flag ? ' flag' : ''}" src="${src}" alt="${esc(p.title)}" loading="lazy">`
+      + (badge ? `<img class="brandbadge" src="${badge}" alt="" loading="lazy">` : "")
     : `<div class="ic">${catIcon(p.title)}</div>`;
   return `<a class="card reveal${src ? ' hascover' : ''}" href="${purl(p)}" onclick="open_(${p.id}, '${t}');return false;">
     ${top}
@@ -1093,7 +1106,8 @@ async function _catalogNode(id, title){
     const isStars = /звёзд|звезд/i.test((data.product && data.product.title) || "");
     const starsHtml = isStars ? await starsSectionHtml() : "";
     if(data.type === "category"){
-      content.innerHTML = desc + starsHtml + `<div class="grid">${data.children.map(productCard).join("")}</div>`;
+      const pTitle = (data.product && data.product.title) || title;
+      content.innerHTML = desc + starsHtml + `<div class="grid">${data.children.map(c => productCard(c, pTitle)).join("")}</div>`;
     } else {
       const cards = data.variants.map(variantCard).join("");
       content.innerHTML = desc + starsHtml + (cards
