@@ -875,6 +875,29 @@ function purl(p){ return `/p/${p.id}-${slugify(p.title)}`; }
 const CAT_IMAGES = {
   "pubg mobile": "/img/cat/pubg-mobile.webp",
   "пополнение pubg mobile": "/img/cat/pubg-mobile.webp",
+
+  "roblox": "/img/cat/roblox.webp",
+  "пополнение roblox": "/img/cat/roblox.webp",
+
+  "free fire": "/img/cat/free-fire.webp",
+  "пополнение free fire": "/img/cat/free-fire.webp",
+
+  "app store itunes": "/img/cat/appstore-itunes.webp",
+  "appstore itunes": "/img/cat/appstore-itunes.webp",
+  "app store / itunes": "/img/cat/appstore-itunes.webp",
+  "appstore / itunes": "/img/cat/appstore-itunes.webp",
+  "пополнение app store itunes": "/img/cat/appstore-itunes.webp",
+  "apple": "/img/cat/appstore-itunes.webp",
+  "itunes": "/img/cat/appstore-itunes.webp",
+  "app store": "/img/cat/appstore-itunes.webp",
+
+  "playstation": "/img/cat/playstation.webp",
+  "пополнение playstation": "/img/cat/playstation.webp",
+  "playstation store": "/img/cat/playstation.webp",
+  "psn": "/img/cat/playstation.webp",
+
+  "exitlag": "/img/cat/exitlag.webp",
+  "пополнение exitlag": "/img/cat/exitlag.webp",
 };
 function _catKey(t){ return (t||"").toLowerCase().replace(/\s+/g," ").trim(); }
 function catImage(title){ return CAT_IMAGES[_catKey(title)] || null; }
