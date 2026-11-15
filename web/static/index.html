@@ -949,6 +949,10 @@ const CAT_IMAGES = {
   "премиум": "/img/cat/premium.webp",
   "telegram premium": "/img/cat/premium.webp",
   "premium": "/img/cat/premium.webp",
+
+  "valorant vp": "/img/cat/valorant.webp",
+  "пополнение valorant vp": "/img/cat/valorant.webp",
+  "valorant": "/img/cat/valorant.webp",
 };
 function _catKey(t){ return (t||"").toLowerCase().replace(/\s+/g," ").trim(); }
 function catImage(title){ return CAT_IMAGES[_catKey(title)] || null; }
@@ -980,7 +984,9 @@ function countryFlag(title){
 // Ключ — название родителя (в нижнем регистре), значение — картинка значка.
 const BRAND_BADGE = {
   "пополнение playstation": "/img/cat/badge-playstation.webp",
-  // "valorant vp": "/img/cat/badge-valorant.webp",
+  "valorant vp": "/img/cat/badge-valorant.webp",
+  "пополнение valorant vp": "/img/cat/badge-valorant.webp",
+  "valorant": "/img/cat/badge-valorant.webp",
 };
 function brandBadge(parentTitle){ return BRAND_BADGE[_catKey(parentTitle)] || null; }
 
