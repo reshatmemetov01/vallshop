@@ -177,6 +177,11 @@
   .card .t{font-weight:700;font-size:17px}
   .card .cdesc{color:var(--muted);font-size:13px;flex:1}
   .card .arrow{margin-top:8px;color:var(--accent);font-size:13px;font-weight:700}
+  /* Крупная обложка категории (когда есть картинка) */
+  .card.hascover{padding-top:0}
+  .card .cover{display:block;width:calc(100% + 40px);margin:-20px -20px 12px;aspect-ratio:16/10;
+    object-fit:cover;background:var(--panel2);border-bottom:1px solid rgba(140,175,225,.12)}
+  .card.hascover:hover .cover{filter:brightness(1.05)}
 
   /* ── Поиск ── */
   .searchbar{margin:6px 0 14px}
@@ -864,11 +869,25 @@ function slugify(t){
 }
 function purl(p){ return `/p/${p.id}-${slugify(p.title)}`; }
 
+// ── Картинки-обложки категорий ─────────────────────────────────────────────
+// Ключ — название категории в нижнем регистре (пробелы схлопнуты). Значение —
+// путь к картинке в /img/cat/. Добавляется по одной строке на категорию.
+const CAT_IMAGES = {
+  // "valorant vp": "/img/cat/valorant.webp",
+  // "pubg mobile": "/img/cat/pubg.webp",
+};
+function _catKey(t){ return (t||"").toLowerCase().replace(/\s+/g," ").trim(); }
+function catImage(title){ return CAT_IMAGES[_catKey(title)] || null; }
+
 function productCard(p){
   const sub = p.has_children ? "открыть →" : "выбрать →";
   const t = esc(p.title).replace(/'/g,"\\'");
-  return `<a class="card reveal" href="${purl(p)}" onclick="open_(${p.id}, '${t}');return false;">
-    <div class="ic">${catIcon(p.title)}</div>
+  const img = catImage(p.title);
+  const top = img
+    ? `<img class="cover" src="${img}" alt="${esc(p.title)}" loading="lazy">`
+    : `<div class="ic">${catIcon(p.title)}</div>`;
+  return `<a class="card reveal${img ? ' hascover' : ''}" href="${purl(p)}" onclick="open_(${p.id}, '${t}');return false;">
+    ${top}
     <div class="t">${esc(p.title)}</div>
     <div class="cdesc">${esc(catDesc(p.title))}</div>
     <div class="arrow">${sub}</div></a>`;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -168,6 +169,27 @@ async def yandex_verify() -> FileResponse:
 @router.api_route("/catalog.css", methods=["GET", "HEAD"])
 async def catalog_css() -> FileResponse:
     return FileResponse(_CATALOG_CSS, media_type="text/css")
+
+
+_IMG_DIR = _STATIC / "img" / "cat"
+_IMG_TYPES = {
+    ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml",
+}
+
+
+@router.api_route("/img/cat/{name}", methods=["GET", "HEAD"])
+async def category_image(name: str) -> FileResponse:
+    """Картинки-обложки категорий из web/static/img/cat (только безопасные имена)."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name) or name.startswith("."):
+        raise HTTPException(status_code=404)
+    path = (_IMG_DIR / name).resolve()
+    if _IMG_DIR.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404)
+    media = _IMG_TYPES.get(path.suffix.lower())
+    if media is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type=media)
 
 
 # --- SEO: серверные страницы, sitemap, robots -----------------------------
