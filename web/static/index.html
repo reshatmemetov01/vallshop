@@ -976,7 +976,16 @@ const COUNTRY_ISO = {
   "киргизия":"kg","кыргызстан":"kg","сербия":"rs","болгария":"bg","грузия":"ge",
 };
 function countryFlag(title){
-  const iso = COUNTRY_ISO[_catKey(title)];
+  const k = _catKey(title);
+  let iso = COUNTRY_ISO[k];
+  if(!iso){
+    // У некоторых списков к названию добавлен код страны («AE ОАЭ», «ʙʀ Бразилия»,
+    // «вн Бахрейн»). Префикс бывает и латиницей, и похож на кириллицу — поэтому
+    // ищем по ОКОНЧАНИЮ названия на известную страну (последнее слово/слова).
+    for(const name in COUNTRY_ISO){
+      if(k === name || k.endsWith(" " + name)){ iso = COUNTRY_ISO[name]; break; }
+    }
+  }
   return iso ? "/img/flags/" + iso + ".svg" : null;
 }
 
