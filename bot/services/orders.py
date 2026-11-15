@@ -704,6 +704,35 @@ async def deliver_code_manual(
     await referral_service.accrue_for_order(session, order)
 
 
+def stars_recipient_qty(order: Order) -> tuple[Optional[str], Optional[str]]:
+    """(@username, qty) заказа звёзд из fields_json. Поддерживает оба формата:
+    dict {username, stars_qty} (Fragment) и список [{label,value}] (витрина)."""
+    import re
+    try:
+        f = json.loads(order.fields_json) if order.fields_json else None
+    except (ValueError, TypeError):
+        f = None
+    uname = qty = None
+    if isinstance(f, dict):
+        uname, qty = f.get("username"), f.get("stars_qty")
+    elif isinstance(f, list):
+        for it in f:
+            if not isinstance(it, dict):
+                continue
+            lbl = str(it.get("label", "")).lower()
+            if "получател" in lbl or "username" in lbl:
+                uname = it.get("value")
+            elif "количеств" in lbl or "qty" in lbl or "stars" in lbl:
+                qty = it.get("value")
+    if uname:
+        uname = str(uname).strip()
+        uname = uname if uname.startswith("@") else "@" + uname
+    if qty is not None:
+        m = re.search(r"\d+", str(qty))
+        qty = m.group(0) if m else str(qty)
+    return uname, qty
+
+
 async def deliver_topup_manual(session: AsyncSession, order: Order) -> None:
     """Пометить топап вручную выполненным (без кода, зачислено на аккаунт)."""
     order.status = OrderStatus.COMPLETED
