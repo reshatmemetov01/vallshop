@@ -192,6 +192,20 @@ async def category_image(name: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
+_FLAG_DIR = _STATIC / "img" / "flags"
+
+
+@router.api_route("/img/flags/{name}", methods=["GET", "HEAD"])
+async def flag_image(name: str) -> FileResponse:
+    """Флаги стран (SVG) из web/static/img/flags (только безопасные имена)."""
+    if not re.fullmatch(r"[a-z]{2,3}\.svg", name):
+        raise HTTPException(status_code=404)
+    path = (_FLAG_DIR / name).resolve()
+    if _FLAG_DIR.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/svg+xml")
+
+
 # --- SEO: серверные страницы, sitemap, robots -----------------------------
 
 @router.api_route("/robots.txt", methods=["GET", "HEAD"])
