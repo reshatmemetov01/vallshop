@@ -873,8 +873,8 @@ function purl(p){ return `/p/${p.id}-${slugify(p.title)}`; }
 // Ключ — название категории в нижнем регистре (пробелы схлопнуты). Значение —
 // путь к картинке в /img/cat/. Добавляется по одной строке на категорию.
 const CAT_IMAGES = {
-  // "valorant vp": "/img/cat/valorant.webp",
-  // "pubg mobile": "/img/cat/pubg.webp",
+  "pubg mobile": "/img/cat/pubg-mobile.webp",
+  "пополнение pubg mobile": "/img/cat/pubg-mobile.webp",
 };
 function _catKey(t){ return (t||"").toLowerCase().replace(/\s+/g," ").trim(); }
 function catImage(title){ return CAT_IMAGES[_catKey(title)] || null; }
