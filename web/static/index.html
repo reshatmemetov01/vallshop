@@ -1032,6 +1032,11 @@ const BRAND_BADGE = {
 };
 function brandBadge(parentTitle){ return BRAND_BADGE[_catKey(parentTitle)] || null; }
 
+// Версия картинок: при любой замене обложки/значка увеличиваем — чтобы браузеры
+// не отдавали старую из кеша (у статических файлов один и тот же адрес).
+const ASSET_VER = "3";
+function ver(u){ return u ? u + (u.indexOf("?") >= 0 ? "&" : "?") + "v=" + ASSET_VER : u; }
+
 function productCard(p, parentTitle){
   const sub = p.has_children ? "открыть →" : "выбрать →";
   const t = esc(p.title).replace(/'/g,"\\'");
@@ -1040,8 +1045,8 @@ function productCard(p, parentTitle){
   const src = img || flag;
   const badge = (flag && parentTitle) ? brandBadge(parentTitle) : null;
   const top = src
-    ? `<img class="cover${flag ? ' flag' : ''}" src="${src}" alt="${esc(p.title)}" loading="lazy">`
-      + (badge ? `<img class="brandbadge" src="${badge}" alt="" loading="lazy">` : "")
+    ? `<img class="cover${flag ? ' flag' : ''}" src="${ver(src)}" alt="${esc(p.title)}" loading="lazy">`
+      + (badge ? `<img class="brandbadge" src="${ver(badge)}" alt="" loading="lazy">` : "")
     : `<div class="ic">${catIcon(p.title)}</div>`;
   return `<a class="card reveal${src ? ' hascover' : ''}" href="${purl(p)}" onclick="open_(${p.id}, '${t}');return false;">
     ${top}
