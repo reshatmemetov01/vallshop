@@ -33,3 +33,7 @@ htmlcov/
 *.sqlite3
 *.db
 *.log
+
+# Бэкапы базы (scripts/backup.sh)
+backups/
+*.sqlite.gz
