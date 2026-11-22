@@ -162,6 +162,61 @@ async def _settle_fragment(bot, db, fragment, config, bots, order_id) -> None:
         )
 
 
+async def _settle_nsgifts(bot, db, nsgifts, config, bots, order_id) -> None:
+    """Опросить статус заказа NS.Gifts (order_info) и довести до финала.
+
+    Коды-товары почти всегда выдаются сразу при покупке; сюда попадают лишь
+    заказы, зависшие в FULFILLING (сбой сети при оплате и т.п.)."""
+    if nsgifts is None:
+        return
+    refunded = False
+    async with db.session() as session:
+        fresh = await session.get(Order, order_id)
+        if not fresh or fresh.status != OrderStatus.FULFILLING:
+            return
+        res = await order_service.settle_nsgifts(session, fresh, nsgifts)
+        outcome = res.get("outcome")
+        user_id = fresh.user_id
+        merchant_id = fresh.merchant_id
+        oid = fresh.id
+        variant_id = fresh.variant_id
+        code = fresh.delivery_code
+        refund_amount = Decimal(fresh.price_usd) * (fresh.quantity or 1)
+        variant = await session.get(Variant, fresh.variant_id)
+        item_name = variant.title if variant else "товар"
+        refund_text = None
+        if outcome == "failed":
+            auto = await settings_service.get_bool(session, settings_service.AUTO_REFUND, True)
+            if auto:
+                await balance_service.credit(
+                    session, user_id, refund_amount, merchant_id=merchant_id
+                )
+                fresh.status = OrderStatus.REFUNDED
+                refunded = True
+                await referral_service.reverse_for_order(session, fresh)
+                await mprice_service.reverse_earnings(
+                    session, fresh.merchant_id, fresh.merchant_margin or Decimal(0)
+                )
+                refund_text = await settings_service.get(
+                    session, settings_service.REFUND_TEXT, texts.FULFILL_REFUNDED
+                )
+            else:
+                fresh.status = OrderStatus.NEEDS_ACTION
+                fresh.fail_reason = fresh.fail_reason or "NS.Gifts: возврат/отмена поставщиком"
+        await session.commit()
+
+    cbot = _pick_bot(bots, merchant_id, bot)
+    if outcome == "completed":
+        done_kb = kb.order_done_kb(oid, variant_id)
+        if code:
+            await _notify(cbot, user_id, texts.DELIVERY_SUCCESS.format(code=code), done_kb)
+        else:
+            await _notify(cbot, user_id, f"✅ Заказ #{oid} «{item_name}» выполнен.", done_kb)
+    elif refunded and refund_text:
+        await _notify(cbot, user_id,
+                      settings_service.fmt(refund_text, amount=texts.rub(refund_amount)), None)
+
+
 async def run_fulfillment_poller(
     bot: Bot,
     db: Database,
@@ -173,13 +228,14 @@ async def run_fulfillment_poller(
     soc: SocProofClient | None = None,
     panels: dict | None = None,
     fragment=None,
+    nsgifts=None,
 ) -> None:
-    """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard + SMM + Fragment)."""
+    """Бесконечный цикл опроса незавершённых заказов (LioGames + FazerCard + SMM + Fragment + NS.Gifts)."""
     if panels is None and soc is not None:
         panels = {"socproof": soc}
     while True:
         try:
-            await _tick(bot, db, liog, fzr, config, bots, panels, fragment)
+            await _tick(bot, db, liog, fzr, config, bots, panels, fragment, nsgifts)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — поллер не должен падать
@@ -196,6 +252,7 @@ async def _tick(
     bots: dict | None = None,
     panels: dict | None = None,
     fragment=None,
+    nsgifts=None,
 ) -> None:
     async with db.session() as session:
         # Опрашиваем все заказы «в обработке», плюс Fragment-заказы, уведённые на
@@ -220,7 +277,7 @@ async def _tick(
         # блокировать выдачу остальных (напр. битый Fragment-заказ не мешал бы
         # завершиться заказам FazerCard).
         try:
-            await _settle_order(bot, db, liog, fzr, config, bots, panels, fragment, order)
+            await _settle_order(bot, db, liog, fzr, config, bots, panels, fragment, order, nsgifts)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -237,6 +294,7 @@ async def _settle_order(
     panels: dict | None,
     fragment,
     order,
+    nsgifts=None,
 ) -> None:
     # SMM (панели soc-proof / 1xpanel) — своя логика опроса/возврата.
     if smm_panels.is_smm(order.supplier):
@@ -245,6 +303,10 @@ async def _settle_order(
     # Fragment (Telegram Stars через TON) — подтверждение оплаты по seqno.
     if order.supplier == "fragment":
         await _settle_fragment(bot, db, fragment, config, bots, order.id)
+        return
+    # NS.Gifts — опрос статуса по custom_id (order_info).
+    if order.supplier == "nsgifts":
+        await _settle_nsgifts(bot, db, nsgifts, config, bots, order.id)
         return
     async with db.session() as session:
         fresh = await session.get(Order, order.id)

@@ -101,7 +101,7 @@ async def _settle(session, topup: TopUp, suppliers: dict, config) -> Optional[Bu
             owner_unit_price=owner_price,
             fzr=suppliers.get("fzr"), fragment=suppliers.get("fragment"),
             soc=suppliers.get("soc"), panels=suppliers.get("panels"),
-            vpn=suppliers.get("vpn"),
+            vpn=suppliers.get("vpn"), nsgifts=suppliers.get("nsgifts"),
             public_base_url=getattr(config, "public_base_url", None),
             topup_fields=fields,
             smm_link=intent.get("smm_link"), smm_quantity=intent.get("smm_quantity"),

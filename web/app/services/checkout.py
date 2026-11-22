@@ -62,6 +62,7 @@ def _sup() -> dict:
         from fazercard import FazerCardClient
         from vpnresellers import VPNResellersClient
         from fragment import FragmentClient
+        from nsgifts import NSGiftsClient
         from bot.services import smm_panels
 
         panels = smm_panels.build_clients()
@@ -71,6 +72,7 @@ def _sup() -> dict:
             "soc": panels["socproof"],   # back-compat
             "panels": panels,
             "fragment": FragmentClient.from_env(),
+            "nsgifts": NSGiftsClient.from_env(),
         }
     return _suppliers
 
@@ -88,6 +90,8 @@ def buy_kind(variant: Variant) -> Optional[str]:
         return "vpn"
     if src in ("stock", "liogames"):
         return "simple"
+    if src == "nsgifts":
+        return "simple"      # товары-коды NS.Gifts: количество + цена, выдача кодов
     if smm_panels.is_smm(src):
         return "smm"
     if src == "fazercard":
@@ -432,6 +436,7 @@ async def purchase(
             soc=sup["soc"],
             panels=sup["panels"],
             fragment=sup["fragment"],
+            nsgifts=sup["nsgifts"],
             smm_link=smm_link,
             smm_quantity=smm_quantity,
             topup_fields=topup_fields,

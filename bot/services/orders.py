@@ -22,6 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from liogames import LioGamesClient
 from fazercard import FazerCardClient, FazerCardError
+from nsgifts import (
+    NSGiftsClient, NSGiftsAPIError,
+    STATUS_COMPLETED as NSG_COMPLETED,
+    STATUS_REFUNDED as NSG_REFUNDED,
+    STATUS_CANCELED as NSG_CANCELED,
+)
 from socproof import SocProofClient, SocProofError
 
 from ..db.models import HEAD_MERCHANT_ID, Order, OrderStatus, User, Variant
@@ -129,6 +135,7 @@ async def purchase_from_balance(
     smm_quantity: Optional[int] = None,
     source: str = "bot",
     rate: Optional[Decimal] = None,
+    nsgifts: Optional[NSGiftsClient] = None,
 ) -> tuple[Order, list[str]]:
     """Купить quantity единиц с баланса и выдать коды.
 
@@ -208,6 +215,9 @@ async def purchase_from_balance(
         link = await vpn_service.fulfill(session, order, variant, vpn, public_base_url)
         await referral_service.accrue_for_order(session, order)
         return order, [link]
+
+    if variant.source == "nsgifts":
+        return await _fulfill_nsgifts(session, order, variant, quantity, nsgifts)
 
     # Сток (свой товар / LioGames): резервируем нужное число кодов.
     items = await stock_service.reserve_many(session, variant.id, order.id, quantity)
@@ -486,6 +496,102 @@ async def settle_fragment(session: AsyncSession, order: Order, fragment) -> dict
     # Иначе (pending / не подтверждено) — ждём. АВТОВОЗВРАТА НЕТ: TON уже списаны
     # с нашего кошелька, решение о возврате — только ручное (поллер уводит такой
     # заказ в «Не выполненные» по таймауту, см. _settle_fragment).
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# NS.Gifts (buy-on-demand: create_order + pay_order → коды pins)
+# ──────────────────────────────────────────────────────────────────────────
+async def _fulfill_nsgifts(
+    session: AsyncSession,
+    order: Order,
+    variant: Variant,
+    quantity: int,
+    nsgifts: Optional[NSGiftsClient],
+) -> tuple[Order, list[str]]:
+    """Оформить заказ-код у NS.Gifts. Коды выдаются сразу (pay_order → pins).
+
+    Если выдача не мгновенная (сеть/асинхронно) — заказ остаётся FULFILLING и
+    его дотянет поллер (settle_nsgifts по custom_id). После оплаты НЕ
+    откатываем (баланс NS мог списаться)."""
+    if nsgifts is None or not getattr(nsgifts, "configured", False):
+        raise SupplierError("NS.Gifts не настроен")
+
+    order.supplier = "nsgifts"
+    order.status = OrderStatus.FULFILLING
+    custom_id = str(uuid.uuid4())
+    order.supplier_order_id = custom_id
+    await session.flush()
+
+    service_id = variant.fzr_b
+    # 1) Создание заказа — если упадёт, ничего не оплачено, можно откатить.
+    try:
+        await asyncio.to_thread(
+            lambda: nsgifts.create_order(
+                service_id=service_id,
+                fields={"quantity": int(quantity or 1)},
+                custom_id=custom_id,
+            )
+        )
+    except NSGiftsAPIError as e:
+        raise SupplierError(f"NS.Gifts: {e}")
+
+    # 2) Оплата. С этого момента НЕ откатываем.
+    try:
+        pay = await asyncio.to_thread(lambda: nsgifts.pay_order(custom_id=custom_id))
+    except NSGiftsAPIError as e:
+        order.fields_json = json.dumps({"custom_id": custom_id}, ensure_ascii=False)
+        await session.flush()
+        log.warning("NS.Gifts pay_order ошибка #%s: %s — уводим на поллер", order.id, e)
+        return order, []
+
+    status = str(pay.get("status") or "").lower()
+    pins = NSGiftsClient.extract_pins(pay)
+    if pins:
+        order.delivery_code = "\n".join(pins)
+        order.status = OrderStatus.COMPLETED
+        await session.flush()
+        await referral_service.accrue_for_order(session, order)
+        return order, pins
+
+    if status == "insufficient":
+        # Оплата не прошла (не хватило баланса поставщика) — безопасно откатить.
+        raise SupplierError("NS.Gifts: недостаточно средств на балансе поставщика")
+
+    # in_progress / completed без кодов / иное — дотянет поллер.
+    order.fields_json = json.dumps({"custom_id": custom_id, "status": status}, ensure_ascii=False)
+    await session.flush()
+    return order, []
+
+
+async def settle_nsgifts(session: AsyncSession, order: Order, nsgifts) -> dict:
+    """Опросить статус заказа NS.Gifts (order_info по custom_id) и закрыть при
+    терминале. Возвращает {outcome}: progress | completed | failed."""
+    out = {"outcome": "progress"}
+    custom_id = order.supplier_order_id
+    if not custom_id:
+        try:
+            f = json.loads(order.fields_json) if order.fields_json else {}
+            custom_id = f.get("custom_id") if isinstance(f, dict) else None
+        except (ValueError, TypeError):
+            custom_id = None
+    if not custom_id or nsgifts is None:
+        return out
+    try:
+        info = await asyncio.to_thread(lambda: nsgifts.order_info(custom_id))
+    except NSGiftsAPIError:
+        return out  # попробуем позже
+    st = info.get("status")
+    pins = NSGiftsClient.extract_pins(info)
+    if pins or st == NSG_COMPLETED:
+        if pins:
+            order.delivery_code = "\n".join(pins)
+        order.status = OrderStatus.COMPLETED
+        await session.flush()
+        await referral_service.accrue_for_order(session, order)
+        out["outcome"] = "completed"
+    elif st in (NSG_REFUNDED, NSG_CANCELED):
+        out["outcome"] = "failed"
     return out
 
 

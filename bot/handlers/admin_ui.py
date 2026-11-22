@@ -38,6 +38,7 @@ from ..services.pricing import (
 )
 from ..services import rates as rates_service
 from fazercard import FazerCardClient, FazerCardError
+from nsgifts import NSGiftsClient
 from socproof import SocProofClient, SocProofError
 from .. import texts
 
@@ -91,6 +92,8 @@ class AdminUI(StatesGroup):
     fzr_search = State()
     fzr_price = State()
     fzr_bulk_markup = State()
+    nsg_search = State()
+    nsg_price = State()
     smm_search = State()
     smm_price = State()
     smm_bulk_markup = State()
@@ -810,6 +813,7 @@ async def _product_card(session, config: BotConfig, product_id: int):
         _btn("➕ Свой номинал", f"a_addvarm:{product_id}"),
     )
     kb.row(_btn("➕ Номинал FazerCard", f"a_addvarf:{product_id}"))
+    kb.row(_btn("➕ Номинал NS.Gifts", f"a_addvarn:{product_id}"))
     kb.row(_btn("➕ Услуга SMM", f"a_addvarsmm:{product_id}"))
     kb.row(
         _btn("🙂 Эмодзи", f"a_pemoji:{product_id}"),
@@ -1358,6 +1362,7 @@ async def msg_add_product(message: Message, db: Database, state: FSMContext) -> 
         _btn("➕ Номинал (LioGames)", f"a_addvar:{pid}"),
         _btn("➕ Номинал FazerCard", f"a_addvarf:{pid}"),
     )
+    kb.row(_btn("➕ Номинал NS.Gifts", f"a_addvarn:{pid}"))
     kb.row(_btn("➕ Услуга SMM", f"a_addvarsmm:{pid}"))
     kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
     await message.answer(f"✅ Создано: <b>{title}</b>", reply_markup=kb.as_markup())
@@ -1454,6 +1459,7 @@ async def msg_add_subcat(message: Message, db: Database, state: FSMContext) -> N
     kb = InlineKeyboardBuilder()
     kb.row(_btn("➕ Номинал (LioGames)", f"a_addvar:{cid}"))
     kb.row(_btn("➕ Номинал FazerCard", f"a_addvarf:{cid}"))
+    kb.row(_btn("➕ Номинал NS.Gifts", f"a_addvarn:{cid}"))
     kb.row(_btn("➕ Услуга SMM", f"a_addvarsmm:{cid}"))
     kb.row(_btn("⬅️ К подкатегории", f"a_prod:{cid}"))
     kb.row(_btn("⬅️ К родителю", f"a_prod:{parent_id}"))
@@ -2181,6 +2187,220 @@ async def msg_fzr_bulk_markup(message: Message, db: Database, state: FSMContext)
             "(напр. ID), затем оформит заказ и зачислит на аккаунт."
         )
     await message.answer("\n".join(parts) + note, reply_markup=kb.as_markup())
+
+
+# ── Номинал NS.Gifts (buy-on-demand): браузер каталога ────────────────────────
+_NSG_RESULTS = 20    # категорий по поиску
+_NSG_SERVICES = 50   # номиналов в категории
+
+
+def _nsg_service_label(s: dict) -> str:
+    label = str(s.get("name") or s.get("id") or "")
+    extra = []
+    if s.get("price") is not None:
+        try:
+            extra.append(f"${s['price']} (≈{texts.rub(usd_to_rub(Decimal(str(s['price']))))})")
+        except Exception:  # noqa: BLE001
+            extra.append(f"${s['price']}")
+    if s.get("stock") is not None:
+        extra.append(f"сток {s['stock']}")
+    if extra:
+        label += " · " + " · ".join(extra)
+    return label[:120]
+
+
+def _nsg_match_code_categories(stock: dict, query: str) -> list:
+    """Категории-коды (схема quantity), чьё имя/id содержит query."""
+    q = (query or "").lower()
+    out = []
+    for c in stock.get("categories") or []:
+        if NSGiftsClient.category_kind(c) != "code":
+            continue
+        name = str(c.get("category_name") or "")
+        if q in name.lower() or q in str(c.get("category_id") or "").lower():
+            out.append(c)
+    return out
+
+
+@router.callback_query(F.data.startswith("a_addvarn:"))
+async def cb_add_variant_nsg(call: CallbackQuery, state: FSMContext) -> None:
+    pid = int(call.data.split(":", 1)[1])
+    await state.update_data(pid=pid, edit_vid=None)
+    await state.set_state(AdminUI.nsg_search)
+    await call.message.edit_text(
+        "🔎 <b>Номинал NS.Gifts</b> (под заказ, товары-коды)\n\n"
+        "Пришлите название или его часть — например <code>nintendo</code>, "
+        "<code>apple</code>, <code>roblox</code>.",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+    )
+    await call.answer()
+
+
+@router.message(AdminUI.nsg_search)
+async def msg_nsg_search(
+    message: Message, db: Database, state: FSMContext, nsgifts: NSGiftsClient
+) -> None:
+    data = await state.get_data()
+    pid = data.get("pid")
+    query = (message.text or "").strip().lower()
+    if not query:
+        await message.answer("Пришлите слово для поиска.")
+        return
+    if nsgifts is None or not getattr(nsgifts, "configured", False):
+        await message.answer("NS.Gifts не настроен (NSGIFTS_* в .env).")
+        return
+    try:
+        stock = await asyncio.to_thread(lambda: nsgifts.stock(use_cache=True))
+    except Exception as e:  # noqa: BLE001
+        await message.answer(f"Ошибка каталога NS.Gifts: {e}")
+        return
+    matched = _nsg_match_code_categories(stock, query)[:_NSG_RESULTS]
+    if not matched:
+        await message.answer("Ничего не найдено среди товаров-кодов. Попробуйте другое слово.")
+        return
+    # Компактно кладём в state: id/name категории + её услуги.
+    compact = [
+        {"id": c.get("category_id"), "name": c.get("category_name"),
+         "services": [
+             {"id": s.get("service_id"), "name": s.get("service_name"),
+              "price": s.get("price"), "stock": s.get("in_stock")}
+             for s in (c.get("services") or [])
+         ]}
+        for c in matched
+    ]
+    await state.update_data(nsg_cats=compact)
+    kb = InlineKeyboardBuilder()
+    for i, c in enumerate(compact):
+        kb.row(_btn((c["name"] or str(c["id"]))[:120], f"a_nsgc:{i}"))
+    kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
+    more = "" if len(compact) < _NSG_RESULTS else "\n(первые 20 — уточните запрос)"
+    await message.answer(f"Выберите категорию:{more}", reply_markup=kb.as_markup())
+
+
+@router.callback_query(AdminUI.nsg_search, F.data.startswith("a_nsgc:"))
+async def cb_nsg_cat(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    cats = data.get("nsg_cats") or []
+    i = int(call.data.split(":", 1)[1])
+    if i >= len(cats):
+        await call.answer("Список устарел, начните заново", show_alert=True)
+        return
+    cat, pid = cats[i], data.get("pid")
+    services = (cat.get("services") or [])[:_NSG_SERVICES]
+    if not services:
+        await call.answer("Нет номиналов", show_alert=True)
+        return
+    await state.update_data(nsg_cat=cat, nsg_services=services)
+    kb = InlineKeyboardBuilder()
+    for j, s in enumerate(services):
+        kb.row(_btn(_nsg_service_label(s), f"a_nsgo:{j}"))
+    kb.row(_btn("⬅️ Назад", f"a_prod:{pid}"))
+    await call.message.edit_text(
+        f"🎯 <b>{cat.get('name')}</b>\nВыберите номинал (цена — закуп у NS.Gifts, USD):",
+        reply_markup=kb.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(AdminUI.nsg_search, F.data.startswith("a_nsgo:"))
+async def cb_nsg_offer(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    services, cat = data.get("nsg_services") or [], data.get("nsg_cat") or {}
+    j = int(call.data.split(":", 1)[1])
+    if j >= len(services):
+        await call.answer("Список устарел, начните заново", show_alert=True)
+        return
+    svc, pid = services[j], data.get("pid")
+    await state.update_data(nsg_svc=svc)
+    await state.set_state(AdminUI.nsg_price)
+    price = svc.get("price")
+    try:
+        rub_hint = f" (≈ {texts.rub(usd_to_rub(Decimal(str(price))))})"
+    except Exception:  # noqa: BLE001
+        rub_hint = ""
+    await call.message.edit_text(
+        f"💲 <b>{cat.get('name')} · {svc.get('name')}</b>\n"
+        f"Закуп у NS.Gifts: <b>${price}</b>{rub_hint}\n\n"
+        "Пришлите вашу <b>цену продажи в рублях</b> (например <code>299</code>) "
+        "или <code>-</code>, чтобы продавать по закупу.\n"
+        "Цена плавает по курсу.",
+        reply_markup=_cancel_kb(f"a_prod:{pid}"),
+    )
+    await call.answer()
+
+
+@router.message(AdminUI.nsg_price)
+async def msg_nsg_price(message: Message, db: Database, state: FSMContext) -> None:
+    data = await state.get_data()
+    pid = data.get("pid")
+    cat, svc = data.get("nsg_cat"), data.get("nsg_svc")
+    if not (cat and svc):
+        await state.clear()
+        await message.answer("Сессия устарела, начните заново.")
+        return
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        cost = Decimal(str(svc.get("price") or "0"))
+    except InvalidOperation:
+        cost = Decimal("0")
+    price = None
+    if raw != "-":
+        try:
+            rub = Decimal(raw)
+        except InvalidOperation:
+            await message.answer("Число или -")
+            return
+        rate = rates_service.get_rate()
+        price = (rub / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    # Короткое имя номинала: убираем префикс названия категории.
+    svc_name, cat_name = str(svc.get("name") or ""), str(cat.get("name") or "")
+    short = svc_name
+    if cat_name and svc_name.startswith(cat_name):
+        short = svc_name[len(cat_name):].lstrip(" |").strip() or svc_name
+    title = short or f"{cat_name} · {svc_name}".strip(" ·")
+    edit_vid = data.get("edit_vid")
+    async with db.session() as session:
+        if edit_vid:
+            v = await session.get(Variant, edit_vid)
+            if not v:
+                await state.clear()
+                await message.answer("Номинал не найден.")
+                return
+            v.source = "nsgifts"
+            v.fzr_kind = "code"
+            v.fzr_a = str(cat.get("id"))
+            v.fzr_b = str(svc.get("id"))
+            v.cost_usd = cost
+            if raw != "-":
+                v.price_usd = price
+            await session.commit()
+            vid, pid = v.id, v.product_id
+            verb = "переключён на NS.Gifts"
+        else:
+            min_vid = await session.scalar(
+                select(func.min(Variant.liog_variation_id)).where(Variant.product_id == pid)
+            )
+            new_vid = min(0, int(min_vid or 0)) - 1
+            v = Variant(
+                product_id=pid, title=title[:255],
+                liog_product_id=0, liog_variation_id=new_vid,
+                cost_usd=cost, price_usd=price,
+                source="nsgifts", fzr_kind="code",
+                fzr_a=str(cat.get("id")), fzr_b=str(svc.get("id")),
+            )
+            session.add(v)
+            await session.commit()
+            vid = v.id
+            verb = "создан"
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.row(_btn("⬅️ К номиналу", f"a_var:{vid}"))
+    kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
+    await message.answer(
+        f"✅ Номинал NS.Gifts {verb}: <b>{title}</b>\n"
+        "Поставщик — NS.Gifts, выдача кодом под заказ.",
+        reply_markup=kb.as_markup(),
+    )
 
 
 # ── Услуга SMM (soc-proof): поиск, выбор (одиночный/пакетный), общая наценка ───

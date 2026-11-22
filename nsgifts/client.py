@@ -98,6 +98,8 @@ class NSGiftsClient:
         self._token: Optional[str] = None
         self._token_exp: float = 0.0
         self._lock = threading.Lock()
+        self._stock_cache: Optional[Dict[str, Any]] = None
+        self._stock_cache_exp: float = 0.0
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None, **overrides: Any) -> "NSGiftsClient":
@@ -232,12 +234,33 @@ class NSGiftsClient:
             return {"balance": "1000.0000"}
         return self._request("GET", "/check_balance")
 
-    def stock(self) -> Dict[str, Any]:
+    def stock(self, *, use_cache: bool = False, ttl: int = 300) -> Dict[str, Any]:
         """Каталог: categories[] -> services[] (service_id, name, price, currency,
-        in_stock) + fields[] (схема полей заказа)."""
+        in_stock) + fields[] (схема полей заказа).
+
+        ``use_cache`` — отдать закэшированный ответ, если моложе ``ttl`` секунд
+        (каталог большой, при переходах по админке не дёргаем сеть повторно)."""
         if self.mock:
             return {"categories": []}
-        return self._request("GET", "/stock")
+        if use_cache and self._stock_cache is not None and time.time() < self._stock_cache_exp:
+            return self._stock_cache
+        data = self._request("GET", "/stock")
+        self._stock_cache = data
+        self._stock_cache_exp = time.time() + ttl
+        return data
+
+    # Классификация категории по схеме полей заказа → тип выдачи у нас.
+    @staticmethod
+    def category_kind(cat: Mapping[str, Any]) -> str:
+        """code | steam | account | gift — по набору полей заказа категории."""
+        keys = {str(f.get("key")) for f in (cat.get("fields") or [])}
+        if keys == {"quantity"} or (not keys):
+            return "code"
+        if "friendLink" in keys or "sub_id" in keys:
+            return "gift"
+        if "amount" in keys and "account" in keys:
+            return "steam"
+        return "account"
 
     def create_order(
         self,

@@ -412,7 +412,7 @@ async def main() -> None:
     tasks = [
         asyncio.create_task(
             run_fulfillment_poller(bot, db, liog, fzr, config, bots=bots_by_merchant,
-                                   panels=panels, fragment=fragment)
+                                   panels=panels, fragment=fragment, nsgifts=nsgifts)
         ),
         asyncio.create_task(
             run_topup_poller(bot, db, provider, payhot=payhot, paydex=paydex,

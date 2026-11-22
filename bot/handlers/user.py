@@ -1631,7 +1631,7 @@ async def cb_smm_buy(
 @router.callback_query(F.data.startswith("confirm:"))
 async def cb_confirm(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    state: FSMContext, vpn=None, merchant_id: int = HEAD_MERCHANT_ID,
+    state: FSMContext, vpn=None, merchant_id: int = HEAD_MERCHANT_ID, nsgifts=None,
 ) -> None:
     _, vid, n = call.data.split(":", 2)
     variant_id, qty = int(vid), int(n)
@@ -1666,6 +1666,7 @@ async def cb_confirm(
                 owner_unit_price=owner_price,
                 fzr=fzr,
                 vpn=vpn,
+                nsgifts=nsgifts,
                 public_base_url=config.public_base_url,
             )
         except InsufficientBalance:
