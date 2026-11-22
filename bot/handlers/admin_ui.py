@@ -1709,6 +1709,7 @@ _SOURCE_RU = {
     "liogames": "🎮 LioGames",
     "fazercard": "🧩 FazerCard",
     "vpnresellers": "🛡 VPNresellers (VPN)",
+    "nsgifts": "🎁 NS.Gifts",
 }
 
 
@@ -1727,9 +1728,12 @@ async def cb_source(call: CallbackQuery, db: Database, state: FSMContext) -> Non
             detail = f"\n{v.fzr_kind} · a={v.fzr_a} · b={v.fzr_b}"
         elif v.source == "liogames":
             detail = f"\nproduct {v.liog_product_id} / variation {v.liog_variation_id}"
+        elif v.source == "nsgifts":
+            detail = f"\ncat={v.fzr_a} · service={v.fzr_b}"
     kb = InlineKeyboardBuilder()
     kb.row(_btn("📦 Свой сток", f"a_srcset:{vid}:stock"))
     kb.row(_btn("🧩 FazerCard", f"a_srcfzr:{vid}"))
+    kb.row(_btn("🎁 NS.Gifts", f"a_srcnsg:{vid}"))
     kb.row(_btn("🛡 VPNresellers (VPN)", f"a_srcvpn:{vid}"))
     kb.row(_btn("🎮 LioGames", f"a_srclio:{vid}"))
     kb.row(_btn("⬅️ Назад", f"a_var:{vid}"))
@@ -1776,6 +1780,28 @@ async def cb_source_fzr(call: CallbackQuery, db: Database, state: FSMContext) ->
     await call.message.edit_text(
         "🧩 <b>FazerCard</b> — привязка к номиналу\n\nВыберите тип:",
         reply_markup=kb.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("a_srcnsg:"))
+async def cb_source_nsg(call: CallbackQuery, db: Database, state: FSMContext) -> None:
+    """Переключить существующий номинал на NS.Gifts (поиск → услуга → цена)."""
+    vid = int(call.data.split(":", 1)[1])
+    async with db.session() as session:
+        v = await session.get(Variant, vid)
+        if not v:
+            await call.answer("Не найдено", show_alert=True)
+            return
+        pid = v.product_id
+    # edit_vid переводит NS.Gifts-флоу в режим редактирования (как у FazerCard).
+    await state.update_data(pid=pid, edit_vid=vid)
+    await state.set_state(AdminUI.nsg_search)
+    await call.message.edit_text(
+        "🎁 <b>NS.Gifts</b> — привязка к номиналу\n\n"
+        "Пришлите название или его часть — например <code>nintendo</code>, "
+        "<code>apple</code>, <code>roblox</code>.",
+        reply_markup=_cancel_kb(f"a_src:{vid}"),
     )
     await call.answer()
 
