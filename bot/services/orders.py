@@ -151,10 +151,12 @@ async def purchase_from_balance(
     # Стоп-лосс для «умной» цены: не продаём ниже живого закупа поставщика.
     # ``rate`` обязателен из веба: кэш курса бота живёт в другом процессе, и без
     # него get_rate() вернул бы DEFAULT (95) и ложно заблокировал продажу.
-    if getattr(variant, "price_mode", None) == "smart" and variant.source == "fazercard":
+    if getattr(variant, "price_mode", None) == "smart" and variant.source in ("fazercard", "nsgifts"):
         from . import smartprice as smartprice_service
         try:
-            if await smartprice_service.stop_loss_violation(fzr, variant, unit_price, rate=rate):
+            if await smartprice_service.stop_loss_violation(
+                fzr, variant, unit_price, rate=rate, nsgifts=nsgifts
+            ):
                 raise SupplierError("Цена ниже закупа — продажа остановлена (стоп-лосс)")
         except SupplierError:
             raise

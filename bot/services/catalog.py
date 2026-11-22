@@ -104,6 +104,44 @@ async def fazercard_cost(fzr, variants: List[Variant]) -> Dict[int, "object"]:
     return result
 
 
+async def nsgifts_cost(nsgifts, variants: List[Variant]) -> Dict[int, "object"]:
+    """Живой закуп (USD, Decimal) для номиналов source='nsgifts'.
+
+    Берёт цену услуги из каталога NS.Gifts (``stock``, с кэшем) по
+    ``fzr_a`` (категория) и ``fzr_b`` (услуга). ``{variant_id: Decimal}``;
+    если закуп неизвестен — ключа нет.
+    """
+    result: Dict[int, object] = {}
+    targets = [
+        v for v in variants
+        if getattr(v, "source", "stock") == "nsgifts" and v.fzr_a and v.fzr_b
+    ]
+    if not targets or nsgifts is None or not getattr(nsgifts, "configured", False):
+        return result
+    try:
+        stock = await asyncio.to_thread(lambda: nsgifts.stock(use_cache=True))
+    except Exception:  # noqa: BLE001
+        log.warning("Не удалось получить закуп NS.Gifts (stock)")
+        return result
+    # (cat_id, service_id) -> price
+    price_map: Dict[tuple, object] = {}
+    for c in stock.get("categories") or []:
+        cat_id = str(c.get("category_id"))
+        for s in c.get("services") or []:
+            pu = s.get("price")
+            if pu is None:
+                continue
+            try:
+                price_map[(cat_id, str(s.get("service_id")))] = Decimal(str(pu))
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+    for v in targets:
+        c = price_map.get((str(v.fzr_a), str(v.fzr_b)))
+        if c is not None:
+            result[v.id] = c
+    return result
+
+
 async def smm_available(panels, variants: List[Variant]) -> Dict[int, bool]:
     """Доступность SMM-услуг у панелей: ``{variant_id: есть ли услуга у поставщика}``.
 

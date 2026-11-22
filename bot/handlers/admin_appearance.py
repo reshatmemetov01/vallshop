@@ -233,12 +233,13 @@ async def cb_migprices_ask(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "ap_migprices_ok")
 async def cb_migprices_ok(
-    call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient
+    call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
+    nsgifts=None,
 ) -> None:
     await call.answer("Перевожу…")
     from ..services import smartprice as smartprice_service
     converted, skipped = await smartprice_service.migrate_supplier_to_smart(
-        db, fzr, config.default_markup_percent
+        db, fzr, config.default_markup_percent, nsgifts=nsgifts
     )
     kb = InlineKeyboardBuilder()
     kb.row(_btn("⬅️ К оформлению", "ap_home"))

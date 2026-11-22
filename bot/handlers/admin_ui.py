@@ -2348,8 +2348,9 @@ async def cb_nsg_offer(call: CallbackQuery, state: FSMContext) -> None:
         f"💲 <b>{cat.get('name')} · {svc.get('name')}</b>\n"
         f"Закуп у NS.Gifts: <b>${price}</b>{rub_hint}\n\n"
         "Пришлите вашу <b>цену продажи в рублях</b> (например <code>299</code>) "
-        "или <code>-</code>, чтобы продавать по закупу.\n"
-        "Цена плавает по курсу.",
+        "или <code>-</code>, чтобы продавать по наценке.\n"
+        "Включится <b>умная цена</b>: наценка зафиксируется и будет плавать "
+        "от закупа NS.Gifts (порог 1%, стоп-лосс).",
         reply_markup=_cancel_kb(f"a_prod:{pid}"),
     )
     await call.answer()
@@ -2369,15 +2370,24 @@ async def msg_nsg_price(message: Message, db: Database, state: FSMContext) -> No
         cost = Decimal(str(svc.get("price") or "0"))
     except InvalidOperation:
         cost = Decimal("0")
-    price = None
+    rate = rates_service.get_rate()
+    # Режим цены: задана ₽-цена и известен закуп → умная (наценка фиксируется,
+    # цена плавает от закупа, как у FazerCard); закупа нет → плавает по курсу;
+    # «-» → продаём по наценке (без переопределения цены).
+    smart = False
+    markup = price_rub_sticky = price_usd = None
     if raw != "-":
         try:
             rub = Decimal(raw)
         except InvalidOperation:
             await message.answer("Число или -")
             return
-        rate = rates_service.get_rate()
-        price = (rub / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if cost > 0:
+            smart = True
+            markup = smartprice_service.derive_markup(rub, cost, rate)
+            price_rub_sticky = round_price_rub(rub)
+        else:
+            price_usd = (rub / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     # Короткое имя номинала: убираем префикс названия категории.
     svc_name, cat_name = str(svc.get("name") or ""), str(cat.get("name") or "")
     short = svc_name
@@ -2397,8 +2407,19 @@ async def msg_nsg_price(message: Message, db: Database, state: FSMContext) -> No
             v.fzr_a = str(cat.get("id"))
             v.fzr_b = str(svc.get("id"))
             v.cost_usd = cost
-            if raw != "-":
-                v.price_usd = price
+            if smart:
+                v.price_mode = smartprice_service.MODE_SMART
+                v.markup_percent = markup
+                v.price_rub = price_rub_sticky
+                v.price_usd = None
+            elif raw != "-":
+                v.price_mode = smartprice_service.MODE_FLOAT
+                v.price_usd = price_usd
+                v.price_rub = None
+            else:
+                v.price_mode = None
+                v.price_usd = None
+                v.price_rub = None
             await session.commit()
             vid, pid = v.id, v.product_id
             verb = "переключён на NS.Gifts"
@@ -2410,7 +2431,12 @@ async def msg_nsg_price(message: Message, db: Database, state: FSMContext) -> No
             v = Variant(
                 product_id=pid, title=title[:255],
                 liog_product_id=0, liog_variation_id=new_vid,
-                cost_usd=cost, price_usd=price,
+                cost_usd=cost,
+                price_usd=price_usd,
+                price_rub=price_rub_sticky,
+                price_mode=(smartprice_service.MODE_SMART if smart
+                            else smartprice_service.MODE_FLOAT if raw != "-" else None),
+                markup_percent=markup,
                 source="nsgifts", fzr_kind="code",
                 fzr_a=str(cat.get("id")), fzr_b=str(svc.get("id")),
             )
@@ -2422,9 +2448,15 @@ async def msg_nsg_price(message: Message, db: Database, state: FSMContext) -> No
     kb = InlineKeyboardBuilder()
     kb.row(_btn("⬅️ К номиналу", f"a_var:{vid}"))
     kb.row(_btn("⬅️ К товару", f"a_prod:{pid}"))
+    price_note = (
+        f"Умная цена: наценка {_fmt_rub(markup)}%, дальше плавает от закупа."
+        if smart else
+        "Цена плавает по курсу." if raw != "-" else
+        "Цена — по наценке по умолчанию."
+    )
     await message.answer(
         f"✅ Номинал NS.Gifts {verb}: <b>{title}</b>\n"
-        "Поставщик — NS.Gifts, выдача кодом под заказ.",
+        f"Выдача кодом под заказ. {price_note}",
         reply_markup=kb.as_markup(),
     )
 
@@ -2914,7 +2946,7 @@ async def cb_set_price(call: CallbackQuery, state: FSMContext) -> None:
     await call.message.edit_text(
         f"💰 Пришлите цену продажи <b>в рублях</b> (например <code>299</code>).\n"
         f"Курс сейчас: 1 USDT = {_fmt_rub(rate)} ₽.\n\n"
-        "• Для товаров поставщика (FazerCard) включится <b>умная цена</b>: "
+        "• Для товаров поставщика (FazerCard, NS.Gifts) включится <b>умная цена</b>: "
         "наценка зафиксируется и цена будет сама плавать от закупа (порог 1%).\n"
         "• Для своего стока — цена плавает по курсу.\n"
         "<code>-</code> — убрать (считать по наценке).",
@@ -2926,7 +2958,7 @@ async def cb_set_price(call: CallbackQuery, state: FSMContext) -> None:
 @router.message(AdminUI.set_price)
 async def msg_set_price(
     message: Message, db: Database, config: BotConfig, state: FSMContext,
-    fzr: FazerCardClient,
+    fzr: FazerCardClient, nsgifts: NSGiftsClient = None,
 ) -> None:
     data = await state.get_data()
     vid = data.get("vid")
@@ -2951,7 +2983,7 @@ async def msg_set_price(
                 return
             cost = None
             if smartprice_service.supports_smart(v):
-                cost = await smartprice_service.live_cost(fzr, v)
+                cost = await smartprice_service.live_cost(fzr, v, nsgifts=nsgifts)
             if cost and cost > 0:
                 # Умная цена: фиксируем наценку от живого закупа, ₽ — «липкая».
                 v.price_mode = smartprice_service.MODE_SMART

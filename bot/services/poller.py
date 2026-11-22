@@ -438,17 +438,19 @@ async def run_smartprice_poller(
     interval: float = 600.0,
     soc: SocProofClient | None = None,
     panels: dict | None = None,
+    nsgifts=None,
 ) -> None:
     """Фоновый пересчёт умных цен по живому закупу (порог 1%) + алерты о росте."""
     from ..services import smartprice as smartprice_service
     if panels is None and soc is not None:
         panels = {"socproof": soc}
+    nsg = nsgifts if (nsgifts is not None and getattr(nsgifts, "configured", False)) else None
     while True:
         try:
             admin_ids = config.admin_ids if config else None
-            if fzr is not None:
+            if fzr is not None or nsg is not None:
                 await smartprice_service.recompute_all(
-                    db, fzr, bot=bot, admin_ids=admin_ids
+                    db, fzr, nsgifts=nsg, bot=bot, admin_ids=admin_ids
                 )
             for name, client in (panels or {}).items():
                 if client is not None and getattr(client, "configured", False):

@@ -38,7 +38,10 @@ ALERT_DOWN = Decimal("0.01")  # уведомляем при падении > 1%
 _ONE = Decimal("1")
 
 # Источники, умеющие отдавать живой закуп по API.
-LIVE_COST_SOURCES = {"fazercard"}
+LIVE_COST_SOURCES = {"fazercard", "nsgifts"}
+
+# Человекочитаемое имя источника живого закупа (для списков цен/маржи).
+LIVE_SOURCE_LABEL = {"fazercard": "FazerCard", "nsgifts": "NS.Gifts"}
 
 
 def supports_smart(variant) -> bool:
@@ -60,17 +63,30 @@ def target_rub(cost_usd, markup_percent, rate) -> Decimal:
     return round_price_rub(val)
 
 
-async def live_cost(fzr, variant) -> Optional[Decimal]:
-    m = await catalog_service.fazercard_cost(fzr, [variant])
+async def _cost_map(fzr, nsgifts, variants) -> dict:
+    """Объединённый живой закуп по всем поставщикам с live-закупом."""
+    cost_map = await catalog_service.fazercard_cost(fzr, variants)
+    if nsgifts is not None:
+        cost_map.update(await catalog_service.nsgifts_cost(nsgifts, variants))
+    return cost_map
+
+
+async def live_cost(fzr, variant, nsgifts=None) -> Optional[Decimal]:
+    src = getattr(variant, "source", "stock")
+    if src == "nsgifts":
+        m = await catalog_service.nsgifts_cost(nsgifts, [variant])
+    else:
+        m = await catalog_service.fazercard_cost(fzr, [variant])
     c = m.get(variant.id)
     return Decimal(c) if c is not None else None
 
 
-async def recompute_all(db: Database, fzr, *, bot=None, admin_ids=None) -> list:
+async def recompute_all(db: Database, fzr, *, nsgifts=None, bot=None, admin_ids=None) -> list:
     """Пересчитать умные цены по живому закупу (порог 1%). Возвращает изменения.
 
     Обновляет ``price_rub`` (липкую цену) и ``cost_usd`` (для маржи/статистики),
-    при росте > 1% собирает алерты и шлёт их администраторам.
+    при росте > 1% собирает алерты и шлёт их администраторам. Закуп берётся у
+    всех поставщиков с live-закупом (FazerCard, NS.Gifts).
     """
     rate = rates_service.get_rate()
     changes: list = []
@@ -82,7 +98,7 @@ async def recompute_all(db: Database, fzr, *, bot=None, admin_ids=None) -> list:
         )
         if not variants:
             return changes
-        cost_map = await catalog_service.fazercard_cost(fzr, variants)
+        cost_map = await _cost_map(fzr, nsgifts, variants)
         for v in variants:
             cost = cost_map.get(v.id)
             if cost is None or Decimal(cost) <= 0:
@@ -221,7 +237,7 @@ async def recompute_socproof(db: Database, soc, *, bot=None, admin_ids=None) -> 
     return await recompute_smm(db, soc, "socproof", bot=bot, admin_ids=admin_ids)
 
 
-async def migrate_supplier_to_smart(db: Database, fzr, default_markup) -> tuple:
+async def migrate_supplier_to_smart(db: Database, fzr, default_markup, nsgifts=None) -> tuple:
     """Массово перевести товары поставщика (живой закуп) на умную цену.
 
     Берёт текущую ₽-цену номинала, живой закуп и фиксирует наценку. Не трогает
@@ -236,7 +252,7 @@ async def migrate_supplier_to_smart(db: Database, fzr, default_markup) -> tuple:
         variants = list(await session.scalars(select(Variant)))
         supplier = [v for v in variants if supports_smart(v)]
         todo = [v for v in supplier if v.price_mode not in (MODE_FIXED, MODE_SMART)]
-        cost_map = await catalog_service.fazercard_cost(fzr, todo)
+        cost_map = await _cost_map(fzr, nsgifts, todo)
         for v in supplier:
             if v.price_mode in (MODE_FIXED, MODE_SMART):
                 skipped += 1
@@ -256,12 +272,12 @@ async def migrate_supplier_to_smart(db: Database, fzr, default_markup) -> tuple:
     return converted, skipped
 
 
-async def stop_loss_violation(fzr, variant, price_rub, rate=None) -> bool:
+async def stop_loss_violation(fzr, variant, price_rub, rate=None, nsgifts=None) -> bool:
     """True, если ₽-цена ниже живого закупа (продавать нельзя)."""
     if not supports_smart(variant):
         return False
     r = rate if rate is not None else rates_service.get_rate()
-    cost = await live_cost(fzr, variant)
+    cost = await live_cost(fzr, variant, nsgifts=nsgifts)
     if cost is None:
         return False  # закуп неизвестен — не блокируем продажу
     cost_rub = (Decimal(cost) * Decimal(r)).quantize(_ONE, rounding=ROUND_CEILING)
@@ -284,7 +300,7 @@ async def low_margin_variants(db: Database, default_markup, threshold) -> list:
         prod_titles: dict = {}
         for v in variants:
             floats = smm_panels.is_smm(v.source) or (
-                v.source == "fazercard" and v.price_mode == MODE_SMART
+                supports_smart(v) and v.price_mode == MODE_SMART
             )
             if not floats:
                 continue
@@ -294,7 +310,7 @@ async def low_margin_variants(db: Database, default_markup, threshold) -> list:
             if v.product_id not in prod_titles:
                 p = await session.get(Product, v.product_id)
                 prod_titles[v.product_id] = (p.title if p else "") or ""
-            src = "SMM" if smm_panels.is_smm(v.source) else "FazerCard"
+            src = "SMM" if smm_panels.is_smm(v.source) else LIVE_SOURCE_LABEL.get(v.source, v.source)
             rows.append((mk, prod_titles[v.product_id], v.title, src, v.id))
     rows.sort(key=lambda r: r[0])
     return rows
@@ -359,7 +375,7 @@ async def apply_markup_floor(db: Database, default_markup, floor) -> int:
         )
         for v in variants:
             floats = smm_panels.is_smm(v.source) or (
-                v.source == "fazercard" and v.price_mode == MODE_SMART
+                supports_smart(v) and v.price_mode == MODE_SMART
             )
             if not floats:
                 continue
@@ -367,7 +383,7 @@ async def apply_markup_floor(db: Database, default_markup, floor) -> int:
             if mk >= floor:
                 continue
             v.markup_percent = floor
-            # Для FazerCard-smart липкую цену поднимаем сразу (SMM считается на лету).
+            # Для smart-поставщиков липкую цену поднимаем сразу (SMM считается на лету).
             if v.price_mode == MODE_SMART and v.cost_usd and Decimal(v.cost_usd) > 0:
                 v.price_rub = target_rub(Decimal(v.cost_usd), floor, rate)
             n += 1
@@ -381,10 +397,10 @@ def format_low_margin(rows: list, threshold) -> list:
     if not rows:
         return [
             f"✅ Товаров с наценкой ниже {threshold:g}% среди плавающих "
-            "(SMM + FazerCard) нет."
+            "(SMM + FazerCard + NS.Gifts) нет."
         ]
     header = (
-        f"⚠️ <b>Наценка ниже {threshold:g}%</b> (плавающие SMM + FazerCard) — "
+        f"⚠️ <b>Наценка ниже {threshold:g}%</b> (плавающие SMM + FazerCard + NS.Gifts) — "
         f"{len(rows)} шт.\nРиск продать в минус из-за комиссии платёжной системы:\n"
     )
     lines = []
