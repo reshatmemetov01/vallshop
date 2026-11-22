@@ -53,23 +53,41 @@ def main() -> int:
         print("→ stock (каталог) …")
         stock = cli.stock()
         cats = stock.get("categories") or []
-        print(f"✅ Категорий: {len(cats)}")
-        shown = 0
-        for c in cats:
+        total_services = sum(len(c.get("services") or []) for c in cats)
+        print(f"✅ Категорий: {len(cats)}, услуг всего: {total_services}")
+
+        print("\n— Первые 5 категорий (примеры) —")
+        for c in cats[:5]:
             svcs = c.get("services") or []
             print(f"  • {c.get('category_name')} (id={c.get('category_id')}) — услуг: {len(svcs)}")
             for s in svcs[:3]:
                 print(f"      - {s.get('service_id')}: {s.get('service_name')} | "
                       f"{s.get('price')} {s.get('currency')} | в наличии: {s.get('in_stock')}")
-            shown += 1
-            if shown >= 5:
-                print("  … (показаны первые 5 категорий)")
-                break
+
+        # Сводка по РАЗНЫМ схемам полей заказа — это главное для встройки выдачи.
+        print("\n— Схемы полей заказа (уникальные наборы по всем категориям) —")
+        seen = {}
+        for c in cats:
+            flds = c.get("fields") or []
+            keyset = tuple((f.get("key"), f.get("type"), bool(f.get("required"))) for f in flds)
+            if keyset not in seen:
+                seen[keyset] = c.get("category_name")
+                if not flds:
+                    print(f"  [пусто]  (пример: {c.get('category_name')})")
+                else:
+                    desc = ", ".join(
+                        f"{f.get('key')}:{f.get('type')}"
+                        f"{'*' if f.get('required') else ''}"
+                        f"{f' [{f.get('min')}..{f.get('max')}]' if (f.get('min') is not None or f.get('max') is not None) else ''}"
+                        for f in flds
+                    )
+                    print(f"  {desc}   (пример категории: {c.get('category_name')})")
+        print(f"\n  Всего уникальных схем полей: {len(seen)}")
     except NSGiftsAPIError as e:
         print(f"❌ stock ошибка (HTTP {e.http_status}): {e}")
         return 1
 
-    print("\n✅ Связь с NS.Gifts работает.")
+    print("\n✅ Связь с NS.Gifts работает. Скиньте этот вывод — встрою импорт и выдачу.")
     return 0
 
 
