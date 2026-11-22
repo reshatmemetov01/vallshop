@@ -503,3 +503,23 @@ async def cmd_import_valorant(
         await message.answer("⚠️ Ошибка импорта. Проверьте логи.")
         raise
     await message.answer(report)
+
+
+@router.message(Command("import_nsgifts"))
+async def cmd_import_nsgifts(
+    message: Message, db: Database, config: BotConfig, nsgifts=None,
+) -> None:
+    """Импортировать товары-коды (гифт-карты/ключи) NS.Gifts в скрытый раздел
+    «NS.Gifts», наценка 9%, всё создаётся скрытым. Идемпотентно — можно
+    запускать повторно (добавит только новое)."""
+    from ..services import nsgifts_import
+    await message.answer(
+        "⏳ Импортирую каталог NS.Gifts (коды/гифт-карты)… каталог большой, "
+        "это может занять несколько минут."
+    )
+    try:
+        report = await nsgifts_import.run_import(db, nsgifts, config)
+    except Exception:  # noqa: BLE001
+        await message.answer("⚠️ Ошибка импорта NS.Gifts. Проверьте логи.")
+        raise
+    await message.answer(report)

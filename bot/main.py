@@ -310,10 +310,12 @@ async def main() -> None:
     fragment = FragmentClient.from_env()
     from vpnresellers import VPNResellersClient
     vpn = VPNResellersClient.from_env()
+    from nsgifts import NSGiftsClient
+    nsgifts = NSGiftsClient.from_env()
     # Пул поставщиков для авто-покупки после оплаты «Купить сразу».
     suppliers = {
         "liog": liog, "fzr": fzr, "soc": soc, "panels": panels,
-        "fragment": fragment, "vpn": vpn,
+        "fragment": fragment, "vpn": vpn, "nsgifts": nsgifts,
     }
 
     def _make_bot(token: str) -> Bot:
@@ -372,6 +374,7 @@ async def main() -> None:
     dp["panels"] = panels
     dp["fragment"] = fragment
     dp["vpn"] = vpn
+    dp["nsgifts"] = nsgifts
     dp["bots_by_merchant"] = bots_by_merchant
 
     from .middlewares import (
