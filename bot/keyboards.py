@@ -257,10 +257,10 @@ def variants_kb(
             else:
                 note = " · ❌ нет в наличии"
                 out = True
-        elif src == "fazercard":
+        elif src in ("fazercard", "nsgifts"):
             st = stock.get(v.id)
             if st is None:
-                note = " · ✅ в наличии"       # оффер есть у поставщика, под заказ
+                note = " · ✅ в наличии"       # есть у поставщика, под заказ
             elif st > 0:
                 note = f" · ✅ {st} шт"
             else:

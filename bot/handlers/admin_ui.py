@@ -959,7 +959,7 @@ def _smm_variant_card(v: Variant, config: BotConfig):
     return caption, kb.as_markup(), v.product_id
 
 
-async def _variant_card(session, config: BotConfig, variant_id: int):
+async def _variant_card(session, config: BotConfig, variant_id: int, nsgifts=None):
     v = await session.get(Variant, variant_id)
     if not v:
         return None, None, None
@@ -986,6 +986,14 @@ async def _variant_card(session, config: BotConfig, variant_id: int):
     else:
         mk = v.markup_percent if v.markup_percent is not None else config.default_markup_percent
         mode = f"наценка {mk}% ({texts.money(price)}) · плавает"
+    nsg_avail = ""
+    if v.source == "nsgifts":
+        live = (await catalog_service.nsgifts_stock(nsgifts, [v])).get(v.id)
+        nsg_avail = (
+            "под заказ" if live is None
+            else f"в наличии: {live}" if live > 0
+            else "❌ нет у поставщика"
+        )
     caption = (
         f"🧩 <b>{v.title}</b> ({vflag})\n"
         f"Курс: 1 USDT = {_fmt_rub(rate)} ₽\n"
@@ -999,6 +1007,8 @@ async def _variant_card(session, config: BotConfig, variant_id: int):
             f"Тип: FazerCard · {v.fzr_kind} "
             f"(a={v.fzr_a}, b={v.fzr_b}) · под заказ"
             if v.source == "fazercard"
+            else f"Тип: 🎁 NS.Gifts · cat={v.fzr_a} · service={v.fzr_b} · {nsg_avail}"
+            if v.source == "nsgifts"
             else f"Тип: 🛡 VPNresellers · {v.fzr_a} дн. · {v.fzr_b or 'vless'}"
             if v.source == "vpnresellers"
             else "Тип: свой товар (без LioGames)"
@@ -1037,7 +1047,9 @@ def _vfw_label(v) -> str:
 
 
 @router.callback_query(F.data.startswith("a_vfw:"))
-async def cb_variant_fw(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_variant_fw(
+    call: CallbackQuery, db: Database, config: BotConfig, nsgifts: NSGiftsClient = None,
+) -> None:
     """Переключить ширину кнопки номинала (во всю строку / половина)."""
     vid = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -1045,7 +1057,7 @@ async def cb_variant_fw(call: CallbackQuery, db: Database, config: BotConfig) ->
         if v:
             v.full_width = not bool(v.full_width)
             await session.commit()
-        caption, markup, _ = await _variant_card(session, config, vid)
+        caption, markup, _ = await _variant_card(session, config, vid, nsgifts=nsgifts)
     if not caption:
         await call.answer("Не найдено", show_alert=True)
         return
@@ -1054,10 +1066,12 @@ async def cb_variant_fw(call: CallbackQuery, db: Database, config: BotConfig) ->
 
 
 @router.callback_query(F.data.startswith("a_var:"))
-async def cb_variant(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_variant(
+    call: CallbackQuery, db: Database, config: BotConfig, nsgifts: NSGiftsClient = None,
+) -> None:
     vid = int(call.data.split(":", 1)[1])
     async with db.session() as session:
-        caption, markup, _ = await _variant_card(session, config, vid)
+        caption, markup, _ = await _variant_card(session, config, vid, nsgifts=nsgifts)
     if not caption:
         await call.answer("Не найдено", show_alert=True)
         return
@@ -1066,14 +1080,16 @@ async def cb_variant(call: CallbackQuery, db: Database, config: BotConfig) -> No
 
 
 @router.callback_query(F.data.startswith("a_tvar:"))
-async def cb_toggle_variant(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_toggle_variant(
+    call: CallbackQuery, db: Database, config: BotConfig, nsgifts: NSGiftsClient = None,
+) -> None:
     vid = int(call.data.split(":", 1)[1])
     async with db.session() as session:
         v = await session.get(Variant, vid)
         if v:
             v.is_active = not v.is_active
             await session.commit()
-        caption, markup, _ = await _variant_card(session, config, vid)
+        caption, markup, _ = await _variant_card(session, config, vid, nsgifts=nsgifts)
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer("Готово")
 
@@ -1747,7 +1763,9 @@ async def cb_source(call: CallbackQuery, db: Database, state: FSMContext) -> Non
 
 
 @router.callback_query(F.data.startswith("a_srcset:"))
-async def cb_source_set(call: CallbackQuery, db: Database, config: BotConfig) -> None:
+async def cb_source_set(
+    call: CallbackQuery, db: Database, config: BotConfig, nsgifts: NSGiftsClient = None,
+) -> None:
     _, raw_vid, src = call.data.split(":", 2)
     vid = int(raw_vid)
     async with db.session() as session:
@@ -1755,7 +1773,7 @@ async def cb_source_set(call: CallbackQuery, db: Database, config: BotConfig) ->
         if v:
             v.source = src  # пока используется только "stock"
             await session.commit()
-        caption, markup, _ = await _variant_card(session, config, vid)
+        caption, markup, _ = await _variant_card(session, config, vid, nsgifts=nsgifts)
     await call.message.edit_text(caption, reply_markup=markup)
     await call.answer("Источник: свой сток")
 

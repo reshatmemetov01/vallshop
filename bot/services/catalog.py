@@ -142,6 +142,61 @@ async def nsgifts_cost(nsgifts, variants: List[Variant]) -> Dict[int, "object"]:
     return result
 
 
+def _nsg_stock_value(raw) -> Optional[int]:
+    """in_stock у NS.Gifts → наш сток: None (неизвестно/под заказ, продаём),
+    0 (нет), либо число. bool трактуем как есть/нет."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None if raw else 0
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+
+
+async def nsgifts_stock(nsgifts, variants: List[Variant]) -> Dict[int, Optional[int]]:
+    """Живой сток NS.Gifts для номиналов source='nsgifts'.
+
+    ``{variant_id: stock}``; ``None`` — неизвестно (под заказ, продаём),
+    ``0`` — услуги нет у поставщика / явный нулевой сток. Для не-NS.Gifts
+    номиналов ключей не добавляет.
+    """
+    result: Dict[int, Optional[int]] = {}
+    targets = [
+        v for v in variants
+        if getattr(v, "source", "stock") == "nsgifts" and v.fzr_a and v.fzr_b
+    ]
+    if not targets:
+        return result
+    # NS.Gifts не настроен или сбой каталога → неизвестно (не блокируем продажу).
+    if nsgifts is None or not getattr(nsgifts, "configured", False):
+        return {v.id: None for v in targets}
+    try:
+        stock = await asyncio.to_thread(lambda: nsgifts.stock(use_cache=True))
+    except Exception:  # noqa: BLE001 — витрина не должна падать из-за поставщика
+        log.warning("Не удалось получить сток NS.Gifts")
+        return {v.id: None for v in targets}
+    smap: Dict[tuple, object] = {}
+    for c in stock.get("categories") or []:
+        cat_id = str(c.get("category_id"))
+        for s in c.get("services") or []:
+            smap[(cat_id, str(s.get("service_id")))] = s.get("in_stock")
+    for v in targets:
+        key = (str(v.fzr_a), str(v.fzr_b))
+        # Услуга присутствует → её in_stock; отсутствует → 0 (нет у поставщика).
+        result[v.id] = _nsg_stock_value(smap[key]) if key in smap else 0
+    return result
+
+
+async def live_stock(fzr, nsgifts, variants: List[Variant]) -> Dict[int, Optional[int]]:
+    """Живой сток у всех поставщиков «под заказ» (FazerCard + NS.Gifts)."""
+    out = await fazercard_stock(fzr, variants)
+    out.update(await nsgifts_stock(nsgifts, variants))
+    return out
+
+
 async def smm_available(panels, variants: List[Variant]) -> Dict[int, bool]:
     """Доступность SMM-услуг у панелей: ``{variant_id: есть ли услуга у поставщика}``.
 

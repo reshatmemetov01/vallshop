@@ -299,7 +299,7 @@ async def cb_catalog(
 async def cb_product(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
-    panels: dict = None,
+    panels: dict = None, nsgifts=None,
 ) -> None:
     product_id = int(call.data.split(":", 1)[1])
     is_franchise = merchant_id != HEAD_MERCHANT_ID
@@ -383,9 +383,9 @@ async def cb_product(
         await call.answer("Нет доступных номиналов", show_alert=True)
         return
 
-    # Живой сток FazerCard (под заказ — только у LioGames/своего стока).
+    # Живой сток поставщиков «под заказ» (FazerCard + NS.Gifts).
     stock = dict(stock)
-    stock.update(await catalog_service.fazercard_stock(fzr, variants))
+    stock.update(await catalog_service.live_stock(fzr, nsgifts, variants))
     # SMM soc-proof: 1 — услуга есть у поставщика (под заказ), 0 — пропала.
     for vid, ok in (await catalog_service.smm_available(panels or {"socproof": soc}, variants)).items():
         stock[vid] = 1 if ok else 0
@@ -433,7 +433,7 @@ async def _instant_old_price(session, variant, merchant_id, config, price):
 async def cb_variant(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
-    panels: dict = None,
+    panels: dict = None, nsgifts=None,
 ) -> None:
     await state.clear()  # сбросить незавершённый сбор данных топапа (в т.ч. отмену)
     variant_id = int(call.data.split(":", 1)[1])
@@ -459,7 +459,7 @@ async def cb_variant(
         )
         v_title = mcatalog_service.disp_title(variant, v_ov)
         in_stock = await stock_service.available_count(session, variant_id)
-        ondemand = variant.source == "fazercard"
+        ondemand = variant.source in ("fazercard", "nsgifts")
         is_vpn = variant.source == "vpnresellers"
         is_smm = smm_panels.is_smm(variant.source)
         smm_min = int(variant.smm_min or 1)
@@ -467,7 +467,7 @@ async def cb_variant(
         back = f"prod:{variant.product_id}"
         old_price = await _instant_old_price(session, variant, merchant_id, config, client_price)
         if ondemand:
-            fz = await catalog_service.fazercard_stock(fzr, [variant])
+            fz = await catalog_service.live_stock(fzr, nsgifts, [variant])
             in_stock = fz.get(variant.id)  # int (реальный сток) или None (неизвестно)
 
     out = False
@@ -525,7 +525,7 @@ async def cb_variant(
 
 async def _render_quantity(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    variant_id: int, qty: int, merchant_id: int = HEAD_MERCHANT_ID,
+    variant_id: int, qty: int, merchant_id: int = HEAD_MERCHANT_ID, nsgifts=None,
 ) -> None:
     async with db.session() as session:
         variant = await catalog_service.get_variant(session, variant_id, exclude_head_only=merchant_id != HEAD_MERCHANT_ID)
@@ -537,11 +537,11 @@ async def _render_quantity(
         old_price = await _instant_old_price(session, variant, merchant_id, config, price)
         in_stock = await stock_service.available_count(session, variant_id)
         balance = await get_balance(session, call.from_user.id, merchant_id)
-        ondemand = variant.source == "fazercard"
+        ondemand = variant.source in ("fazercard", "nsgifts")
         is_vpn = variant.source == "vpnresellers"
         live = None
         if ondemand:
-            fz = await catalog_service.fazercard_stock(fzr, [variant])
+            fz = await catalog_service.live_stock(fzr, nsgifts, [variant])
             live = fz.get(variant.id)  # int или None (неизвестно)
 
     if is_vpn:
@@ -587,7 +587,7 @@ async def _render_quantity(
 async def cb_buy(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
     state: FSMContext, merchant_id: int = HEAD_MERCHANT_ID, soc: SocProofClient = None,
-    panels: dict = None,
+    panels: dict = None, nsgifts=None,
 ) -> None:
     variant_id = int(call.data.split(":", 1)[1])
     async with db.session() as session:
@@ -608,16 +608,16 @@ async def cb_buy(
     if needs_fields:
         await _start_topup(call, db, config, fzr, state, variant, merchant_id)
         return
-    await _render_quantity(call, db, config, fzr, variant_id, 1, merchant_id)
+    await _render_quantity(call, db, config, fzr, variant_id, 1, merchant_id, nsgifts=nsgifts)
 
 
 @router.callback_query(F.data.startswith("qty:"))
 async def cb_qty(
     call: CallbackQuery, db: Database, config: BotConfig, fzr: FazerCardClient,
-    merchant_id: int = HEAD_MERCHANT_ID,
+    merchant_id: int = HEAD_MERCHANT_ID, nsgifts=None,
 ) -> None:
     _, vid, n = call.data.split(":", 2)
-    await _render_quantity(call, db, config, fzr, int(vid), int(n), merchant_id)
+    await _render_quantity(call, db, config, fzr, int(vid), int(n), merchant_id, nsgifts=nsgifts)
 
 
 def _needs_fields(variant) -> bool:
